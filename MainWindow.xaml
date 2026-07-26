@@ -1,0 +1,19 @@
+<Window
+    x:Class="VideoDirector.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:VideoDirector.Views"
+    xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
+    Title="Video Director">
+
+    <Grid x:Name="RootGrid" Background="Transparent" IsTabStop="True" PointerMoved="RootGrid_PointerMoved">
+        <Grid x:Name="DragZone" Height="45" VerticalAlignment="Top" HorizontalAlignment="Stretch" Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}" Opacity="0" Canvas.ZIndex="1000">
+            <Grid.OpacityTransition>
+                <ScalarTransition Duration="0:0:0.25"/>
+            </Grid.OpacityTransition>
+            <Rectangle Width="40" Height="4" RadiusX="2" RadiusY="2" Fill="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" Opacity="0.4" IsHitTestVisible="False"/>
+        </Grid>
+
+        <views:VideoDirectorControl x:Name="DirectorControl" />
+    </Grid>
+</Window>

@@ -1,0 +1,41 @@
+﻿<UserControl
+    x:Class="VideoDirector.Views.TimelineRangeSlider"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    SizeChanged="UserControl_SizeChanged"
+    Height="32">
+
+    <Grid x:Name="RootGrid" Background="Transparent" PointerPressed="RootGrid_PointerPressed"
+          PointerMoved="RootGrid_PointerMoved" PointerReleased="RootGrid_PointerReleased"
+          PointerWheelChanged="RootGrid_PointerWheelChanged" DoubleTapped="RootGrid_DoubleTapped"
+          ToolTipService.ToolTip="Scroll to zoom · Shift+scroll to pan · double-click to reset zoom">
+        <!-- Base Track -->
+        <Rectangle x:Name="BaseTrack" Height="4" Fill="{ThemeResource SurfaceStrokeColorDefaultBrush}" RadiusX="2" RadiusY="2" VerticalAlignment="Center" Margin="12,0" />
+        
+        <!-- Active Trim Range Highlight -->
+        <Rectangle x:Name="ActiveTrack" Height="4" Fill="{ThemeResource AccentTextFillColorPrimaryBrush}" RadiusX="2" RadiusY="2" VerticalAlignment="Center" Margin="12,0" HorizontalAlignment="Left" />
+
+        <!-- Interaction Canvas -->
+        <Canvas x:Name="ThumbsCanvas" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            
+            <!-- Trim Start Thumb. Dragging is driven by RootGrid pointer events (absolute tracking),
+                 so the thumb itself just needs to be identifiable as the press target. -->
+            <Border x:Name="StartThumb" Width="24" Height="32" Background="Transparent">
+                <TextBlock Text="[" FontSize="20" FontWeight="Bold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,-4,0,0"/>
+            </Border>
+
+            <!-- Trim End Thumb -->
+            <Border x:Name="EndThumb" Width="24" Height="32" Background="Transparent">
+                <TextBlock Text="]" FontSize="20" FontWeight="Bold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,-4,0,0"/>
+            </Border>
+
+            <!-- Playhead Thumb -->
+            <Border x:Name="PlayheadThumb" Width="16" Height="32" Background="Transparent">
+                <Ellipse Width="12" Height="12" Fill="{ThemeResource TextFillColorPrimaryBrush}" Stroke="{ThemeResource SolidBackgroundFillColorBaseBrush}" StrokeThickness="2" VerticalAlignment="Center" HorizontalAlignment="Center" />
+            </Border>
+        </Canvas>
+    </Grid>
+</UserControl>

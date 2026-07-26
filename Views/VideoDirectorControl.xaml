@@ -1,0 +1,472 @@
+﻿<UserControl
+    x:Class="VideoDirector.Views.VideoDirectorControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:local="using:VideoDirector.Views"
+    xmlns:models="using:VideoDirector.Models"
+    RequestedTheme="Dark"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="DirectorTemplates.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <local:EmptyToVisConverter x:Key="EmptyToVisConverter" />
+            <local:NullToVisConverter x:Key="NullToVisConverter" />
+            <local:NullToBoolConverter x:Key="NullToBoolConverter" />
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <UserControl.KeyboardAccelerators>
+        <!-- Escape leaves Edit mode; Space toggles play/pause; Delete removes the selected clip.
+             Space/Delete are ignored while a text field has focus (see the handlers). -->
+        <KeyboardAccelerator Key="Escape" Invoked="EscapeAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Space" Invoked="PlayPauseAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Delete" Invoked="DeleteAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Left" Invoked="LeftAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Right" Invoked="RightAccelerator_Invoked" />
+        <KeyboardAccelerator Key="J" Invoked="LeftAccelerator_Invoked" />
+        <KeyboardAccelerator Key="L" Invoked="RightAccelerator_Invoked" />
+        <KeyboardAccelerator Key="S" Invoked="SplitAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Z" Modifiers="Control" Invoked="UndoAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Y" Modifiers="Control" Invoked="RedoAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Z" Modifiers="Control,Shift" Invoked="RedoAccelerator_Invoked" />
+    </UserControl.KeyboardAccelerators>
+
+    <Grid Background="Black" AllowDrop="True" DragOver="Grid_DragOver" Drop="Grid_Drop">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />    <!-- Canvas area (player + right panel + floating pill) -->
+            <RowDefinition Height="Auto" /> <!-- Bottom track dock (collapses when hidden) -->
+        </Grid.RowDefinitions>
+
+        <!-- Background Layer: Full Bleed Immersive Player -->
+        <local:DirectorPlayerControl x:Name="PlayerControl" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+
+        <!-- ===== Zone A: Global Command Zone (top-right) =====
+             Project-scoped controls only — the mode badge (read-only state) + Save/Load/Clear.
+             Deliberately separated from the selection-scoped Properties panel so the
+             biggest-blast-radius actions never sit next to per-clip fields. Top margin clears the
+             window caption/drag region. -->
+
+
+
+        <!-- Foreground Layer: Floating Edit Badge -->
+        <Border x:Name="EditModeBadge" Background="#D9E81123" CornerRadius="8" Padding="16,8" 
+                Visibility="{x:Bind ViewModel.IsRecordingMotion, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}" 
+                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0" IsHitTestVisible="False"
+                BorderBrush="#33FFFFFF" BorderThickness="1">
+            <StackPanel Orientation="Vertical" Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                    <SymbolIcon Symbol="Video" Foreground="White" />
+                    <TextBlock x:Name="EditModeText" Text="Live Recording: Move Camera" Foreground="White" FontSize="16" FontWeight="SemiBold" />
+                </StackPanel>
+                <TextBlock Text="Zoom with scroll wheel. Pan by dragging. Set speed to &gt;0x to capture." Foreground="White" Opacity="0.8" HorizontalAlignment="Center" FontSize="12"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Foreground Layer: Right Side Panel (Properties). Top margin clears the Global Command
+             Zone strip above it so Save/Load/Clear stay reachable while this panel is open. -->
+        <Border HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="380"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1,0,0,0"
+                CornerRadius="8,0,0,8" Margin="0,96,0,0"
+                Visibility="{x:Bind ViewModel.IsStoryboardVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /> <!-- Edit header + CommandBar -->
+                    <RowDefinition Height="*" />    <!-- Inspector area -->
+                </Grid.RowDefinitions>
+
+              <StackPanel Grid.Row="0">
+
+
+                <!-- Selection-scoped panel header. Project actions (Save/Load/Clear) deliberately
+                     live in the top-right Global Command Zone, not here. -->
+                <TextBlock Text="Properties" Style="{StaticResource SubtitleTextBlockStyle}"
+                           Visibility="Collapsed" VerticalAlignment="Center" Margin="16,10,0,10"/>
+              </StackPanel>
+
+                <!-- Hint shown when nothing is selected (clip lists now live in the bottom dock). -->
+                <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" Padding="24"
+                            Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
+                    <FontIcon Glyph="&#xE7C9;" FontSize="40" Foreground="{ThemeResource TextFillColorDisabledBrush}"/>
+                    <TextBlock Text="Select a clip in the timeline below to edit it." TextWrapping="Wrap" TextAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorDisabledBrush}" />
+                </StackPanel>
+
+                <!-- Unified Inspector: one layout for every track. Binds to SelectedClip (whichever
+                     track is selected); track-specific rows toggle via IsTrack1Selected /
+                     IsOverlaySelected so Track 1 and Track 2+ share an identical skeleton. -->
+                <Border Grid.Row="1" Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
+                        Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                        Padding="16">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="16">
+                            <!-- Header: clip name + track label -->
+                            <StackPanel Margin="0,0,0,8" Spacing="2">
+                                <TextBlock Text="{Binding SelectedClip.FileName}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding SelectedTrackLabel}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="2">
+                                <!-- 1. Transform & Overlay (Contains Zoom/Motion & PiP) -->
+                                <Expander Header="Transform &amp; Overlay" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="4,4,0,0">
+                                    <!-- Zoom & Motion (Always visible) -->
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="Zoom &amp; Motion Controls" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" ToolTipService.ToolTip="Scroll/drag the video to frame it, then set Start / Mid / End. Same on every track."/>
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Button Content="Start" Width="60" FontWeight="SemiBold" Click="SetStart_Click" ToolTipService.ToolTip="Set Start Keyframe" Foreground="Cyan" />
+                                            <Button Content="Mid" Width="60" FontWeight="SemiBold" Click="SetMid_Click" RightTapped="ClearMid_RightTapped" ToolTipService.ToolTip="Set Mid Keyframe (right-click to clear)" Foreground="DeepSkyBlue" />
+                                            <Button Content="End" Width="60" FontWeight="SemiBold" Click="SetEnd_Click" ToolTipService.ToolTip="Set End Keyframe" Foreground="RoyalBlue" />
+                                            <ToggleButton x:Name="RecordButton" Click="RecordButton_Click" ToolTipService.ToolTip="Record Motion (Track 1)" Height="32" Padding="8,4" CornerRadius="4" IsEnabled="{Binding IsTrack1Selected}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <SymbolIcon x:Name="RecordIcon" Symbol="Video" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                                    <TextBlock Text="Record" Foreground="{ThemeResource SystemFillColorCriticalBrush}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </ToggleButton>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 2. Time & Trimming -->
+                                <Expander Header="Time &amp; Trimming" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0">
+                                    <StackPanel Spacing="8">
+                                        <!-- Timeline Position -->
+                                        <StackPanel Spacing="4">
+                                            <Grid>
+                                                <TextBlock Text="Timeline Position" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
+                                                <TextBlock Text="{Binding SelectedClip.StartTimeFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" HorizontalAlignment="Right" />
+                                            </Grid>
+                                            <NumberBox local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.StartTimeSeconds, Mode=TwoWay, FallbackValue=0.0}"
+                                                       IsEnabled="{Binding IsOverlaySelected}" SmallChange="0.5" LargeChange="1.0" Minimum="0" SpinButtonPlacementMode="Compact" />
+                                        </StackPanel>
+                                        
+                                        <!-- Source Length & Duration -->
+                                        <StackPanel Spacing="4">
+                                            <Grid>
+                                                <TextBlock Text="Duration (Source / Trimmed)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
+                                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding SelectedClip.SourceDurationFormatted, FallbackValue='00:00.0'}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    <TextBlock Text="/" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    <TextBlock Text="{Binding SelectedClip.OpDurationFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <NumberBox Grid.Column="0" local:NumberBoxExtensions.FractionDigits="1" IsEnabled="False"
+                                                           Value="{Binding SelectedClip.SourceDurationSeconds, Mode=OneWay, FallbackValue=0.0}"
+                                                           SpinButtonPlacementMode="Hidden" Foreground="{ThemeResource TextFillColorSecondaryBrush}" ToolTipService.ToolTip="Source Length" />
+                                                <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.OpDuration, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=1.0}"
+                                                           SmallChange="0.5" LargeChange="1.0" Minimum="0.1" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Trimmed Duration" />
+                                            </Grid>
+                                        </StackPanel>
+                                        
+                                        <!-- Clip Range (Start / End) -->
+                                        <StackPanel Spacing="4">
+                                            <Grid>
+                                                <TextBlock Text="Clip Range (Start / End)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
+                                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding SelectedClip.VideoStartTimeFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                                    <TextBlock Text="→" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    <TextBlock Text="{Binding SelectedClip.VideoEndTimeFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <NumberBox Grid.Column="0" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.VideoStartTime, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
+                                                           SmallChange="0.5" LargeChange="5" Minimum="0" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Clip Start" />
+                                                <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.VideoEndTime, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
+                                                           SmallChange="0.5" LargeChange="5" Minimum="0" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Clip End" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 3. Playback -->
+                                <Expander Header="Playback" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0">
+                                    <StackPanel Spacing="8">
+                                        <!-- Curve Profile -->
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Curve Profile" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <ComboBox SelectedIndex="{Binding SelectedClip.CurveProfileIndex, Mode=TwoWay, FallbackValue=0}" HorizontalAlignment="Stretch">
+                                                <x:String>Linear</x:String>
+                                                <x:String>Bezier</x:String>
+                                                <x:String>DirectorsArc</x:String>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        
+                                        <!-- Playback Speed, Volume & Opacity -->
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Speed / Volume / Opacity" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <NumberBox Grid.Column="0" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.PlaybackSpeed, Mode=TwoWay, FallbackValue=1.0}"
+                                                           SmallChange="0.25" LargeChange="1.0" Minimum="0" Maximum="8" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Speed" />
+                                                <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Volume, Mode=TwoWay, FallbackValue=1.0}"
+                                                           SmallChange="0.1" LargeChange="0.25" Minimum="0" Maximum="1" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Volume" />
+                                                <NumberBox Grid.Column="2" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}"
+                                                           SmallChange="0.1" LargeChange="0.25" Minimum="0" Maximum="1" SpinButtonPlacementMode="Compact" IsEnabled="{Binding IsOverlaySelected}" ToolTipService.ToolTip="Opacity (Overlay Only)" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 4. Transitions (Track 1 only) -->
+                                <Expander Header="Transitions" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0,0,4,4"
+                                          Visibility="{Binding IsTrack1Selected, Converter={StaticResource BoolToVisConverter}}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Transition Style / Length (s)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="3*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
+                                            <ComboBox Grid.Column="0" SelectedIndex="{Binding SelectedClip.TransitionStyleIndex, Mode=TwoWay, FallbackValue=0}" HorizontalAlignment="Stretch" ToolTipService.ToolTip="Transition Style">
+                                                <x:String>HardSnap</x:String>
+                                                <x:String>Crossfade</x:String>
+                                                <x:String>CinematicBridge</x:String>
+                                                <x:String>DipToColor</x:String>
+                                            </ComboBox>
+                                            <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.TransitionDuration, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
+                                                       IsEnabled="{Binding SelectedClip.TransitionEditable}"
+                                                       SmallChange="0.1" LargeChange="0.5" Minimum="0" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Transition Length in Seconds" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Expander>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Foreground Layer: Floating Pill Control Bar -->
+        <Border x:Name="FloatingPill" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,32" Padding="12,8"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" 
+                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" 
+                BorderThickness="1" CornerRadius="16"
+                Visibility="{x:Bind ViewModel.IsControlsVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                RequestedTheme="Dark"
+                PointerEntered="FloatingPill_PointerEntered"
+                PointerExited="FloatingPill_PointerExited">
+            <StackPanel Spacing="4">
+                <!-- Edit Mode Only: Clip Range Scrubber, Frame-Stepping, and Trim controls.
+                     Quarantined from Arrange Mode to prevent duration mutations and scrubber glitches during story playback. -->
+                <Grid Margin="0,0,0,4" Padding="0" ColumnSpacing="8"
+                      Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <local:TimelineRangeSlider x:Name="ClipScrubber" Grid.Column="0"
+                                               Maximum="{Binding SelectedClip.SourceDurationSeconds, FallbackValue=1.0}"
+                                               Position="{x:Bind ViewModel.CurrentOperationTimeSeconds, Mode=TwoWay}"
+                                               TrimStart="{Binding SelectedClip.VideoStartTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"
+                                               TrimEnd="{Binding SelectedClip.VideoEndTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"
+                                               TrimChanged="ClipScrubber_TrimChanged"
+                                               InteractionStarted="TimelineRangeSlider_InteractionStarted"
+                                               InteractionCompleted="TimelineRangeSlider_InteractionCompleted" />
+                    <!-- Trim & Frame-Step Controls -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button x:Name="FrameStepBackButton" Click="FrameStepBack_Click" Height="28" Width="32" Padding="0" FontSize="11" VerticalAlignment="Center"
+                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
+                                ToolTipService.ToolTip="Step Backward 1 Frame (Left Arrow / J)">
+                            <TextBlock Text="-1F" FontWeight="Bold" FontSize="10" />
+                        </Button>
+                        <Button x:Name="FrameStepForwardButton" Click="FrameStepForward_Click" Height="28" Width="32" Padding="0" FontSize="11" VerticalAlignment="Center"
+                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
+                                ToolTipService.ToolTip="Step Forward 1 Frame (Right Arrow / L)">
+                            <TextBlock Text="+1F" FontWeight="Bold" FontSize="10" />
+                        </Button>
+                        <Button Click="Trim_Click" IsEnabled="{Binding HasSelection}"
+                                Height="28" Padding="12,0" FontSize="11" VerticalAlignment="Center"
+                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
+                                ToolTipService.ToolTip="Preview the trimmed clip on the scrubber (double-click the scrubber to re-trim)">
+                            <TextBlock Text="Trim" />
+                        </Button>
+                        <Button x:Name="PlaybarSplitButton" Click="PlaybarSplit_Click" IsEnabled="{Binding HasSelection}"
+                                Height="28" Padding="10,0" FontSize="11" VerticalAlignment="Center"
+                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
+                                ToolTipService.ToolTip="Split selected clip at playhead (S / Cut)">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="Cut" />
+                                <TextBlock Text="Split" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <!-- Mode Indicator directly on the Playbar. In Edit Mode, this acts as a subtle pulsing interactive button to exit back to Arrange! -->
+                    <Button x:Name="ModeBadgeButton" Click="ModeBadge_Click"
+                            Background="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToBackgroundConverter}}"
+                            BorderBrush="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToForegroundConverter}}"
+                            BorderThickness="1" CornerRadius="14" Padding="12,4" VerticalAlignment="Center" MinWidth="80"
+                            ToolTipService.ToolTip="Current Mode (If in EDIT mode, click here to exit back to Arrange mode)">
+                        <TextBlock Text="{x:Bind ViewModel.ModeLabel, Mode=OneWay}"
+                                   Foreground="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToForegroundConverter}}"
+                                   FontSize="11" FontWeight="Black" CharacterSpacing="50" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Button>
+
+                    <Border Width="1" Height="28" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+
+                    <!-- Toggles Column -->
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <ToggleButton x:Name="ShuffleButton" Width="32" Height="32" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Toggle Shuffle">
+                            <SymbolIcon Symbol="Shuffle" />
+                        </ToggleButton>
+                        <ToggleButton x:Name="LoopButton" IsChecked="{x:Bind ViewModel.IsLooping, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Toggle Loop" Padding="0">
+                            <FontIcon Glyph="&#xE8EE;" FontSize="14" />
+                        </ToggleButton>
+                        <ToggleButton x:Name="AutoPlayButton" IsChecked="{x:Bind ViewModel.IsAutoPlayEnabled, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Toggle Auto-Play" Padding="0">
+                            <FontIcon Glyph="&#xE173;" FontSize="14" />
+                        </ToggleButton>
+                        <Button x:Name="ResetClipButton" Click="ResetClip_Click" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Reset Clip Modifications" Padding="0"
+                                Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                                IsEnabled="{x:Bind ViewModel.SelectedClip.HasModifications, Mode=OneWay, FallbackValue=False}">
+                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                        </Button>
+                    </StackPanel>
+
+                    <Border Width="1" Height="32" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="8,0" />
+
+                    <!-- Transport Column -->
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button x:Name="PrevButton" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Prev_Click" ToolTipService.ToolTip="Previous">
+                            <SymbolIcon Symbol="Previous" />
+                        </Button>
+                        <Button x:Name="PlayPauseButton" Width="48" Height="48" Background="Transparent" BorderThickness="0" CornerRadius="24" Click="PlayPause_Click" ToolTipService.ToolTip="Play/Pause">
+                            <SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
+                        </Button>
+                        <Button x:Name="NextButton" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Next_Click" ToolTipService.ToolTip="Next">
+                            <SymbolIcon Symbol="Next" />
+                        </Button>
+                    </StackPanel>
+
+
+
+                    <!-- Master playback speed (affects every track) -->
+                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="SPEED" FontSize="9" Foreground="Gray" FontWeight="Bold" HorizontalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <ComboBox SelectedItem="{x:Bind ViewModel.PlaybackSpeed, Mode=TwoWay}"
+                                      ItemsSource="{x:Bind ViewModel.AvailableSpeeds}"
+                                      Width="60" Height="28" MinHeight="28" FontSize="11" Padding="8,0" VerticalAlignment="Center" ToolTipService.ToolTip="Master playback speed (affects all tracks)" />
+                            <ToggleButton x:Name="StoryboardButton" IsChecked="{x:Bind ViewModel.IsStoryboardPinned, Mode=TwoWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Pin the Properties panel open (it opens automatically while editing)">
+                                <SymbolIcon Symbol="List" />
+                            </ToggleButton>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Bottom Track Dock: horizontal arrangement lanes (one per track).
+             Auto-hides during playback (IsDockVisible) so the video gets the full canvas. -->
+        <!-- Always visible now (it is just the compact timeline strip since the tile lanes were
+             removed) so the playhead is watchable during playback too. -->
+        <Border Grid.Row="1" x:Name="TrackDock"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
+                Padding="8,6"
+                AllowDrop="True" DragOver="OverlaySection_DragOver" Drop="OverlaySection_Drop">
+            <StackPanel Spacing="4">
+                <!-- Timeline Toolbar: Consolidated NLE mechanics, History, Project operations, and Export -->
+                <Grid Margin="0,0,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    
+                    <!-- Left: History & Timeline Mode Tools -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button Click="Undo_Click" IsEnabled="{x:Bind ViewModel.CanUndo, Mode=OneWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Undo (Ctrl+Z)">
+                            <SymbolIcon Symbol="Undo" />
+                        </Button>
+                        <Button Click="Redo_Click" IsEnabled="{x:Bind ViewModel.CanRedo, Mode=OneWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Redo (Ctrl+Y)">
+                            <SymbolIcon Symbol="Redo" />
+                        </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <ToggleButton x:Name="MagnetButton" IsChecked="True" Click="MagnetButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Snapping (Magnet Tool): Snap clips to edges and playhead (S)">
+                            <FontIcon Glyph="&#xE81E;" FontSize="13" />
+                        </ToggleButton>
+                        <ToggleButton x:Name="RippleEditButton" IsChecked="True" Click="RippleEditButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Magnetic Timeline: Automatically ripple clips when inserting, trimming, or deleting (R)">
+                            <FontIcon Glyph="&#xE8DE;" FontSize="13" />
+                        </ToggleButton>
+                        <ToggleButton x:Name="WaveformButton" Click="WaveformButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Show Audio Waveforms on timeline clips (W)">
+                            <FontIcon Glyph="&#xE8D6;" FontSize="13" />
+                        </ToggleButton>
+                    </StackPanel>
+
+                    <!-- Right: Zoom, Fit, Project File operations, and Export -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button x:Name="ZoomOutTimelineButton" Click="ZoomOutTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom Out Timeline (Ctrl + -)">
+                            <FontIcon Glyph="&#xE71F;" FontSize="13" />
+                        </Button>
+                        <Button x:Name="ZoomInTimelineButton" Click="ZoomInTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom In Timeline (Ctrl + +)">
+                            <FontIcon Glyph="&#xE71E;" FontSize="13" />
+                        </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <Button Click="FitWindow_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Auto-size window to fit background video">
+                            <SymbolIcon Symbol="FullScreen" />
+                        </Button>
+                        <Button Click="Save_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Save project">
+                            <SymbolIcon Symbol="Save" />
+                        </Button>
+                        <Button Click="Load_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Load project">
+                            <SymbolIcon Symbol="OpenFile" />
+                        </Button>
+                        <Button Click="Clear_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Clear project">
+                            <SymbolIcon Symbol="Delete" />
+                        </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <!-- Export -->
+                        <Button Click="Export_Click" Height="28" Padding="12,0" CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Background="{ThemeResource AccentFillColorDefaultBrush}" Foreground="White"
+                                ToolTipService.ToolTip="Export composite to MP4 video">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="Video" Foreground="White" />
+                                <TextBlock Text="Export" Foreground="White" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Proportional timeline + playhead (§7E/F). Activity view: spine (top row) +
+                     one row per upper track, drawn to scale on one shared time axis, with the
+                     playhead tracking story position. Track labels sit in a fixed-width gutter on
+                     the left; the Canvas keeps x=0 == time 0. Laid out in code (TimelineBar_*). -->
+                <Border Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" CornerRadius="4">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="58" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Canvas x:Name="TimelineLabels" Grid.Column="0" Background="Transparent" />
+                        <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch">
+                            <Canvas x:Name="TimelineBar" Height="52" HorizontalAlignment="Stretch"
+                                    Background="Transparent" SizeChanged="TimelineBar_SizeChanged"
+                                    PointerPressed="TimelineBar_PointerPressed"
+                                    PointerMoved="TimelineBar_PointerMoved"
+                                    PointerReleased="TimelineBar_PointerReleased">
+                                <!-- A real ContextFlyout: the platform shows this on right-click /
+                                     menu key / long-press, rather than us hand-rolling it from a
+                                     pointer event (which never fired reliably). -->
+                                <Canvas.ContextFlyout>
+                                    <MenuFlyout Opening="TimelineContextMenu_Opening">
+                                        <MenuFlyoutItem x:Name="TimelineSplitItem" Text="Split at playhead" Click="TimelineSplit_Click" />
+                                        <MenuFlyoutItem x:Name="TimelineSnapshotItem" Text="Snapshot (10s still)" Click="TimelineSnapshot_Click"
+                                                        ToolTipService.ToolTip="Freeze this frame as a 10s still with a slow Ken Burns push-in" />
+                                        <MenuFlyoutSeparator />
+                                        <MenuFlyoutItem x:Name="TimelineDuplicateItem" Text="Duplicate" Click="TimelineDuplicate_Click" />
+                                        <MenuFlyoutItem x:Name="TimelineRemoveItem" Text="Remove" Click="TimelineRemove_Click" />
+                                    </MenuFlyout>
+                                </Canvas.ContextFlyout>
+                            </Canvas>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

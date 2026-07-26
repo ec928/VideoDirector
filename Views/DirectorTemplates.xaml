@@ -1,0 +1,16 @@
+﻿<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:VideoDirector.Models"
+    xmlns:local="using:VideoDirector.Views"
+    xmlns:wgf="using:Windows.Globalization.NumberFormatting">
+
+    <local:TimeSpanConverter x:Key="TimeSpanConverter" />
+    <local:BoolToVisConverter x:Key="BoolToVisConverter" />
+    <local:FloatFormatConverter x:Key="FloatFormatConverter" />
+    <local:TimeSpanToDoubleSecondsConverter x:Key="TimeSpanToDoubleSecondsConverter" />
+    <local:BoolToBadgeBrushConverter x:Key="BoolToBadgeBrushConverter" />
+    <local:ModeLabelToForegroundConverter x:Key="ModeLabelToForegroundConverter" />
+    <local:ModeLabelToBackgroundConverter x:Key="ModeLabelToBackgroundConverter" />
+
+</ResourceDictionary>
