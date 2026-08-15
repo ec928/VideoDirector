@@ -151,7 +151,7 @@ namespace VideoDirector.Views
             return Math.Clamp(PixelToValue(e.GetCurrentPoint(RootGrid).Position.X, trackWidth), 0, Max);
         }
 
-        private void UserControl_SizeChanged(object sender, SizeChangedEventArgs e)
+        private void UserControl_SizeChanged(object? sender, SizeChangedEventArgs e)
         {
             UpdateUI();
         }
@@ -209,7 +209,7 @@ namespace VideoDirector.Views
             InteractionCompleted?.Invoke(this, EventArgs.Empty);
         }
 
-        private void RootGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
+        private void RootGrid_PointerPressed(object? sender, PointerRoutedEventArgs e)
         {
             // A press on a thumb starts a drag that tracks the cursor; a press on the bare track
             // scrubs the playhead there.
@@ -233,7 +233,7 @@ namespace VideoDirector.Views
             UpdateUI();
         }
 
-        private void RootGrid_PointerMoved(object sender, PointerRoutedEventArgs e)
+        private void RootGrid_PointerMoved(object? sender, PointerRoutedEventArgs e)
         {
             if (_drag == DragTarget.None) return;
             double v = ValueAtCursor(e);
@@ -257,7 +257,7 @@ namespace VideoDirector.Views
             e.Handled = true;
         }
 
-        private void RootGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
+        private void RootGrid_PointerReleased(object? sender, PointerRoutedEventArgs e)
         {
             if (_drag != DragTarget.None)
             {
@@ -269,7 +269,7 @@ namespace VideoDirector.Views
 
         // Scroll to zoom around the CENTRE of the view (both edges move equally, no sideways slide);
         // Shift+scroll pans the window to reach any region.
-        private void RootGrid_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+        private void RootGrid_PointerWheelChanged(object? sender, PointerRoutedEventArgs e)
         {
             EnsureView();
 
@@ -303,7 +303,7 @@ namespace VideoDirector.Views
         }
 
         // Double-click toggles between full source view and Smart Auto-Frame around the trimmed region.
-        private void RootGrid_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        private void RootGrid_DoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)
         {
             if (_viewSpan >= Max * 0.98)
             {

@@ -364,7 +364,7 @@ namespace VideoDirector.ViewModels
             while (OverlayTracks.Count < MaxOverlayTracks) AddOverlayTrack();
         }
 
-        private void TimelineNodes_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        private void TimelineNodes_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         {
             if (e.OldItems != null)
             {
@@ -383,7 +383,7 @@ namespace VideoDirector.ViewModels
             OnPropertyChanged(nameof(TotalStoryTime));
         }
 
-        private void CinematicOperation_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        private void CinematicOperation_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
             if (e.PropertyName == nameof(CinematicOperation.OpDuration) || e.PropertyName == nameof(CinematicOperation.TransitionDuration))
             {

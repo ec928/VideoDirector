@@ -1,7 +1,6 @@
 # VideoDirector — Architecture, UI/UX Model & Roadmap
 
-**Path**: `c:\Users\chan_\OneDrive\Apps\ModernImageViewer\VideoDirector\ARCHITECTURE.md`  
-**Purpose**: This authoritative document serves as the single source of truth for the VideoDirector Non-Linear Editor (NLE) architecture within ModernImageViewer. Designed for human developers and AI assistants, it outlines core interaction laws, system topology, historical architectural achievements, strict invariants, and strategic future work.
+**Purpose**: This authoritative document serves as the single source of truth for the VideoDirector Non-Linear Editor (NLE) architecture. Designed for human developers and AI assistants, it outlines core interaction laws, system topology, historical architectural achievements, strict invariants, and strategic future work.
 
 ---
 

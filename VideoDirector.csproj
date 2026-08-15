@@ -15,7 +15,15 @@
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
-    <Nullable>enable</Nullable>
+    <!--
+      'annotations' rather than 'enable': nullable syntax (T?) is honoured, but the
+      compiler does not emit nullable diagnostics. This codebase predates nullable
+      reference types. Annotating the fields honestly cascades into ~60 dereference
+      warnings through VideoPlaybackEngine's playback/seek/transition paths, which is
+      a refactor rather than a cleanup. Revisit by switching to 'enable' and working
+      through the diagnostics file by file.
+    -->
+    <Nullable>annotations</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -55,6 +63,8 @@
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
     <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">False</PublishTrimmed>
+    <PublishSingleFile Condition="'$(Configuration)' != 'Debug'">True</PublishSingleFile>
+    <ApplicationIcon>VideoDirector.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>

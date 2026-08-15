@@ -1,4 +1,4 @@
-using Microsoft.UI.Windowing;
+﻿using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -13,7 +13,7 @@ namespace VideoDirector
     {
         public static MainWindow Instance { get; private set; } = null!;
         private readonly AppWindow _appWindow;
-        public AppWindow AppWindow => _appWindow;
+        public new AppWindow AppWindow => _appWindow;
 
         private sealed class AppSettings
         {
@@ -60,7 +60,7 @@ namespace VideoDirector
             };
         }
 
-        private void RootGrid_PointerMoved(object sender, PointerRoutedEventArgs e)
+        private void RootGrid_PointerMoved(object? sender, PointerRoutedEventArgs e)
         {
             if (DragZone == null) return;
             var position = e.GetCurrentPoint(RootGrid).Position;

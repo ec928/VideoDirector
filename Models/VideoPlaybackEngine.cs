@@ -87,12 +87,12 @@ namespace VideoDirector.Models
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
         }
 
-        private void ViewModel_OperationSeekRequested(object sender, TimeSpan e)
+        private void ViewModel_OperationSeekRequested(object? sender, TimeSpan e)
         {
             SeekActiveOperation(e);
         }
 
-        private void ViewModel_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
             if (e.PropertyName == nameof(DirectorViewModel.IsTelemetryVisible))
             {
@@ -131,7 +131,7 @@ namespace VideoDirector.Models
             }
         }
 
-        private void ViewModel_PlaybackSpeedChanged(object sender, double speed)
+        private void ViewModel_PlaybackSpeedChanged(object? sender, double speed)
         {
             double speedA = _opA != null ? speed * _opA.PlaybackSpeed : speed;
             double speedB = _opB != null ? speed * _opB.PlaybackSpeed : speed;
@@ -755,7 +755,7 @@ namespace VideoDirector.Models
 
         private TransitionStyle _transitionStyle;
 
-        private void CompositionTarget_Rendering(object sender, object e)
+        private void CompositionTarget_Rendering(object? sender, object e)
         {
             if (!_isAnimating || _isPaused) return;
             
@@ -1305,7 +1305,7 @@ namespace VideoDirector.Models
             EnterEditMode(op, EditTarget.Start);
         }
 
-        private void RecordMotion_Rendering(object sender, object e)
+        private void RecordMotion_Rendering(object? sender, object e)
         {
             if (_opA == null || _playerControl.ActiveTransform == null) return;
             
@@ -2075,7 +2075,7 @@ namespace VideoDirector.Models
             _viewModel.IsPlaying = false;
         }
 
-        private void EditPreview_Rendering(object sender, object e)
+        private void EditPreview_Rendering(object? sender, object e)
         {
             if (_editClip == null || _playerControl.ActiveTransform == null) return;
             // Apply Volume live so the audio slider works while the preview is playing (overlays
@@ -2118,7 +2118,7 @@ namespace VideoDirector.Models
 
         // ---- Arrange mode: drag / wheel the PiP under the cursor (the hit slot) ----
 
-        private void OnOverlayBoxDragged(object sender, (int slot, Views.BoxGrab grab, double dx, double dy) e)
+        private void OnOverlayBoxDragged(object? sender, (int slot, Views.BoxGrab grab, double dx, double dy) e)
         {
             if (_mode != EditorMode.Arrange) return;
             // §7A invariant: never manipulate a live video surface. While ACTIVELY playing the PiP
@@ -2172,7 +2172,7 @@ namespace VideoDirector.Models
             ApplyOverlayBox(e.slot, overlay, false);
         }
 
-        private void OnOverlayBoxWheel(object sender, (int slot, int delta) e)
+        private void OnOverlayBoxWheel(object? sender, (int slot, int delta) e)
         {
             if (_mode != EditorMode.Arrange) return;
             if (IsActivelyPlaying) return;   // same invariant: no resizing a live video surface

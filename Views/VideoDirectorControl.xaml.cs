@@ -60,7 +60,7 @@ namespace VideoDirector.Views
             this.Loaded += VideoDirectorControl_Loaded;
         }
 
-        private void VideoDirectorControl_PointerMoved(object sender, PointerRoutedEventArgs e)
+        private void VideoDirectorControl_PointerMoved(object? sender, PointerRoutedEventArgs e)
         {
             _inactivityTimer.Stop();
             ViewModel.IsControlsVisible = true;
@@ -68,10 +68,10 @@ namespace VideoDirector.Views
         }
 
         private bool _isPointerOverPill = false;
-        private void FloatingPill_PointerEntered(object sender, PointerRoutedEventArgs e) => _isPointerOverPill = true;
-        private void FloatingPill_PointerExited(object sender, PointerRoutedEventArgs e) => _isPointerOverPill = false;
+        private void FloatingPill_PointerEntered(object? sender, PointerRoutedEventArgs e) => _isPointerOverPill = true;
+        private void FloatingPill_PointerExited(object? sender, PointerRoutedEventArgs e) => _isPointerOverPill = false;
 
-        private void InactivityTimer_Tick(object sender, object e)
+        private void InactivityTimer_Tick(object? sender, object e)
         {
             _inactivityTimer.Stop();
             if (!ViewModel.IsRecordingMotion && !_isPointerOverPill)
@@ -80,7 +80,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void VideoDirectorControl_Loaded(object sender, RoutedEventArgs e)
+        private void VideoDirectorControl_Loaded(object? sender, RoutedEventArgs e)
         {
             _playbackEngine = new VideoPlaybackEngine(PlayerControl, ViewModel);
             PlayerControl.ViewportTransformChanged += PlayerControl_ViewportTransformChanged;
@@ -114,7 +114,7 @@ namespace VideoDirector.Views
             return null;
         }
 
-        private void TimelineBar_SizeChanged(object sender, SizeChangedEventArgs e) => BuildTimelineBar();
+        private void TimelineBar_SizeChanged(object? sender, SizeChangedEventArgs e) => BuildTimelineBar();
 
         // Timeline layout: a scrub ruler on top, then the spine row, then the overlay row — all on
         // one shared px=seconds scale (§7E). Scrub on the ruler; drag clips in their rows.
@@ -535,7 +535,7 @@ namespace VideoDirector.Views
         // Timeline pointer model (standard NLE): the top ruler scrubs; the clip rows drag clips.
         // Tap in a row = select; drag in a row = move (overlay = reposition in time, spine =
         // reorder). Empty space in the rows also scrubs.
-        private void TimelineBar_PointerPressed(object sender, PointerRoutedEventArgs e)
+        private void TimelineBar_PointerPressed(object? sender, PointerRoutedEventArgs e)
         {
             var point = e.GetCurrentPoint(TimelineBar);
             // Only the left button (or a touch/pen contact, which also reports it) drives
@@ -567,7 +567,7 @@ namespace VideoDirector.Views
             else { _timelineScrubbing = true; ScrubToX(p.X); }
         }
 
-        private void TimelineBar_PointerMoved(object sender, PointerRoutedEventArgs e)
+        private void TimelineBar_PointerMoved(object? sender, PointerRoutedEventArgs e)
         {
             // Recorded even when not dragging: the context menu resolves its target from here.
             _lastHoverPoint = e.GetCurrentPoint(TimelineBar).Position;
@@ -640,7 +640,7 @@ namespace VideoDirector.Views
             return insert;
         }
 
-        private void TimelineBar_PointerReleased(object sender, PointerRoutedEventArgs e)
+        private void TimelineBar_PointerReleased(object? sender, PointerRoutedEventArgs e)
         {
             // This fires for the RIGHT button too. If we never started a left-press, do nothing —
             // in particular do NOT rebuild the bar: rebuilding destroys every Canvas child,
@@ -683,7 +683,7 @@ namespace VideoDirector.Views
         private CinematicOperation _contextClip;
         private bool _contextIsSpine;
 
-        private void TimelineContextMenu_Opening(object sender, object e)
+        private void TimelineContextMenu_Opening(object? sender, object e)
         {
             // Keep this trivial: just record what was under the cursor. It previously also called
             // SelectClip (which changes mode / starts async work) — an exception in Opening aborts
@@ -693,22 +693,22 @@ namespace VideoDirector.Views
             _contextIsSpine = hit.isSpine;
         }
 
-        private void TimelineSplit_Click(object sender, RoutedEventArgs e)
+        private void TimelineSplit_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextClip != null) SplitClip(_contextClip, _contextIsSpine);
         }
 
-        private void TimelineSnapshot_Click(object sender, RoutedEventArgs e)
+        private void TimelineSnapshot_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextClip != null) SnapshotClip(_contextClip, _contextIsSpine);
         }
 
-        private void TimelineDuplicate_Click(object sender, RoutedEventArgs e)
+        private void TimelineDuplicate_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextClip != null) DuplicateClip(_contextClip, _contextIsSpine);
         }
 
-        private void TimelineRemove_Click(object sender, RoutedEventArgs e)
+        private void TimelineRemove_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextClip != null) RemoveClip(_contextClip, _contextIsSpine);
         }
@@ -1042,14 +1042,14 @@ namespace VideoDirector.Views
             }
         }
 
-        private void PlayerControl_SizeChanged(object sender, SizeChangedEventArgs e)
+        private void PlayerControl_SizeChanged(object? sender, SizeChangedEventArgs e)
         {
             // The canvas resizes when the bottom dock is toggled — keep WYSIWYG/overlay aligned.
             _playbackEngine?.OnViewportResized();
         }
 
 
-        private void ViewModel_EditTargetChanged(object sender, CinematicOperation op)
+        private void ViewModel_EditTargetChanged(object? sender, CinematicOperation op)
         {
             if (!ViewModel.IsPlaying)
             {
@@ -1057,7 +1057,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void PlayerControl_ViewportTransformChanged(object sender, EventArgs e)
+        private void PlayerControl_ViewportTransformChanged(object? sender, EventArgs e)
         {
             if (ViewModel.IsPlaying || ViewModel.SelectedClip == null) return;
             var op = ViewModel.SelectedClip as CinematicOperation;
@@ -1072,7 +1072,7 @@ namespace VideoDirector.Views
         // (the edit-mode transform) onto the selected clip. One handler, whichever track is live.
         // Collapse the scrubber to just the trimmed range so it plays/scrubs the resulting short
         // clip like any other clip. Double-clicking the scrubber returns to the full source.
-        private void Trim_Click(object sender, RoutedEventArgs e)
+        private void Trim_Click(object? sender, RoutedEventArgs e)
         {
             ClipScrubber?.EnterTrimmedView();
         }
@@ -1082,12 +1082,12 @@ namespace VideoDirector.Views
         // These stub handlers establish the structural blueprint for upcoming NLE features, ensuring
         // clean domain separation between Arrange Mode and Edit Mode without piecemeal architectural drift.
 
-        private void FrameStepBack_Click(object sender, RoutedEventArgs e)
+        private void FrameStepBack_Click(object? sender, RoutedEventArgs e)
         {
             StepFrame(-1);
         }
 
-        private void FrameStepForward_Click(object sender, RoutedEventArgs e)
+        private void FrameStepForward_Click(object? sender, RoutedEventArgs e)
         {
             StepFrame(1);
         }
@@ -1111,7 +1111,7 @@ namespace VideoDirector.Views
             ViewModel.CurrentOperationTimeSeconds = target;
         }
 
-        private void MagnetButton_Click(object sender, RoutedEventArgs e)
+        private void MagnetButton_Click(object? sender, RoutedEventArgs e)
         {
             if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
             {
@@ -1119,7 +1119,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void RippleEditButton_Click(object sender, RoutedEventArgs e)
+        private void RippleEditButton_Click(object? sender, RoutedEventArgs e)
         {
             if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
             {
@@ -1127,7 +1127,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void WaveformButton_Click(object sender, RoutedEventArgs e)
+        private void WaveformButton_Click(object? sender, RoutedEventArgs e)
         {
             if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
             {
@@ -1136,20 +1136,20 @@ namespace VideoDirector.Views
             }
         }
 
-        private void ZoomInTimeline_Click(object sender, RoutedEventArgs e)
+        private void ZoomInTimeline_Click(object? sender, RoutedEventArgs e)
         {
             _timelineZoomFactor = Math.Min(16.0, _timelineZoomFactor * 1.3333333);
             BuildTimelineBar();
         }
 
-        private void ZoomOutTimeline_Click(object sender, RoutedEventArgs e)
+        private void ZoomOutTimeline_Click(object? sender, RoutedEventArgs e)
         {
             _timelineZoomFactor = Math.Max(1.0, _timelineZoomFactor / 1.3333333);
             if (_timelineZoomFactor <= 1.01) _timelineZoomFactor = 1.0;
             BuildTimelineBar();
         }
 
-        private void SetStart_Click(object sender, RoutedEventArgs e)
+        private void SetStart_Click(object? sender, RoutedEventArgs e)
         {
             var op = ViewModel.SelectedClip;
             var transform = PlayerControl.ActiveTransform;
@@ -1160,7 +1160,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void SetMid_Click(object sender, RoutedEventArgs e)
+        private void SetMid_Click(object? sender, RoutedEventArgs e)
         {
             var op = ViewModel.SelectedClip;
             var transform = PlayerControl.ActiveTransform;
@@ -1171,7 +1171,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void SetEnd_Click(object sender, RoutedEventArgs e)
+        private void SetEnd_Click(object? sender, RoutedEventArgs e)
         {
             var op = ViewModel.SelectedClip;
             var transform = PlayerControl.ActiveTransform;
@@ -1183,7 +1183,7 @@ namespace VideoDirector.Views
         }
 
         // Right-click the Mid button to clear it (back to a two-point Start -> End motion).
-        private void ClearMid_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+        private void ClearMid_RightTapped(object? sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
         {
             var op = ViewModel.SelectedClip;
             if (op != null)
@@ -1194,7 +1194,7 @@ namespace VideoDirector.Views
             e.Handled = true;
         }
 
-        private void ViewModel_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
             if (e.PropertyName == nameof(DirectorViewModel.CurrentStoryTime))
             {
@@ -1297,7 +1297,7 @@ namespace VideoDirector.Views
         }
 
 
-        private void RecordButton_Click(object sender, RoutedEventArgs e)
+        private void RecordButton_Click(object? sender, RoutedEventArgs e)
         {
             if (RecordButton.IsChecked.HasValue)
             {
@@ -1305,7 +1305,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void Grid_DragOver(object sender, DragEventArgs e)
+        private void Grid_DragOver(object? sender, DragEventArgs e)
         {
             if (e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
             {
@@ -1314,7 +1314,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private async void Grid_Drop(object sender, DragEventArgs e)
+        private async void Grid_Drop(object? sender, DragEventArgs e)
         {
             if (e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
             {
@@ -1346,7 +1346,7 @@ namespace VideoDirector.Views
             SelectClip(ViewModel.TimelineNodes[^1], isSpine: true);
         }
 
-        private async void PlayPause_Click(object sender, RoutedEventArgs e)
+        private async void PlayPause_Click(object? sender, RoutedEventArgs e)
         {
             if (_playbackEngine == null) return;
             // Strict segregation: in Edit mode, Play previews ONLY the edited clip's motion;
@@ -1366,14 +1366,14 @@ namespace VideoDirector.Views
         // The scrubber's trim handles are OneWay-bound (display only); a drag writes the model here.
         // Doing it explicitly (not via a TwoWay binding on a shared control) is what stops one clip's
         // trim from being clobbered when you switch between clips.
-        private void ClipScrubber_TrimChanged(object sender, EventArgs e)
+        private void ClipScrubber_TrimChanged(object? sender, EventArgs e)
         {
             if (ViewModel.SelectedClip is not CinematicOperation clip) return;
             clip.VideoStartTime = TimeSpan.FromSeconds(ClipScrubber.TrimStart);
             clip.VideoEndTime = TimeSpan.FromSeconds(ClipScrubber.TrimEnd);
         }
 
-        private void TimelineRangeSlider_InteractionStarted(object sender, EventArgs e)
+        private void TimelineRangeSlider_InteractionStarted(object? sender, EventArgs e)
         {
             _wasPlayingBeforeDrag = ViewModel.IsPlaying;
             if (_wasPlayingBeforeDrag && _playbackEngine != null)
@@ -1382,7 +1382,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private async void TimelineRangeSlider_InteractionCompleted(object sender, EventArgs e)
+        private async void TimelineRangeSlider_InteractionCompleted(object? sender, EventArgs e)
         {
             if (_wasPlayingBeforeDrag && !ViewModel.IsPlaying && _playbackEngine != null)
             {
@@ -1391,17 +1391,17 @@ namespace VideoDirector.Views
             }
         }
 
-        private void Prev_Click(object sender, RoutedEventArgs e)
+        private void Prev_Click(object? sender, RoutedEventArgs e)
         {
             _playbackEngine?.SkipPrevious();
         }
 
-        private void Next_Click(object sender, RoutedEventArgs e)
+        private void Next_Click(object? sender, RoutedEventArgs e)
         {
             _playbackEngine?.SkipNext();
         }
 
-        private async void FitWindow_Click(object sender, RoutedEventArgs e)
+        private async void FitWindow_Click(object? sender, RoutedEventArgs e)
         {
             if (_timelineZoomFactor > 1.0)
             {
@@ -1474,7 +1474,7 @@ namespace VideoDirector.Views
             appWindow.ResizeClient(new Windows.Graphics.SizeInt32(winWidthPhysical, winHeightPhysical));
         }
 
-        private async void Save_Click(object sender, RoutedEventArgs e)
+        private async void Save_Click(object? sender, RoutedEventArgs e)
         {
             var savePicker = new FileSavePicker();
             var window = MainWindow.Instance;
@@ -1492,7 +1492,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private async void Load_Click(object sender, RoutedEventArgs e)
+        private async void Load_Click(object? sender, RoutedEventArgs e)
         {
             var openPicker = new FileOpenPicker();
             var window = MainWindow.Instance;
@@ -1514,7 +1514,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private async void Clear_Click(object sender, RoutedEventArgs e)
+        private async void Clear_Click(object? sender, RoutedEventArgs e)
         {
             bool hasContent = ViewModel.TimelineNodes.Count > 0;
             if (!hasContent)
@@ -1538,7 +1538,7 @@ namespace VideoDirector.Views
             ViewModel.Clear();
         }
 
-        private async void Export_Click(object sender, RoutedEventArgs e)
+        private async void Export_Click(object? sender, RoutedEventArgs e)
         {
             if (ViewModel.TimelineNodes.Count == 0)
             {
@@ -1609,7 +1609,7 @@ namespace VideoDirector.Views
 
 
 
-        private void ResetClip_Click(object sender, RoutedEventArgs e)
+        private void ResetClip_Click(object? sender, RoutedEventArgs e)
         {
             if (ViewModel.SelectedClip != null)
             {
@@ -1619,7 +1619,7 @@ namespace VideoDirector.Views
         }
 
 
-        private void PulseTimer_Tick(object sender, object e)
+        private void PulseTimer_Tick(object? sender, object e)
         {
             _pulsePhase += 0.15;
             if (ModeBadgeButton != null)
@@ -1629,7 +1629,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void ModeBadge_Click(object sender, RoutedEventArgs e)
+        private void ModeBadge_Click(object? sender, RoutedEventArgs e)
         {
             if (ViewModel.IsEditMode)
             {
@@ -1637,7 +1637,7 @@ namespace VideoDirector.Views
             }
         }
 
-        private void PlaybarSplit_Click(object sender, RoutedEventArgs e)
+        private void PlaybarSplit_Click(object? sender, RoutedEventArgs e)
         {
             if (ViewModel.SelectedClip != null)
             {
@@ -1646,12 +1646,12 @@ namespace VideoDirector.Views
             }
         }
 
-        private void ExitToArrange_Click(object sender, RoutedEventArgs e) => ExitEditMode();
+        private void ExitToArrange_Click(object? sender, RoutedEventArgs e) => ExitEditMode();
 
         // Double-tap the image (Arrange) to edit the clip under the cursor: an overlay PiP, or the
         // Track 1 clip at the playhead if the tap wasn't on a PiP. Routes through SelectClip so
         // there's one entry path (selection + enter-edit) shared with the timeline.
-        private void PlayerControl_EditRequested(object sender, int slot)
+        private void PlayerControl_EditRequested(object? sender, int slot)
         {
             if (ViewModel.IsPlaying) return;
             if (slot >= 0)
@@ -1765,8 +1765,8 @@ namespace VideoDirector.Views
             ApplyHistory(ViewModel.Redo);
         }
 
-        private void Undo_Click(object sender, RoutedEventArgs e) => ApplyHistory(ViewModel.Undo);
-        private void Redo_Click(object sender, RoutedEventArgs e) => ApplyHistory(ViewModel.Redo);
+        private void Undo_Click(object? sender, RoutedEventArgs e) => ApplyHistory(ViewModel.Undo);
+        private void Redo_Click(object? sender, RoutedEventArgs e) => ApplyHistory(ViewModel.Redo);
 
         // Undo/redo swap the whole clip collection, so any engine references to the old clips (edit
         // target, playing op) go stale. Settle the engine into a clean Arrange first, apply the
@@ -1784,7 +1784,7 @@ namespace VideoDirector.Views
 
 
 
-        private void OverlaySection_DragOver(object sender, DragEventArgs e)
+        private void OverlaySection_DragOver(object? sender, DragEventArgs e)
         {
             if (e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
             {
@@ -1807,7 +1807,7 @@ namespace VideoDirector.Views
         // Drop a video/image onto the timeline strip to add it. Which row you drop on decides the
         // track (Track 1 row = spine, lower rows = that overlay track); the drop x sets the start
         // time (falls back to the playhead if the scale isn't ready).
-        private async void OverlaySection_Drop(object sender, DragEventArgs e)
+        private async void OverlaySection_Drop(object? sender, DragEventArgs e)
         {
             if (e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
             {

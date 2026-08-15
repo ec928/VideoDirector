@@ -148,7 +148,7 @@ namespace VideoDirector.Views
             return BoxGrab.Move;
         }
 
-        private void InputLayer_PointerPressed(object sender, PointerRoutedEventArgs e)
+        private void InputLayer_PointerPressed(object? sender, PointerRoutedEventArgs e)
         {
             var p = e.GetCurrentPoint(InputLayer).Position;
 
@@ -168,7 +168,7 @@ namespace VideoDirector.Views
             InputLayer.CapturePointer(e.Pointer);
         }
 
-        private void InputLayer_PointerMoved(object sender, PointerRoutedEventArgs e)
+        private void InputLayer_PointerMoved(object? sender, PointerRoutedEventArgs e)
         {
             if (!_isDragging) return;
 
@@ -189,21 +189,21 @@ namespace VideoDirector.Views
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        private void InputLayer_PointerReleased(object sender, PointerRoutedEventArgs e)
+        private void InputLayer_PointerReleased(object? sender, PointerRoutedEventArgs e)
         {
             _isDragging = false;
             _dragSlot = -1;
             InputLayer.ReleasePointerCapture(e.Pointer);
         }
 
-        private void InputLayer_PointerCanceled(object sender, PointerRoutedEventArgs e)
+        private void InputLayer_PointerCanceled(object? sender, PointerRoutedEventArgs e)
         {
             _isDragging = false;
             _dragSlot = -1;
             InputLayer.ReleasePointerCapture(e.Pointer);
         }
 
-        private void InputLayer_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+        private void InputLayer_PointerWheelChanged(object? sender, PointerRoutedEventArgs e)
         {
             var pt = e.GetCurrentPoint(InputLayer);
             int delta = pt.Properties.MouseWheelDelta;
@@ -223,7 +223,7 @@ namespace VideoDirector.Views
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        private void InputLayer_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        private void InputLayer_DoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)
         {
             if (InputMode == PlayerInputMode.ArrangePips)
             {
