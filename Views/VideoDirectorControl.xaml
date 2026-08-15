@@ -355,6 +355,9 @@
                             <ToggleButton x:Name="StoryboardButton" IsChecked="{x:Bind ViewModel.IsStoryboardPinned, Mode=TwoWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Pin the Properties panel open (it opens automatically while editing)">
                                 <SymbolIcon Symbol="List" />
                             </ToggleButton>
+                            <Button x:Name="ReportProblemButton" Click="ReportProblem_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Report a problem or suggest a feature (opens GitHub in your browser)">
+                                <SymbolIcon Symbol="Help" />
+                            </Button>
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>

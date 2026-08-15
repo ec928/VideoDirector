@@ -1,0 +1,73 @@
+name: Bug report
+description: Something crashes, misbehaves, or plays back incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. The details below are what make a bug
+        reproducible — without them most reports can't be acted on.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+      placeholder: Scrubbing the playhead back over a crossfade left both clips visible at full opacity.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which mode were you in?
+      description: Shown on the badge in the playbar.
+      options:
+        - Playback (green)
+        - Arrange (cyan)
+        - Edit (red)
+        - Not sure / not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: The version of the release zip you downloaded, or the commit if you built it yourself.
+      placeholder: e.g. v0.3.0
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Press Win+R, type `winver`, and paste what it shows.
+      placeholder: e.g. Windows 11 Pro 24H2 (build 26100.1742)
+    validations:
+      required: true
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Media details (if relevant)
+      description: Container and codec, resolution, frame rate, and how many clips were on the timeline.
+      placeholder: e.g. MP4 / H.264, 3840x2160, 60 fps, 12 clips across 3 tracks
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, a screen recording, GPU model, or anything else you think matters.

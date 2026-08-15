@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an improvement or a new capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation you're in, rather than the solution you have in mind. It often leads somewhere better.
+      placeholder: Building a 40-clip sequence means a lot of repeated trimming, and I lose my place on the timeline each time.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you've tried instead?
+      description: Workarounds, or other editors that handle this well.
