@@ -1,16 +1,116 @@
 @echo off
-echo ========================================================
-echo Publishing VideoDirector as a Single Executable
-echo ========================================================
-echo.
-echo Bypassing Visual Studio and using MSBuild directly...
+setlocal
+
+REM ============================================================================
+REM  VideoDirector - build a portable, self-contained x64 release.
+REM
+REM  Works from a fresh clone: every setting is passed explicitly, so this does
+REM  not depend on a .pubxml (the publish profiles are gitignored and local to
+REM  the author's machine).
+REM
+REM  Usage:
+REM    publish.bat                     -> publishes to .\publish\
+REM    publish.bat "D:\somewhere"      -> publishes to that folder
+REM    publish.bat "D:\somewhere" nosmoke
+REM
+REM  Deliberately NOT single-file: single-file self-extracts the whole runtime
+REM  to %TEMP% on the first launch after every publish, which measurably slows
+REM  cold start.
+REM ============================================================================
+
+set "OUTDIR=%~1"
+if "%OUTDIR%"=="" set "OUTDIR=%~dp0publish"
+if /i "%OUTDIR%"=="nosmoke" set "OUTDIR=%~dp0publish"
+
+set "PROJ=%~dp0VideoDirector.csproj"
+
+echo ============================================================
+echo  Publishing VideoDirector  (x64, self-contained, loose)
+echo  Output: %OUTDIR%
+echo ============================================================
 echo.
 
-dotnet publish -p:PublishProfile=FolderProfile -p:Platform=x64
+dotnet publish "%PROJ%" ^
+  -c Release ^
+  -r win-x64 ^
+  -p:Platform=x64 ^
+  -p:SelfContained=true ^
+  -p:PublishSingleFile=false ^
+  -p:PublishTrimmed=false ^
+  -p:PublishReadyToRun=true ^
+  -p:PublishDir="%OUTDIR%\" ^
+  -p:PublishProfile= ^
+  --nologo
+
+if errorlevel 1 goto :failed
+if not exist "%OUTDIR%\VideoDirector.exe" goto :failed
 
 echo.
-echo ========================================================
-echo Publish Complete!
-echo Check your target folder: C:\Users\chan_\OneDrive\Apps\VideoDirector
-echo ========================================================
-pause
+echo Publish reported success. Verifying output...
+
+REM A part-installed .NET SDK can produce a build that compiles cleanly but
+REM crashes at startup, with framework assemblies published stripped.
+REM System.Private.Xml.dll is a reliable canary: ~7.6 MB healthy, ~3 MB bad.
+for %%F in ("%OUTDIR%\System.Private.Xml.dll") do set "XMLSIZE=%%~zF"
+if not defined XMLSIZE goto :suspect
+if %XMLSIZE% LSS 5000000 goto :suspect
+echo   [ok] Framework assemblies look intact.
+
+if /i "%~1"=="nosmoke" goto :done
+if /i "%~2"=="nosmoke" goto :done
+
+tasklist /fi "imagename eq VideoDirector.exe" 2>nul | find /i "VideoDirector.exe" >nul
+if not errorlevel 1 (
+  echo   [skip] VideoDirector already running - smoke test skipped.
+  goto :done
+)
+
+echo   Launching to confirm it starts...
+start "" "%OUTDIR%\VideoDirector.exe"
+REM ping, not "timeout" - timeout fails if stdin is redirected (publish.bat > log.txt)
+ping -n 7 127.0.0.1 >nul 2>&1
+tasklist /fi "imagename eq VideoDirector.exe" 2>nul | find /i "VideoDirector.exe" >nul
+if errorlevel 1 goto :crashed
+taskkill /im VideoDirector.exe /f >nul 2>&1
+echo   [ok] App started and stayed running.
+
+:done
+echo.
+echo ============================================================
+echo  PUBLISH COMPLETE
+echo  %OUTDIR%
+echo ============================================================
+exit /b 0
+
+:suspect
+echo.
+echo ============================================================
+echo  WARNING - output looks wrong
+echo.
+echo  System.Private.Xml.dll is smaller than expected, meaning the
+echo  framework assemblies were published stripped. This build will
+echo  most likely crash on startup.
+echo.
+echo  Usual cause: a .NET SDK or Visual Studio update part-way
+echo  through installing. Check this returns the same answer twice,
+echo  then publish again:
+echo.
+echo      dotnet --list-sdks
+echo ============================================================
+exit /b 2
+
+:crashed
+echo.
+echo ============================================================
+echo  SMOKE TEST FAILED - the app exited immediately.
+echo  The published output is not usable. See the note above about
+echo  checking "dotnet --list-sdks" for an in-progress SDK update.
+echo ============================================================
+exit /b 3
+
+:failed
+echo.
+echo ============================================================
+echo  PUBLISH FAILED - see errors above.
+echo ============================================================
+exit /b 1
