@@ -1148,25 +1148,10 @@ namespace VideoDirector.Models
                 progress = (_editPlayer.PlaybackSession.Position - clip.VideoStartTime).TotalSeconds / dur;
             progress = Math.Clamp(progress, 0, 1);
 
-            double eased = progress;
-            if (clip.CurveProfile == CurveProfile.Bezier)
-                eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2;
-            else if (clip.CurveProfile == CurveProfile.DirectorsArc)
-                eased = 1 - Math.Pow(1 - progress, 3);
-
-            SpatialMark from, to;
-            double p;
-            if (clip.MidMark != null)
-            {
-                if (eased < 0.5) { from = clip.StartMark; to = clip.MidMark; p = eased * 2; }
-                else { from = clip.MidMark; to = clip.EndMark; p = (eased - 0.5) * 2; }
-            }
-            else { from = clip.StartMark; to = clip.EndMark; p = eased; }
-
-            return (from.Zoom + (to.Zoom - from.Zoom) * p,
-                    from.CenterX + (to.CenterX - from.CenterX) * p,
-                    from.CenterY + (to.CenterY - from.CenterY) * p);
+            return MotionPath.Sample(
+                clip.StartMark, clip.MidMark, clip.EndMark, clip.MidTime, clip.CurveProfile, progress);
         }
+
 
         private static void Place(Microsoft.UI.Xaml.Shapes.Rectangle shape, ScreenRect r)
         {
@@ -1836,29 +1821,8 @@ namespace VideoDirector.Models
             if (op == null || transform == null) return;
             double progress = Math.Clamp(rawProgress, 0, 1);
 
-            double eased = progress;
-            if (op.CurveProfile == CurveProfile.Bezier)
-                eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2;
-            else if (op.CurveProfile == CurveProfile.DirectorsArc)
-                eased = 1 - Math.Pow(1 - progress, 3);
-
-            double zoom, cx, cy;
-            if (op.MidMark != null)
-            {
-                // Two segments: Start -> Mid over the first half, Mid -> End over the second.
-                var (from, to, p) = eased < 0.5
-                    ? (op.StartMark, op.MidMark, eased * 2)
-                    : (op.MidMark, op.EndMark, (eased - 0.5) * 2);
-                zoom = from.Zoom + (to.Zoom - from.Zoom) * p;
-                cx = from.CenterX + (to.CenterX - from.CenterX) * p;
-                cy = from.CenterY + (to.CenterY - from.CenterY) * p;
-            }
-            else
-            {
-                zoom = op.StartMark.Zoom + (op.EndMark.Zoom - op.StartMark.Zoom) * eased;
-                cx = op.StartMark.CenterX + (op.EndMark.CenterX - op.StartMark.CenterX) * eased;
-                cy = op.StartMark.CenterY + (op.EndMark.CenterY - op.StartMark.CenterY) * eased;
-            }
+            var (zoom, cx, cy) = MotionPath.Sample(
+                op.StartMark, op.MidMark, op.EndMark, op.MidTime, op.CurveProfile, progress);
 
             var (scale, tx, ty) = Framing.ToTransform(zoom, cx, cy, surfaceW, surfaceH);
 

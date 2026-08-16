@@ -401,6 +401,34 @@ namespace VideoDirector.Models
             }
         }
 
+        // Where the Mid keyframe sits in the clip, as a fraction of its duration. Used to be
+        // pinned to the exact middle, so a move could not dwell on one side or the other.
+        private double _midTime = 0.5;
+        public double MidTime
+        {
+            get => _midTime;
+            set
+            {
+                if (SetProperty(ref _midTime, Math.Clamp(value, 0.01, 0.99)))
+                {
+                    OnPropertyChanged(nameof(MidTimePercent));
+                    OnPropertyChanged(nameof(MidTimePercentText));
+                }
+            }
+        }
+
+        // Slider-friendly view of MidTime. The slider works in whole percent, which is finer than
+        // anyone can place a keyframe by eye and keeps the value readable.
+        [JsonIgnore]
+        public double MidTimePercent
+        {
+            get => Math.Round(_midTime * 100);
+            set => MidTime = value / 100.0;
+        }
+
+        [JsonIgnore]
+        public string MidTimePercentText => $"{MidTimePercent:F0}%";
+
         private SpatialMark? _midMark;
         public SpatialMark? MidMark
         {
@@ -444,6 +472,7 @@ namespace VideoDirector.Models
             StartMark.CenterY = 0.5;
 
             MidMark = null;
+            MidTime = 0.5;
 
             EndMark.Zoom = 1.0;
             EndMark.CenterX = 0.5;

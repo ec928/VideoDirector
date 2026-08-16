@@ -1340,18 +1340,25 @@ namespace VideoDirector.Views
                 _playbackEngine?.SetResultView(tb.IsChecked ?? false);
         }
 
-        // Right-click the Mid button to clear it (back to a two-point Start -> End motion).
+        // Explicit Mid removal. Right-clicking the Mid button still works, but it was the ONLY
+        // way to do this, which made it undiscoverable.
+        private void RemoveMid_Click(object? sender, RoutedEventArgs e) => RemoveMid();
+
         private void ClearMid_RightTapped(object? sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
         {
-            var op = ViewModel.SelectedClip;
-            if (op != null)
-            {
-                op.MidMark = null;
-                if (ViewModel.CurrentEditTarget == EditTarget.Mid) ViewModel.CurrentEditTarget = EditTarget.Start;
-                ViewModel.RecordIfChanged();
-                _playbackEngine?.RefreshEditView();
-            }
+            RemoveMid();
             e.Handled = true;
+        }
+
+        private void RemoveMid()
+        {
+            var op = ViewModel.SelectedClip;
+            if (op == null || op.MidMark == null) return;
+            op.MidMark = null;
+            op.MidTime = 0.5;
+            if (ViewModel.CurrentEditTarget == EditTarget.Mid) ViewModel.CurrentEditTarget = EditTarget.Start;
+            ViewModel.RecordIfChanged();
+            _playbackEngine?.RefreshEditView();
         }
 
         private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

@@ -62,7 +62,7 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
   * The drawn span is content **plus runway**, never the content exactly, so a clip can always be dragged past the current end to extend the project.
   * Drags **preview and commit on drop** (§5.7); Esc cancels. External file drags highlight the destination lane. Right-click gives a lane-scoped menu whose clip actions disable when no clip is under the cursor.
   * Magnetic snapping (8px threshold), and Ctrl+drag scrubs from anywhere.
-* **Inspector Panel & Telemetry HUD (Right Panel)**: Dedicated property editor displaying human-readable formatted timecodes (`00:00:00.00`), speed, transitions, Ken Burns keyframe capture buttons (Start/Mid/End), and easing profiles. PiP coordinates and real-time operational readouts are cleanly consolidated into a compact Telemetry HUD for maximum workflow clarity.
+* **Inspector Panel & Telemetry HUD (Right Panel)**: Dedicated property editor displaying human-readable formatted timecodes (`00:00:00.00`), speed, transitions, the Start/Mid/End keyframe pickers, the Mid keyframe's position within the clip, and motion pacing. PiP coordinates and real-time operational readouts are cleanly consolidated into a compact Telemetry HUD for maximum workflow clarity.
 * **Transport Pill (Bottom-Center Floating)**: Hosts core transport controls: Play/Pause, Previous/Next frame, range/trim sliders, global playback speed, loop toggle, and inspector docking controls.
 
 ---

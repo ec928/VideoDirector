@@ -443,7 +443,7 @@ the true framing at every point.
 
 ---
 
-### D3 — Mid keyframe timing ⬜
+### D3 — Mid keyframe timing ✅ **Done**
 
 **Why.** Mid is hard-wired to the midpoint, both in the interpolation split
 (`ApplyMarksAtProgress`) and in the Edit seek (`EnterEditMode`). It is cleared by **right-clicking

@@ -129,6 +129,30 @@
                                             <Button Content="Mid" Width="56" FontWeight="SemiBold" Click="PickMid_Click" RightTapped="ClearMid_RightTapped" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Frame the Mid keyframe (adds one if absent; right-click to remove)" Foreground="DeepSkyBlue" />
                                             <Button Content="End" Width="56" FontWeight="SemiBold" Click="PickEnd_Click" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Frame the End keyframe" Foreground="RoyalBlue" />
                                         </StackPanel>
+                                        <!-- Where the Mid keyframe sits in the clip. It used to be
+                                             pinned to the exact middle, so a move could not dwell on
+                                             one side. Only meaningful once a Mid exists. -->
+                                        <StackPanel Spacing="4"
+                                                    Visibility="{Binding SelectedClip.MidMark, Converter={StaticResource NullToVisConverter}}">
+                                            <Grid>
+                                                <TextBlock Text="Mid position" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
+                                                <TextBlock Text="{Binding SelectedClip.MidTimePercentText}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" HorizontalAlignment="Right" />
+                                            </Grid>
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <Slider Grid.Column="0" Minimum="1" Maximum="99" StepFrequency="1"
+                                                        Value="{Binding SelectedClip.MidTimePercent, Mode=TwoWay}"
+                                                        IsEnabled="{Binding IsEditMode}"
+                                                        AutomationProperties.Name="Mid keyframe position"
+                                                        ToolTipService.ToolTip="Where the Mid keyframe sits within the clip" />
+                                                <Button Grid.Column="1" Click="RemoveMid_Click" IsEnabled="{Binding IsEditMode}"
+                                                        Width="30" Height="30" Padding="0" CornerRadius="4"
+                                                        AutomationProperties.Name="Remove Mid keyframe"
+                                                        ToolTipService.ToolTip="Remove the Mid keyframe (back to a straight Start to End move)">
+                                                    <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                                                </Button>
+                                            </Grid>
+                                        </StackPanel>
                                         <ToggleButton x:Name="ResultViewToggle" Click="ResultView_Click" IsEnabled="{Binding IsEditMode}"
                                                       HorizontalAlignment="Stretch" AutomationProperties.Name="Result view"
                                                       ToolTipService.ToolTip="Show what the viewer sees at the playhead, instead of the framing rectangles">
@@ -196,11 +220,12 @@
                                     <StackPanel Spacing="8">
                                         <!-- Curve Profile -->
                                         <StackPanel Spacing="4">
-                                            <TextBlock Text="Curve Profile" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            <ComboBox SelectedIndex="{Binding SelectedClip.CurveProfileIndex, Mode=TwoWay, FallbackValue=0}" HorizontalAlignment="Stretch">
-                                                <x:String>Linear</x:String>
-                                                <x:String>Bezier</x:String>
-                                                <x:String>DirectorsArc</x:String>
+                                            <TextBlock Text="Motion pacing" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <ComboBox SelectedIndex="{Binding SelectedClip.CurveProfileIndex, Mode=TwoWay, FallbackValue=0}" HorizontalAlignment="Stretch"
+                                                      ToolTipService.ToolTip="How the move is paced across the clip">
+                                                <x:String>Linear — even throughout</x:String>
+                                                <x:String>Ease in and out — slow at both ends</x:String>
+                                                <x:String>Ease out — quick start, gentle settle</x:String>
                                             </ComboBox>
                                         </StackPanel>
                                         
