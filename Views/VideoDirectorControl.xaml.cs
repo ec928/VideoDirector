@@ -116,15 +116,47 @@ namespace VideoDirector.Views
 
         private void TimelineBar_SizeChanged(object? sender, SizeChangedEventArgs e) => BuildTimelineBar();
 
-        // Timeline layout: a scrub ruler on top, then the spine row, then the overlay row — all on
-        // one shared px=seconds scale (§7E). Scrub on the ruler; drag clips in their rows.
-        private const double RulerH = 14, RowSpineY = 16, RowOvY = 34, BlockH = 16, RowPitch = 18;
+        // ---- Timeline row geometry (§7E) ---------------------------------------------------
+        // A scrub ruler on top, then one lane per track, all on one shared px=seconds scale.
+        // Scrub on the ruler; drag clips in their lanes.
+        //
+        // THE TOP LANE IS THE TOPMOST COMPOSITING LAYER (invariant §5.4: z-order is track index).
+        // So lanes run Track 4, Track 3, Track 2, Track 1 top-to-bottom, matching both the
+        // compositor and standard NLE convention — dragging a clip up moves it up the stack.
+        //
+        // Every conversion between a track and a y coordinate goes through the four helpers below.
+        // This maths used to be inlined at seven call sites, each free to drift from the others.
+        private const double RulerH = 14, RowTop = 16, BlockH = 16, RowPitch = 18;
 
-        // Bar height grows with the number of upper tracks. The last row is BlockH tall starting at
-        // (count-1)*RowPitch, so allow for that plus a small bottom margin — otherwise the bottom
-        // track gets clipped by a few pixels.
-        private double TimelineBarHeight =>
-            RowOvY + (Math.Max(1, ViewModel.OverlayTracks.Count) - 1) * RowPitch + BlockH + 6;
+        // Track index convention used throughout: -1 = the spine (Track 1); 0..n-1 = overlay
+        // tracks (Track 2..n+1). Lane index is a pure display position, 0 = topmost lane.
+        private int LaneCount => 1 + ViewModel.OverlayTracks.Count;
+
+        private int LaneOfTrack(int trackIndex)
+        {
+            int overlays = ViewModel.OverlayTracks.Count;
+            return trackIndex < 0 ? overlays : overlays - 1 - trackIndex;
+        }
+
+        private int TrackOfLane(int lane)
+        {
+            int overlays = ViewModel.OverlayTracks.Count;
+            return lane >= overlays ? -1 : overlays - 1 - lane;
+        }
+
+        private double RowYForTrack(int trackIndex) => RowTop + LaneOfTrack(trackIndex) * RowPitch;
+
+        // True when y is in the scrub ruler above the lanes.
+        private bool IsRulerY(double y) => y < RowTop;
+
+        // y -> track index. Clamped, so a point above or below the lanes resolves to the nearest
+        // one rather than to nothing. Callers that need to distinguish the ruler check IsRulerY.
+        private int TrackAtY(double y)
+            => TrackOfLane(Math.Clamp((int)((y - RowTop) / RowPitch), 0, Math.Max(0, LaneCount - 1)));
+
+        // Bar height covers every lane plus a small bottom margin, otherwise the bottom lane gets
+        // clipped by a few pixels.
+        private double TimelineBarHeight => RowTop + Math.Max(1, LaneCount) * RowPitch + 6;
 
         private void BuildTimelineBar()
         {
@@ -149,9 +181,9 @@ namespace VideoDirector.Views
             // Per-lane bands: a faint tint of the track's own colour distinguishes the lanes by
             // colour rather than by height (space is at a premium), and ties each lane to its
             // identity colour. Drawn first so blocks/gridlines paint over them.
-            DrawRowBand(RowSpineY, w, TrackPalette.Spine);
+            DrawRowBand(RowYForTrack(-1), w, TrackPalette.Spine);
             for (int ti = 0; ti < ViewModel.OverlayTracks.Count; ti++)
-                DrawRowBand(RowOvY + ti * RowPitch, w, TrackPalette.Overlay(ti));
+                DrawRowBand(RowYForTrack(ti), w, TrackPalette.Overlay(ti));
 
             // Faint ruler strip marks the scrub zone.
             var ruler = new Microsoft.UI.Xaml.Shapes.Rectangle
@@ -189,6 +221,7 @@ namespace VideoDirector.Views
             var spineColor = TrackPalette.Spine;
             var transColor = Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x64, 0x74, 0x8B);
             bool spineGhost = _timelineMovingClip && _dragIsSpine && _dragClip != null;
+            double spineY = RowYForTrack(-1);
 
             if (!spineGhost)
             {
@@ -197,10 +230,10 @@ namespace VideoDirector.Views
                     var clip = ViewModel.TimelineNodes[i];
                     double x = ViewModel.GetSpineClipStart(i).TotalSeconds * _timelinePxPerSec;
                     double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                    AddTimelineBlock(x, RowSpineY, cw, BlockH, spineColor, clip);
+                    AddTimelineBlock(x, spineY, cw, BlockH, spineColor, clip);
                     double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
                     if (tw > 0.5)
-                        AddTimelineBlock(x + cw, RowSpineY, tw, BlockH, transColor);
+                        AddTimelineBlock(x + cw, spineY, tw, BlockH, transColor);
                 }
             }
             else
@@ -216,22 +249,22 @@ namespace VideoDirector.Views
                     if (clip == _dragClip) continue;
                     if (drawn == _dragInsertIndex) x += dragW;   // open the drop gap
                     double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                    AddTimelineBlock(x, RowSpineY, cw, BlockH, spineColor, clip);
+                    AddTimelineBlock(x, spineY, cw, BlockH, spineColor, clip);
                     double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
-                    if (tw > 0.5) AddTimelineBlock(x + cw, RowSpineY, tw, BlockH, transColor);
+                    if (tw > 0.5) AddTimelineBlock(x + cw, spineY, tw, BlockH, transColor);
                     x += cw + tw;
                     drawn++;
                 }
 
                 double ghostX = _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec;
-                AddTimelineBlock(ghostX, RowSpineY, dragW, BlockH,
+                AddTimelineBlock(ghostX, spineY, dragW, BlockH,
                     Microsoft.UI.ColorHelper.FromArgb(0xCC, 0x93, 0xC5, 0xFD), _dragClip); // ghost
             }
 
-            // One row per upper track (§7B) — same loop for 1 track or 3, each in its own colour.
+            // One lane per upper track (§7B) — same loop for 1 track or 3, each in its own colour.
             for (int ti = 0; ti < ViewModel.OverlayTracks.Count; ti++)
             {
-                double rowY = RowOvY + ti * RowPitch;
+                double rowY = RowYForTrack(ti);
                 var trackColor = TrackPalette.Overlay(ti);
                 foreach (var ov in ViewModel.OverlayTracks[ti].Clips)
                 {
@@ -293,16 +326,18 @@ namespace VideoDirector.Views
             return m > 0 ? $"{m}:{s:00}" : $"{s}s";
         }
 
-        // "Track 1".."Track 4" in the left gutter, vertically aligned to each row.
+        // "Track 1".."Track 4" in the left gutter, vertically aligned to each lane. Drawn in track
+        // order but positioned by RowYForTrack, so they land in flipped display order (Track 4 at
+        // the top) without the loop needing to know that.
         private void BuildTrackLabels()
         {
             if (TimelineLabels == null) return;
             TimelineLabels.Children.Clear();
             TimelineLabels.Height = TimelineBarHeight;
 
-            AddTrackLabel("Track 1", RowSpineY, TrackPalette.Spine, -1);        // -1 = spine
+            AddTrackLabel("Track 1", RowYForTrack(-1), TrackPalette.Spine, -1);        // -1 = spine
             for (int ti = 0; ti < ViewModel.OverlayTracks.Count; ti++)
-                AddTrackLabel("Track " + (ti + 2), RowOvY + ti * RowPitch, TrackPalette.Overlay(ti), ti);
+                AddTrackLabel("Track " + (ti + 2), RowYForTrack(ti), TrackPalette.Overlay(ti), ti);
         }
 
         // Each track label is a button: click it to load a video into that track via a file picker
@@ -557,10 +592,11 @@ namespace VideoDirector.Views
             _timelineMovingClip = true;
 
             // Live transfer between Track 1 (Spine) and Track 2/3/4 (Overlays)
-            if (_dragIsSpine && p.Y >= RowOvY && ViewModel.TimelineNodes.Count > 1)
+            int hoverTrack = TrackAtY(p.Y);
+            if (_dragIsSpine && hoverTrack >= 0 && ViewModel.TimelineNodes.Count > 1)
             {
                 ViewModel.TimelineNodes.Remove(_dragClip);
-                int targetIndex = Math.Clamp((int)((p.Y - RowOvY) / RowPitch), 0, ViewModel.OverlayTracks.Count - 1);
+                int targetIndex = Math.Clamp(hoverTrack, 0, ViewModel.OverlayTracks.Count - 1);
                 var targetTrk = ViewModel.OverlayTracks[targetIndex];
                 double newStart = Math.Max(0, (p.X / _timelinePxPerSec) - _dragGrabOffsetSec);
                 _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
@@ -568,7 +604,7 @@ namespace VideoDirector.Views
                 targetTrk.ResolveOverlaps();
                 _dragIsSpine = false;
             }
-            else if (!_dragIsSpine && p.Y < RowOvY)
+            else if (!_dragIsSpine && hoverTrack < 0)
             {
                 var currentTrk = TrackOf(_dragClip);
                 currentTrk?.Clips.Remove(_dragClip);
@@ -906,27 +942,26 @@ namespace VideoDirector.Views
             _playbackEngine?.SeekCompositeToStoryTime(TimeSpan.FromSeconds(sec));
         }
 
-        // Which clip (and its start-second) sits under a point in the clip rows, if any.
+        // Which clip (and its start-second) sits under a point in the clip lanes, if any.
+        // The ruler owns no clips — a press there scrubs.
         private (CinematicOperation clip, bool isSpine, double startSec) HitClip(Windows.Foundation.Point p)
         {
-            if (_timelinePxPerSec <= 0) return (null, false, 0);
+            if (_timelinePxPerSec <= 0 || IsRulerY(p.Y)) return (null, false, 0);
             var t = TimeSpan.FromSeconds(Math.Max(0, p.X / _timelinePxPerSec));
+            int track = TrackAtY(p.Y);
 
-            if (p.Y >= RowSpineY && p.Y < RowSpineY + BlockH && ViewModel.TimelineNodes.Count > 0)
+            if (track < 0)
             {
+                if (ViewModel.TimelineNodes.Count == 0) return (null, false, 0);
                 int idx = ViewModel.GetTimelineIndexForStoryTime(t);
                 if (idx >= 0 && idx < ViewModel.TimelineNodes.Count)
                     return (ViewModel.TimelineNodes[idx], true, ViewModel.GetSpineClipStart(idx).TotalSeconds);
             }
-            else if (p.Y >= RowOvY)
+            else if (track < ViewModel.OverlayTracks.Count)
             {
-                int ti = (int)((p.Y - RowOvY) / RowPitch);   // which upper-track row
-                if (ti >= 0 && ti < ViewModel.OverlayTracks.Count)
-                {
-                    foreach (var ov in ViewModel.OverlayTracks[ti].Clips)
-                        if (t >= ov.StartTime && t < ov.StartTime + ov.OpDuration)
-                            return (ov, false, ov.StartTimeSeconds);
-                }
+                foreach (var ov in ViewModel.OverlayTracks[track].Clips)
+                    if (t >= ov.StartTime && t < ov.StartTime + ov.OpDuration)
+                        return (ov, false, ov.StartTimeSeconds);
             }
             return (null, false, 0);
         }
@@ -956,9 +991,9 @@ namespace VideoDirector.Views
         {
             if (_dragClip == null || _timelinePxPerSec <= 0) return;
 
-            // Vertical: which track row is the cursor over?
-            int targetIndex = p.Y >= RowOvY ? (int)((p.Y - RowOvY) / RowPitch) : 0;
-            targetIndex = Math.Clamp(targetIndex, 0, ViewModel.OverlayTracks.Count - 1);
+            // Vertical: which track lane is the cursor over? (Spine transfer is handled by the
+            // caller before we get here, so a spine-lane hover just clamps to the nearest overlay.)
+            int targetIndex = Math.Clamp(TrackAtY(p.Y), 0, ViewModel.OverlayTracks.Count - 1);
             var target = ViewModel.OverlayTracks[targetIndex];
             var current = TrackOf(_dragClip);
             bool trackChanged = current != null && !ReferenceEquals(current, target);
@@ -986,7 +1021,7 @@ namespace VideoDirector.Views
             else if (_clipBlockElements.TryGetValue(_dragClip, out var elements))
             {
                 double newX = newStart * _timelinePxPerSec;
-                double rowY = RowOvY + targetIndex * RowPitch;
+                double rowY = RowYForTrack(targetIndex);
                 foreach (var el in elements)
                 {
                     Canvas.SetLeft(el, el is StackPanel ? newX + 6 : newX);
@@ -1841,13 +1876,11 @@ namespace VideoDirector.Views
             }
         }
 
-        // Which track a given y in the timeline belongs to: the Track 1 row (and the ruler above
-        // it) is the spine; the rows below are the overlay tracks.
+        // Human-readable name of the track a given y falls in, for the drag caption.
         private string TrackNameAt(double y)
         {
-            if (y < RowOvY) return "Track 1";
-            int i = Math.Clamp((int)((y - RowOvY) / RowPitch), 0, Math.Max(0, ViewModel.OverlayTracks.Count - 1));
-            return "Track " + (i + 2);
+            int track = TrackAtY(y);
+            return track < 0 ? "Track 1" : "Track " + (track + 2);
         }
 
         // Drop a video/image onto the timeline strip to add it. Which row you drop on decides the
@@ -1863,11 +1896,12 @@ namespace VideoDirector.Views
                     ? TimeSpan.FromSeconds(Math.Max(0, drop.X / _timelinePxPerSec))
                     : ViewModel.CurrentStoryTime;
 
-                // The row you drop on decides the destination: the Track 1 row (and the ruler
-                // above it) adds to the spine; the rows below add to that overlay track.
-                bool toSpine = drop.Y < RowOvY;
-                int trackIndex = toSpine ? 0 : (int)((drop.Y - RowOvY) / RowPitch);
-                trackIndex = Math.Clamp(trackIndex, 0, Math.Max(0, ViewModel.OverlayTracks.Count - 1));
+                // The lane you drop on decides the destination. A drop above or below the lanes
+                // resolves to the nearest one (TrackAtY clamps) rather than silently defaulting
+                // to the spine, which is what the old ruler-is-Track-1 rule did.
+                int dropTrack = TrackAtY(drop.Y);
+                bool toSpine = dropTrack < 0;
+                int trackIndex = Math.Clamp(toSpine ? 0 : dropTrack, 0, Math.Max(0, ViewModel.OverlayTracks.Count - 1));
 
                 var items = await e.DataView.GetStorageItemsAsync();
                 var spinePaths = new System.Collections.Generic.List<string>();
