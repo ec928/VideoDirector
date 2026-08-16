@@ -52,13 +52,15 @@ Settled 2026-08-16. Recorded so they are not re-litigated in a later session.
 | Snapping shortcut | **N**, because S was already Split and the magnet tooltip wrongly claimed S. | A2 |
 | Adding a clip | **Selects** it rather than diving into Edit, matching the reasoning `AddOverlayAsync` already applied to overlays. | B1 |
 | Leaving Edit | **Keeps** the selection. It had to clear it before, or selecting would immediately re-enter Edit. | B1 |
+| Track defaults | Track 0 ships `IsGapless`, full-frame placement and full volume; tracks 1–3 ship free, corner PiP and muted. Defaults only — every one can be changed per track or per clip. | C2a |
+| Transitions on upper tracks | **Deferred to C2d.** The model and timeline support a transition on any clip; the compositor still only renders them through track 0's A/B player pair. | C2b |
 
 ### Still open
 
 Decide when the owning phase starts, not before:
 
-- **Do Mute / Hide affect export, or preview only?** Recommendation: honoured in export — the
-  alternative surprises people at render time. (Phase C3)
+- **Do Mute / Hide affect export, or preview only?** Currently **preview only** — C2b wires them
+  into the live compositor; the exporter does not read them yet. (Phase C3)
 - **Does Lock block selection, or only mutation?** Recommendation: mutation only, so a locked clip
   can still be inspected. (Phase C3)
 - **Framing migration tolerance**: identity marks convert exactly; non-identity marks from existing
@@ -95,6 +97,9 @@ B1  Selection ≠ Edit mode             ─── first behavioural change (deci
       │
       └─ D5  Placement presets + Reset      (needs C2)
 ```
+
+`C2d` (canvas drag for track 0's box, and on-demand second surfaces so transitions render on any
+track) is the remaining piece of C2 — see the C2 section.
 
 `D4` can be pulled forward at any point — it is independent of the framing work and addresses the
 day-to-day confusion of problem 3.
@@ -253,7 +258,7 @@ dragged past the current project end on any track.
 
 ---
 
-### C2 — Unify track collections ⬜
+### C2 — Unify track collections ✅ **Done** (C2a/C2b/C2c)
 
 The structural block. Everything else in Group C and `D5` depends on it.
 
