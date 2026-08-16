@@ -460,7 +460,7 @@ Ease In-Out with a small curve glyph.
 
 ---
 
-### D4 — Retime block ⬜
+### D4 — Retime block ✅ **Done**
 
 Independent of D1–D3. Implements decision 2.
 

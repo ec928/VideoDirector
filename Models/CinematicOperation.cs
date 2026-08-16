@@ -86,9 +86,8 @@ namespace VideoDirector.Models
             set
             {
                 if (_isUpdatingTiming) { SetProperty(ref _videoStartTime, value); return; }
-                _isUpdatingTiming = true;
-                try { NormalizeTrim(value.TotalSeconds, _videoEndTime.TotalSeconds, changedStart: true); }
-                finally { _isUpdatingTiming = false; }
+                _videoStartTime = value;
+                Retime(RetimeField.In);
             }
         }
 
@@ -99,9 +98,8 @@ namespace VideoDirector.Models
             set
             {
                 if (_isUpdatingTiming) { SetProperty(ref _videoEndTime, value); return; }
-                _isUpdatingTiming = true;
-                try { NormalizeTrim(_videoStartTime.TotalSeconds, value.TotalSeconds, changedStart: false); }
-                finally { _isUpdatingTiming = false; }
+                _videoEndTime = value;
+                Retime(RetimeField.Out);
             }
         }
 
@@ -117,14 +115,10 @@ namespace VideoDirector.Models
                 if (SetProperty(ref _sourceDuration, value))
                 {
                     OnPropertyChanged(nameof(SourceDurationSeconds));
+                    OnPropertyChanged(nameof(SourceLengthSummary));
                     // Learning the true source length (e.g. backfilled after the media opens) can
-                    // retroactively invalidate a trim; re-clamp so the window stays inside it.
-                    if (!_isUpdatingTiming)
-                    {
-                        _isUpdatingTiming = true;
-                        try { NormalizeTrim(_videoStartTime.TotalSeconds, _videoEndTime.TotalSeconds, changedStart: false); }
-                        finally { _isUpdatingTiming = false; }
-                    }
+                    // retroactively invalidate a trim; re-solve so the window stays inside it.
+                    Retime(RetimeField.SourceLength);
                 }
             }
         }
@@ -139,9 +133,8 @@ namespace VideoDirector.Models
             set
             {
                 if (_isUpdatingTiming) { SetProperty(ref _opDuration, value); return; }
-                _isUpdatingTiming = true;
-                try { ApplyDurationEdit(value.TotalSeconds); }
-                finally { _isUpdatingTiming = false; }
+                _opDuration = value;
+                Retime(RetimeField.Duration);
             }
         }
 
@@ -151,105 +144,119 @@ namespace VideoDirector.Models
             get => _playbackSpeed;
             set
             {
-                if (SetProperty(ref _playbackSpeed, value < 0 ? 0 : value))
-                {
-                    if (!_isUpdatingTiming)
-                    {
-                        _isUpdatingTiming = true;
-                        try { RecomputeOpDurationFromTrim(); }
-                        finally { _isUpdatingTiming = false; }
-                    }
-                    OnPropertyChanged(nameof(HasModifications));
-                }
+                if (_isUpdatingTiming) { SetProperty(ref _playbackSpeed, value < 0 ? 0 : value); return; }
+
+                // Speed zero has always meant "freeze this frame". It now selects the Still mode
+                // explicitly, rather than being a hidden second meaning of a number.
+                if (value <= 0) { RetimeMode = RetimeMode.Still; return; }
+                if (_retimeMode == RetimeMode.Still) RetimeMode = RetimeMode.HoldSource;
+
+                _playbackSpeed = value;
+                OnPropertyChanged(nameof(PlaybackSpeed));
+                OnPropertyChanged(nameof(IsStill));
+                Retime(RetimeField.Speed);
             }
         }
 
-        // Enforces the trim invariant. Whichever endpoint the user just changed is honoured; the
-        // other yields if they would cross (or come within MinClipSeconds). Then OpDuration is
-        // recomputed from the real window so the timeline block can never lie about its length.
-        private void NormalizeTrim(double startSec, double endSec, bool changedStart)
+        // ---- Retiming ------------------------------------------------------------------------
+        // All four values go through RetimeSolver, the single place that knows
+        // Duration = (Out - In) / Speed and which value each mode derives. There used to be three
+        // bespoke methods here (NormalizeTrim, RecomputeOpDurationFromTrim, ApplyDurationEdit),
+        // each implementing part of the rule with its own clamping.
+
+        private RetimeMode _retimeMode = RetimeMode.HoldSource;
+        public RetimeMode RetimeMode
         {
-            double src = _sourceDuration.TotalSeconds > 0 ? _sourceDuration.TotalSeconds : double.PositiveInfinity;
-            double start = Math.Clamp(startSec, 0, src);
-            double end = Math.Clamp(endSec, 0, src);
-
-            if (end - start < MinClipSeconds)
+            get => _retimeMode;
+            set
             {
-                if (changedStart)
-                {
-                    end = Math.Min(src, start + MinClipSeconds);
-                    start = Math.Max(0, end - MinClipSeconds);
-                }
-                else
-                {
-                    start = Math.Max(0, end - MinClipSeconds);
-                    end = Math.Min(src, start + MinClipSeconds);
-                }
+                if (!SetProperty(ref _retimeMode, value)) return;
+                Apply(RetimeSolver.OnModeChanged(CurrentRetime, value, _sourceDuration.TotalSeconds));
+                RaiseRetimeInfo();
             }
+        }
 
-            if (Math.Abs(start - _videoStartTime.TotalSeconds) > 1e-9)
+        [JsonIgnore]
+        public RetimeState CurrentRetime => new RetimeState(
+            _videoStartTime.TotalSeconds, _videoEndTime.TotalSeconds,
+            _playbackSpeed, _opDuration.TotalSeconds);
+
+        // The value this clip's mode computes rather than accepts — the inspector greys it out and
+        // labels it a result, instead of offering it as an equal input that mysteriously moves.
+        [JsonIgnore] public bool IsDurationDerived => RetimeSolver.DerivedField(_retimeMode) == RetimeField.Duration;
+        [JsonIgnore] public bool IsSpeedDerived => RetimeSolver.DerivedField(_retimeMode) == RetimeField.Speed;
+        [JsonIgnore] public bool IsDurationEditable => !IsDurationDerived;
+        [JsonIgnore] public bool IsSpeedEditable => !IsSpeedDerived && _retimeMode != RetimeMode.Still;
+        [JsonIgnore] public bool IsStillMode => _retimeMode == RetimeMode.Still;
+        [JsonIgnore] public string RetimeExplanation => RetimeSolver.Explain(_retimeMode);
+
+        // Field labels say outright when a value is a result rather than an input, so the number
+        // moving on its own is expected instead of mysterious.
+        [JsonIgnore] public string SpeedLabel => IsSpeedDerived ? "Speed (worked out)" : "Speed";
+        [JsonIgnore] public string DurationLabel => IsDurationDerived ? "Duration (worked out)" : "Duration";
+
+        // The source length as plain prose. It used to be a disabled spin box, which looks like an
+        // input you are not allowed to touch rather than a fact about the file.
+        [JsonIgnore]
+        public string SourceLengthSummary => _sourceDuration.TotalSeconds > 0
+            ? $"Source file is {_sourceDuration.TotalSeconds:0.#}s long."
+            : "Source length not known yet.";
+
+        [JsonIgnore]
+        public int RetimeModeIndex
+        {
+            get => (int)_retimeMode;
+            set => RetimeMode = (RetimeMode)Math.Clamp(value, 0, 2);
+        }
+
+        private void Retime(RetimeField changed)
+        {
+            if (_isUpdatingTiming) return;
+            _isUpdatingTiming = true;
+            try { Apply(RetimeSolver.Reconcile(CurrentRetime, changed, _retimeMode, _sourceDuration.TotalSeconds)); }
+            finally { _isUpdatingTiming = false; }
+        }
+
+        // Write a solved state back, notifying only what actually moved.
+        private void Apply(RetimeState s)
+        {
+            if (Math.Abs(s.In - _videoStartTime.TotalSeconds) > 1e-9)
             {
-                _videoStartTime = TimeSpan.FromSeconds(start);
+                _videoStartTime = TimeSpan.FromSeconds(s.In);
                 OnPropertyChanged(nameof(VideoStartTime));
             }
-            if (Math.Abs(end - _videoEndTime.TotalSeconds) > 1e-9)
+            if (Math.Abs(s.Out - _videoEndTime.TotalSeconds) > 1e-9)
             {
-                _videoEndTime = TimeSpan.FromSeconds(end);
+                _videoEndTime = TimeSpan.FromSeconds(s.Out);
                 OnPropertyChanged(nameof(VideoEndTime));
             }
-            RecomputeOpDurationFromTrim();
-            OnPropertyChanged(nameof(HasModifications));
-        }
-
-        private void RecomputeOpDurationFromTrim()
-        {
-            if (_playbackSpeed <= 0) return; // still: OpDuration is an independent hold time
-            double dur = (_videoEndTime - _videoStartTime).TotalSeconds / _playbackSpeed;
-            if (dur < MinClipSeconds) dur = MinClipSeconds;
-            if (Math.Abs(dur - _opDuration.TotalSeconds) > 1e-9)
+            if (Math.Abs(s.Speed - _playbackSpeed) > 1e-9)
             {
-                _opDuration = TimeSpan.FromSeconds(dur);
-                OnPropertyChanged(nameof(OpDuration));
+                _playbackSpeed = s.Speed;
+                OnPropertyChanged(nameof(PlaybackSpeed));
+                OnPropertyChanged(nameof(IsStill));
             }
-        }
-
-        // Editing the timeline Duration re-trims the OUT point (In and Speed fixed): "make this
-        // 10s long" pulls exactly 10s x speed of source from the In point. This is what makes a
-        // precise segment extractable from a very long source by typing a number. For a still
-        // (speed 0) there is no source window, so Duration is set directly as the hold time.
-        private void ApplyDurationEdit(double durationSec)
-        {
-            double d = Math.Max(MinClipSeconds, durationSec);
-
-            if (_playbackSpeed <= 0)
+            if (Math.Abs(s.Duration - _opDuration.TotalSeconds) > 1e-9)
             {
-                if (Math.Abs(d - _opDuration.TotalSeconds) > 1e-9)
-                {
-                    _opDuration = TimeSpan.FromSeconds(d);
-                    OnPropertyChanged(nameof(OpDuration));
-                }
-                OnPropertyChanged(nameof(HasModifications));
-                return;
-            }
-
-            double src = _sourceDuration.TotalSeconds > 0 ? _sourceDuration.TotalSeconds : double.PositiveInfinity;
-            double desiredEnd = _videoStartTime.TotalSeconds + d * _playbackSpeed;
-            double end = Math.Clamp(desiredEnd, _videoStartTime.TotalSeconds + MinClipSeconds, src);
-            if (Math.Abs(end - _videoEndTime.TotalSeconds) > 1e-9)
-            {
-                _videoEndTime = TimeSpan.FromSeconds(end);
-                OnPropertyChanged(nameof(VideoEndTime));
-            }
-            // Reflect the ACTUAL (possibly source-capped) window, keeping the displayed number honest.
-            double actual = (end - _videoStartTime.TotalSeconds) / _playbackSpeed;
-            if (actual < MinClipSeconds) actual = MinClipSeconds;
-            if (Math.Abs(actual - _opDuration.TotalSeconds) > 1e-9)
-            {
-                _opDuration = TimeSpan.FromSeconds(actual);
+                _opDuration = TimeSpan.FromSeconds(s.Duration);
                 OnPropertyChanged(nameof(OpDuration));
             }
             OnPropertyChanged(nameof(HasModifications));
         }
+
+        private void RaiseRetimeInfo()
+        {
+            OnPropertyChanged(nameof(IsDurationDerived));
+            OnPropertyChanged(nameof(IsSpeedDerived));
+            OnPropertyChanged(nameof(IsDurationEditable));
+            OnPropertyChanged(nameof(IsSpeedEditable));
+            OnPropertyChanged(nameof(IsStillMode));
+            OnPropertyChanged(nameof(RetimeExplanation));
+            OnPropertyChanged(nameof(RetimeModeIndex));
+            OnPropertyChanged(nameof(SpeedLabel));
+            OnPropertyChanged(nameof(DurationLabel));
+        }
+
 
         // --- Upper-track (Track 2/3) clip properties ---
         // Track 1 ignores these (its timeline position is computed sequentially). Upper

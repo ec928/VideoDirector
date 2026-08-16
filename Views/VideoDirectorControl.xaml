@@ -161,43 +161,32 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 2. Time & Trimming -->
-                                <Expander Header="Time &amp; Trimming" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0">
-                                    <StackPanel Spacing="8">
-                                        <!-- Timeline Position -->
+                                <!-- 2. Time & Retiming.
+                                     Source window, speed and timeline duration satisfy
+                                     Duration = (Out - In) / Speed, so only two can be free. The
+                                     mode says which one the app computes; that value is disabled
+                                     and labelled a result, rather than offered as an equal input
+                                     that mysteriously moves when you touch another. -->
+                                <Expander Header="Time &amp; Retiming" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0">
+                                    <StackPanel Spacing="10">
+                                        <!-- What stays put when something else changes -->
                                         <StackPanel Spacing="4">
-                                            <Grid>
-                                                <TextBlock Text="Timeline Position" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
-                                                <TextBlock Text="{Binding SelectedClip.StartTimeFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" HorizontalAlignment="Right" />
-                                            </Grid>
-                                            <NumberBox local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.StartTimeSeconds, Mode=TwoWay, FallbackValue=0.0}"
-                                                       IsEnabled="{Binding IsSelectedPositionEditable}" SmallChange="0.5" LargeChange="1.0" Minimum="0" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Position on the timeline (derived from clip order on a sequence track)" />
+                                            <TextBlock Text="When I change one, keep" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <ComboBox SelectedIndex="{Binding SelectedClip.RetimeModeIndex, Mode=TwoWay, FallbackValue=0}"
+                                                      HorizontalAlignment="Stretch" AutomationProperties.Name="Retime mode"
+                                                      ToolTipService.ToolTip="Which of source window, speed and duration the app works out for you">
+                                                <x:String>The footage — speed sets the length</x:String>
+                                                <x:String>The length — speed fits the slot</x:String>
+                                                <x:String>Still frame — hold for a set time</x:String>
+                                            </ComboBox>
+                                            <TextBlock Text="{Binding SelectedClip.RetimeExplanation}" FontSize="11" TextWrapping="Wrap"
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                         </StackPanel>
-                                        
-                                        <!-- Source Length & Duration -->
-                                        <StackPanel Spacing="4">
+
+                                        <!-- Source window -->
+                                        <StackPanel Spacing="4" Visibility="{Binding SelectedClip.IsStillMode, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
                                             <Grid>
-                                                <TextBlock Text="Duration (Source / Trimmed)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
-                                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
-                                                    <TextBlock Text="{Binding SelectedClip.SourceDurationFormatted, FallbackValue='00:00.0'}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                    <TextBlock Text="/" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                    <TextBlock Text="{Binding SelectedClip.OpDurationFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                                                </StackPanel>
-                                            </Grid>
-                                            <Grid ColumnSpacing="8">
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                                <NumberBox Grid.Column="0" local:NumberBoxExtensions.FractionDigits="1" IsEnabled="False"
-                                                           Value="{Binding SelectedClip.SourceDurationSeconds, Mode=OneWay, FallbackValue=0.0}"
-                                                           SpinButtonPlacementMode="Hidden" Foreground="{ThemeResource TextFillColorSecondaryBrush}" ToolTipService.ToolTip="Source Length" />
-                                                <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.OpDuration, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=1.0}"
-                                                           SmallChange="0.5" LargeChange="1.0" Minimum="0.1" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Trimmed Duration" />
-                                            </Grid>
-                                        </StackPanel>
-                                        
-                                        <!-- Clip Range (Start / End) -->
-                                        <StackPanel Spacing="4">
-                                            <Grid>
-                                                <TextBlock Text="Clip Range (Start / End)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
+                                                <TextBlock Text="Source In / Out" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
                                                 <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
                                                     <TextBlock Text="{Binding SelectedClip.VideoStartTimeFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                                                     <TextBlock Text="→" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -207,10 +196,51 @@
                                             <Grid ColumnSpacing="8">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                                 <NumberBox Grid.Column="0" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.VideoStartTime, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
-                                                           SmallChange="0.5" LargeChange="5" Minimum="0" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Clip Start" />
+                                                           SmallChange="0.5" LargeChange="5" Minimum="0" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Source in point" ToolTipService.ToolTip="Where this clip starts within the source file" />
                                                 <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.VideoEndTime, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
-                                                           SmallChange="0.5" LargeChange="5" Minimum="0" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Clip End" />
+                                                           SmallChange="0.5" LargeChange="5" Minimum="0" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Source out point" ToolTipService.ToolTip="Where it ends within the source file" />
                                             </Grid>
+                                        </StackPanel>
+
+                                        <!-- The frozen frame, when this clip is a still -->
+                                        <StackPanel Spacing="4" Visibility="{Binding SelectedClip.IsStillMode, Converter={StaticResource BoolToVisConverter}}">
+                                            <TextBlock Text="Frozen frame" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <NumberBox local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.VideoStartTime, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
+                                                       SmallChange="0.5" LargeChange="5" Minimum="0" SpinButtonPlacementMode="Compact" AutomationProperties.Name="Frozen frame position" ToolTipService.ToolTip="Which frame of the source is held" />
+                                        </StackPanel>
+
+                                        <!-- Speed and duration. Exactly one of these is a result. -->
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Spacing="4" Visibility="{Binding SelectedClip.IsStillMode, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
+                                                <TextBlock Text="{Binding SelectedClip.SpeedLabel}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <NumberBox local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.PlaybackSpeed, Mode=TwoWay, FallbackValue=1.0}"
+                                                           IsEnabled="{Binding SelectedClip.IsSpeedEditable}"
+                                                           SmallChange="0.25" LargeChange="1.0" Minimum="0.01" Maximum="8" SpinButtonPlacementMode="Compact"
+                                                           AutomationProperties.Name="Playback speed" ToolTipService.ToolTip="How fast the footage plays" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Spacing="4">
+                                                <TextBlock Text="{Binding SelectedClip.DurationLabel}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <NumberBox local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.OpDuration, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=1.0}"
+                                                           IsEnabled="{Binding SelectedClip.IsDurationEditable}"
+                                                           SmallChange="0.5" LargeChange="1.0" Minimum="0.1" SpinButtonPlacementMode="Compact"
+                                                           AutomationProperties.Name="Timeline duration" ToolTipService.ToolTip="How long the clip occupies the timeline" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <!-- Position on the timeline, and the source length as plain text
+                                             rather than a disabled spinner pretending to be an input. -->
+                                        <StackPanel Spacing="4">
+                                            <Grid>
+                                                <TextBlock Text="Timeline position" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Left" />
+                                                <TextBlock Text="{Binding SelectedClip.StartTimeFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" HorizontalAlignment="Right" />
+                                            </Grid>
+                                            <NumberBox local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.StartTimeSeconds, Mode=TwoWay, FallbackValue=0.0}"
+                                                       IsEnabled="{Binding IsSelectedPositionEditable}" SmallChange="0.5" LargeChange="1.0" Minimum="0" SpinButtonPlacementMode="Compact"
+                                                       AutomationProperties.Name="Timeline position"
+                                                       ToolTipService.ToolTip="Where the clip sits on the timeline (derived from clip order on a sequence track)" />
+                                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                       Text="{Binding SelectedClip.SourceLengthSummary}" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Expander>
@@ -231,14 +261,12 @@
                                         
                                         <!-- Playback Speed, Volume & Opacity -->
                                         <StackPanel Spacing="4">
-                                            <TextBlock Text="Speed / Volume / Opacity" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock Text="Volume / Opacity" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                             <Grid ColumnSpacing="8">
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                                <NumberBox Grid.Column="0" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.PlaybackSpeed, Mode=TwoWay, FallbackValue=1.0}"
-                                                           SmallChange="0.25" LargeChange="1.0" Minimum="0" Maximum="8" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Speed" />
-                                                <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Volume, Mode=TwoWay, FallbackValue=1.0}"
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <NumberBox Grid.Column="0" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Volume, Mode=TwoWay, FallbackValue=1.0}"
                                                            SmallChange="0.1" LargeChange="0.25" Minimum="0" Maximum="1" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Volume" />
-                                                <NumberBox Grid.Column="2" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}"
+                                                <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}"
                                                            SmallChange="0.1" LargeChange="0.25" Minimum="0" Maximum="1" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Opacity" />
                                             </Grid>
                                         </StackPanel>

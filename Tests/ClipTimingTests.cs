@@ -146,7 +146,89 @@ namespace VideoDirector.Tests
             Assert.True(c.PlaybackSpeed >= 0);
         }
 
-        // ---- Current yield rules (expected to change in D4) ---------------------------------
+        // ---- Retime modes (D4) ---------------------------------------------------------------
+
+        [Fact]
+        public void AClipHoldsItsSourceWindowByDefault()
+        {
+            // The default has to reproduce what the app did before the mode existed, or every
+            // existing project changes behaviour on load.
+            Assert.Equal(RetimeMode.HoldSource, Video(60).RetimeMode);
+        }
+
+        [Fact]
+        public void FitToFillDerivesSpeedFromTheRequestedLength()
+        {
+            var c = Video(600);
+            c.VideoStartTime = TimeSpan.Zero;
+            c.VideoEndTime = TimeSpan.FromSeconds(20);
+            c.RetimeMode = RetimeMode.FitToFill;
+
+            c.OpDuration = TimeSpan.FromSeconds(10);   // fill a 10s slot with 20s of footage
+
+            Assert.Equal(10, c.OpDuration.TotalSeconds, 6);
+            Assert.Equal(20, c.VideoEndTime.TotalSeconds, 6);   // window untouched
+            Assert.Equal(2.0, c.PlaybackSpeed, 6);              // speed did the work
+        }
+
+        [Fact]
+        public void TheDerivedValueIsAdvertisedAsSuch()
+        {
+            var c = Video(60);
+            Assert.True(c.IsDurationDerived);
+            Assert.False(c.IsDurationEditable);
+            Assert.True(c.IsSpeedEditable);
+
+            c.RetimeMode = RetimeMode.FitToFill;
+            Assert.True(c.IsSpeedDerived);
+            Assert.False(c.IsSpeedEditable);
+            Assert.True(c.IsDurationEditable);
+        }
+
+        [Fact]
+        public void SettingSpeedToZeroSelectsStillModeExplicitly()
+        {
+            // Speed zero always meant "freeze this frame". It is now a named mode rather than a
+            // hidden second meaning of a number.
+            var c = Video(60);
+            c.PlaybackSpeed = 0;
+
+            Assert.Equal(RetimeMode.Still, c.RetimeMode);
+            Assert.True(c.IsStillMode);
+            Assert.True(c.IsStill);
+            Assert.True(c.IsDurationEditable);   // a still's duration is authored, never derived
+        }
+
+        [Fact]
+        public void GivingAStillASpeedMakesItMoveAgain()
+        {
+            var c = Video(60);
+            c.PlaybackSpeed = 0;
+            c.PlaybackSpeed = 1.0;
+
+            Assert.Equal(RetimeMode.HoldSource, c.RetimeMode);
+            Assert.False(c.IsStill);
+        }
+
+        [Fact]
+        public void SwitchingModeDoesNotChangeWhatTheClipCurrentlyDoes()
+        {
+            var c = Video(600);
+            c.VideoStartTime = TimeSpan.Zero;
+            c.VideoEndTime = TimeSpan.FromSeconds(60);
+            c.PlaybackSpeed = 2.0;
+
+            double durationBefore = c.OpDuration.TotalSeconds;
+            double outBefore = c.VideoEndTime.TotalSeconds;
+
+            c.RetimeMode = RetimeMode.FitToFill;
+
+            Assert.Equal(durationBefore, c.OpDuration.TotalSeconds, 6);
+            Assert.Equal(outBefore, c.VideoEndTime.TotalSeconds, 6);
+            Assert.Equal(2.0, c.PlaybackSpeed, 6);
+        }
+
+        // ---- Current yield rules (unchanged by D4 in the default mode) -----------------------
 
         [Fact]
         public void EditingDurationRetrimsTheOutPoint()

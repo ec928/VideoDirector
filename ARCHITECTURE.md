@@ -80,6 +80,7 @@ This chronological ledger records all established solutions and performance opti
 * **Drags preview and commit on drop**, with Esc to cancel (§5.7).
 * **Real track headers**: Mute / Hide / Lock / Sequence + overflow.
 * **Placement for every track**: track 0 renders inside a `BaseBox` and can be a PiP like any other; geometry is the shared, tested `PlacementBox`.
+* **Retiming is explicit**: source window, speed and duration satisfy `Duration = (Out − In) ÷ Speed`, and a per-clip `RetimeMode` says which one the app derives (`RetimeSolver`, pure and tested). "Still" is a named mode rather than a hidden meaning of `speed == 0`.
 * **Framing is normalised and directly editable**: marks are zoom + centre in source-frame terms (`Framing`), and the Edit canvas draws them as draggable camera rectangles over the whole frame (`FramingRects`). Both are pure and unit-tested.
 * **Regression suite**: `Tests/` (xunit) plus `Tests/run-ui-smoke.ps1` for UI Automation checks against the running app.
 
