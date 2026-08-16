@@ -13,15 +13,19 @@ Several statements below are marked ⚠ — they are accurate today but schedule
 VideoDirector is a multi-track video sequencer and compositor built in **WinUI 3 / Windows App SDK** (mouse + keyboard primary; touch-compatible). It composes multiple video and image assets into a unified time-synchronized output.
 
 ### 4-Track Topology
-The sequencer is bounded to 4 tracks (1 spine + 3 overlay tracks, enabling up to 3 simultaneous Picture-in-Picture layers):
+Four **peer** tracks (`DirectorViewModel.Tracks`, all `TimelineTrack`). There is no privileged "spine": every track holds the same clip type, carries a placement box, and obeys the same rules. Compositing order is track index (§5.4).
 
-> ⚠ **Scheduled to change** — Plan phase C2 makes all four tracks peers under a single `TimelineTrack` collection. "Gapless" becomes a per-track flag rather than a property of Track 1, and total duration becomes the max end across all tracks. Track 1 ships with the flag on, so default behaviour is unchanged.
+A clip's position is **always** its absolute `StartTime`. What differs between tracks is behaviour, expressed as flags:
 
-* **Track 1 — The Spine (A-Roll)**: A gapless row of clips played sequentially end-to-end. It defines the total duration of the project. Supports optional additive transitions (crossfade, dip to black) between clips, and variable playback speed (including speed 0 for still images rendered over a set time).
-* **Tracks 2, 3 & 4 — Overlays (B-Roll / PiP)**: Freely positioned time-bounded clips (gaps allowed, one active clip per track at any given timestamp). Composited over Track 1 as Picture-in-Picture (PiP) windows. Each clip maintains normalized position and dimension coordinates (`PlacementCenterX/Y`, `PlacementWidth/Height` in 0..1 space) and opacity. When reordering occurs on an overlay track, `ResolveOverlaps()` dynamically shifts sibling clips sequentially to prevent stacking collisions.
+* **`IsGapless`** - clips butt up end-to-end in list order; adding, removing or reordering reflows the rest, and start times are *derived* from order by `TimelineTrack.Normalize()`. This is what Track 1 used to be structurally. Ships on for `Tracks[0]` and off for the rest, so default behaviour matches the old app, but it can be switched off there or on anywhere.
+* **`IsMuted` / `IsHidden` / `IsLocked`** - track-level overrides. Muted contributes no audio, hidden contributes no picture, locked rejects mutation but still selects and inspects. Muted and hidden are honoured by the live compositor; the exporter does not read them yet.
+
+On a non-gapless track, gaps are legal and `ResolveOverlaps()` keeps clips from colliding. Every track is **strict** - its clips never overlap, so at most one is active at any story time (§5.3). A time with no clip on a track renders as background.
+
+Project duration is the latest end across **all** tracks, not one track's span.
 
 ### Unified Clip & Ken Burns Model
-Every clip across spine and overlay tracks shares a unified data schema (`CinematicOperation`). Any clip can carry an animated **Ken Burns** spatial motion—a smooth pan/zoom defined by Start, optional Mid, and End framing keyframes interpolated via easing curves. Still images on Track 1 advance master story time and Ken Burns spatial animation via wall-clock time rather than media player timestamps.
+Every clip on every track shares one schema (`CinematicOperation`). Any clip can carry an animated **Ken Burns** spatial motion - a smooth pan/zoom defined by Start, optional Mid, and End framing keyframes interpolated via easing curves. Stills (image files, or `PlaybackSpeed == 0`) advance master story time and Ken Burns animation by wall clock rather than media player timestamps.
 
 ---
 
@@ -42,24 +46,24 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
 ### C. EDIT Mode (Red Badge)
 * **Purpose**: Micro-framing and motion design.
 * **Behavior**: Isolates and displays **one clip full-frame** on a clean canvas without redundant outer borders.
-* **Input Rules**: Canvas manipulation adjusts the clip's internal Ken Burns content framing (drag to pan content, mouse wheel to zoom content). Entered by single-clicking a timeline clip or double-clicking a canvas PiP; cleanly exited via the interactive mode badge on the playbar, the Done button, or pressing Esc.
+* **Input Rules**: Canvas manipulation adjusts the clip's internal Ken Burns content framing (drag to pan content, mouse wheel to zoom content).
+* **Entry is deliberate** - double-click a timeline clip, press Enter on a selection, double-tap a canvas PiP, or use the inspector's "Edit framing" button. **Selecting a clip does not enter Edit**: selection means "work on this clip" and shows it in the inspector, nothing more. Exit via the mode badge, Esc, or clicking the timeline, which exits *and* does its normal job in the same gesture.
 
-> ⚠ **Scheduled to change** — two separate changes land here:
-> * **Entry** (plan phase B1): single-clicking a clip will *select* it, not enter Edit. The inspector becomes available in Arrange. Edit becomes deliberate (double-click, Enter, or a button). Mode segregation itself is unaffected — selection simply stops being a mode trigger.
-> * **Canvas input** (plan phase D2): direct content pan/zoom is replaced by directly manipulating the Start/Mid/End keyframe rectangles over the whole source frame. The wheel will zoom the *selected rectangle*.
+> ⚠ **Scheduled to change** - **canvas input** (plan phase D2): direct content pan/zoom is replaced by directly manipulating the Start/Mid/End keyframe rectangles over the whole source frame. The wheel will zoom the *selected rectangle*.
 
 ---
 
 ## 3. UI Layout & Control Topography
 
 * **Timeline Toolbar (`TrackDock` Header)**: A dedicated command bar directly above the timeline separating global actions from inspector panels. 
-  * *Left Zone*: History (Undo/Redo) and Timeline Mode Tools (Snapping toggle, Ripple edit, Waveform display).
-    * ⚠ Of these three, **only Snapping is functional**. `IsRippleEditEnabled` is written but never read anywhere, and the waveform is synthesised from the clip's hash rather than its audio. The Shuffle toggle on the transport pill has no handler at all. Plan phase A2 resolves all three.
-  * *Right Zone*: View zoom/fit controls, Project Operations (Save, Load, Clear), and MP4 Export.
-    * ⚠ The "fit" button resizes the *application window* to the video's aspect ratio and resets timeline zoom as a side effect — it is not a timeline-fit control despite its position and icon. Plan phase A2 splits it.
-* **Proportional Timeline Dashboard (Bottom Dock)**: Hosts the time ruler, playhead, and 4 colored track lanes. Track labels ("Track 1", "Track 2", etc.) act as interactive load buttons that open file pickers (`LoadIntoTrack`) targeting that specific lane. Supports bidirectional cross-track drag-and-drop, ghost-follow dragging on Track 1, runtime magnetic snapping (8px threshold), and right-click context flyouts (`Duplicate`, `Remove`, `Split at playhead`, `Snapshot still`).
-
-  > ⚠ **Scheduled to change** — Track 1 currently draws as the **top** lane while compositing at the **bottom** of the picture. Plan phase A3 flips lane order so the top lane is the topmost layer, matching the compositor and standard NLE convention, and consolidates the row geometry (today duplicated across six call sites) behind `RowYForTrack` / `TrackAtY`. Phase C3 replaces the single-button track label with a real header (Mute · Hide · Lock · Gapless + overflow) in a wider gutter.
+  * *Left Zone*: History (Undo/Redo) and the Snapping toggle (**N**).
+  * *Right Zone*: timeline zoom readout, zoom in/out (**Ctrl+NumPad +/-**), fit-to-project (**Ctrl+0**), Save, Load, an overflow menu (resize window to video aspect; clear project), and MP4 Export. Every shortcut named in a tooltip here is actually bound - keep it that way.
+* **Timeline Dashboard (Bottom Dock)**: The time ruler, playhead, and one lane per track, all on one shared px=seconds scale.
+  * **Lanes run highest track at the top** (§5.4), so dragging a clip up a lane moves it up the compositing stack.
+  * **Track headers** sit in a fixed 168px gutter outside the horizontal scroller: identity chip, name, **Mute / Hide / Lock / Sequence**, and an overflow menu (add clips, default placement for new clips, clear track).
+  * The drawn span is content **plus runway**, never the content exactly, so a clip can always be dragged past the current end to extend the project.
+  * Drags **preview and commit on drop** (§5.7); Esc cancels. External file drags highlight the destination lane. Right-click gives a lane-scoped menu whose clip actions disable when no clip is under the cursor.
+  * Magnetic snapping (8px threshold), and Ctrl+drag scrubs from anywhere.
 * **Inspector Panel & Telemetry HUD (Right Panel)**: Dedicated property editor displaying human-readable formatted timecodes (`00:00:00.00`), speed, transitions, Ken Burns keyframe capture buttons (Start/Mid/End), and easing profiles. PiP coordinates and real-time operational readouts are cleanly consolidated into a compact Telemetry HUD for maximum workflow clarity.
 * **Transport Pill (Bottom-Center Floating)**: Hosts core transport controls: Play/Pause, Previous/Next frame, range/trim sliders, global playback speed, loop toggle, and inspector docking controls.
 
@@ -69,7 +73,18 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
 
 This chronological ledger records all established solutions and performance optimizations. **Do not re-propose or regress these items.**
 
-### 🎬 Timeline & Track Behavior Unification
+*Historical note*: entries below predate the track unification (plan phase C2) and describe the app in the vocabulary of that time — "spine" for track 0, "overlay" for the rest. The problems they solved and the solutions they record still stand; only the naming has moved on.
+
+### 🧱 Track Unification (plan phases A1–C4)
+* **One track model**: `TimelineTrack` x4, no privileged spine. Position is always absolute `StartTime`; gapless/free is a per-track flag. Duration is the max end across all tracks, so a project made only of upper-track clips is playable and visible.
+* **Lane order matches compositing**: highest track draws in the top lane. Row geometry lives in one tested `TimelineGeometry` rather than seven inlined copies.
+* **Selection is not a mode**: one `SelectedClip`; the inspector follows it; Edit is entered deliberately.
+* **Drags preview and commit on drop**, with Esc to cancel (§5.7).
+* **Real track headers**: Mute / Hide / Lock / Sequence + overflow.
+* **Placement for every track**: track 0 renders inside a `BaseBox` and can be a PiP like any other; geometry is the shared, tested `PlacementBox`.
+* **Regression suite**: `Tests/` (xunit) plus `Tests/run-ui-smoke.ps1` for UI Automation checks against the running app.
+
+### 🎬 Timeline & Track Behavior Unification (pre-C2)
 * **Consolidated Timeline Toolbar**: Re-homed global operations (Save/Load/Export/Undo) into a dedicated toolbar above the timeline dock, de-cluttering inspector panels.
 * **Clickable Track Labels**: Enabled direct asset loading into specific track lanes via clickable track labels.
 * **Dynamic Overlap Resolution (`ResolveOverlaps`)**: Replaced rigid slot clamping on Tracks 2–4 with dynamic overlap resolution, automatically shifting sibling clips when reordering occurs.
@@ -91,10 +106,9 @@ This chronological ledger records all established solutions and performance opti
 ## 5. Core Architectural Invariants & Laws
 
 1. **Holistic Design over Piecemeal Hacks**: Never apply localized fixes that break the overarching NLE mental model. All tracks must follow consistent interaction laws.
-2. **Strict Track Roles (Sequence vs. Layering)** ⚠: Track 1 (Spine) is strictly sequential and gapless. Tracks 2–4 (Overlays) are time-bounded layers that use `ResolveOverlaps()` to prevent overlapping clips on the same row.
-   *Scheduled to change (plan phase C2)*: the sequence/layer distinction becomes a per-track `IsGapless` flag, not a role. What survives is the **one-active-clip-per-track** rule below, which is load-bearing for the player/surface mapping.
+2. **Track Behaviour Is A Flag, Not A Role**: sequential-and-gapless versus freely-placed is `TimelineTrack.IsGapless`, settable per track, not a property of which track it is. On a gapless track, start times are derived from clip order by `Normalize()`; on a free one the user places them. Either way, position is read as `StartTime` and no consumer needs to know which kind of track it is looking at.
 3. **One Active Clip Per Track**: Clips on a track never overlap in time, so at most one clip is active at any story time. This is what lets track *i* own exactly one player and one render surface. Simultaneity is expressed by using another track, never by stacking within one. Survives C2 unchanged.
-4. **Z-Order Is Track Index**: Compositing order is determined solely by track number — Track 4 over Track 3 over Track 2 over Track 1. There is no per-clip z-override and none should be added. In the preview this is enforced by XAML declaration order in `DirectorPlayerControl.xaml`; when the spine becomes a generic visual (C2), the surface array must stay declared bottom-to-top.
+4. **Z-Order Is Track Index**: Compositing order is determined solely by track number — Track 4 over Track 3 over Track 2 over Track 1. There is no per-clip z-override and none should be added. In the preview this is enforced by XAML declaration order in `DirectorPlayerControl.xaml` (track 0's `BaseBox` first, then the overlay units bottom-to-top); keep that order when touching that file. In the export, track 0 is the base clip list and each higher track becomes a `MediaOverlayLayer` added in track order.
 5. **Modal Separation of Concern**: Editing handles, trim bars, and PiP bounding boxes must never leak into screening (PLAYBACK mode) or macro-structuring (ARRANGE mode).
 6. **GPU Surface Preservation**: Never directly manipulate live `MediaPlayerElement` XAML properties per-frame in ways that corrupt DirectX swapchains; use dedicated transforms and delta-checked placement boxes. Corollary (§7A): never reshape a live video surface — Arrange shows a still proxy instead.
 7. **Model Mutation Happens On Drop, Not During Drag**: a gesture must not change the model until it completes, and Esc must cancel it cleanly. A drag computes where the clip *would* land, redraws to show it, and commits exactly once on release (`CommitDrag`). Losing pointer capture cancels rather than half-applying.
@@ -112,7 +126,7 @@ Two long-standing items from the previous roadmap are **not** covered by any pha
 are recorded here so they are not lost:
 
 ### A. Overlay Scrubbing Seeks (Medium Priority)
-* **Problem**: During rapid timeline scrubbing, overlay tracks display a static frame rather than seeking live to the scrubbed timestamp (only Track 1 seeks live during scrub).
+* **Problem**: During rapid timeline scrubbing, upper tracks display a static frame rather than seeking live to the scrubbed timestamp (only track 0 seeks live during scrub).
 * **Target Solution**: Extend the live scrubbing seek loop to evaluate and seek active overlay media players per-frame during scrub gestures.
 
 ### B. Edge Trimming On The Timeline (Medium Priority)
@@ -120,8 +134,9 @@ are recorded here so they are not lost:
 * **Target Solution**: Define explicit rules for Ripple Trimming (extending an edge pushes downstream clips on that track) versus Roll Trimming (extending an edge consumes gap space or overwrites), then implement edge grabs uniformly across all tracks.
 
 ### Previously listed, now superseded
-* *Live PiP Video Reshaping* — largely solved by the §7A still-proxy path (see §4). Extending the same treatment to Track 1 is plan phase C2 step 6.
-* *Deep Data Schema Unification* — this is plan phase C2.
+* *Live PiP Video Reshaping* — solved by the §7A still-proxy path (see §4).
+* *Deep Data Schema Unification* — done in plan phase C2.
+* *Trimming parity across tracks* — the behavioural half is done (every track follows the same rules); the missing part is on-timeline edge grabs, recorded as B above.
 
 ---
 
@@ -162,25 +177,26 @@ player's real decode position — **not** stepped at clip boundaries — because
 correction compares against it every frame, and a stale target makes the correction fight the
 overlay's real playback (the original overlay-stutter bug).
 
-Transitions are **additive**: a spine clip occupies `OpDuration + TransitionDuration` of story time.
-Per-clip speed divides into story time — a clip at 2× contributes half as much story time as video
-watched. ⚠ Total length is currently defined by the spine alone; plan phase C2 changes this to the
-max end across all tracks.
+Transitions are **additive**: on a gapless track a clip occupies `OpDuration + TransitionDuration`
+of story time, which is what `Normalize()` walks when deriving start times. Per-clip speed divides
+into story time — a clip at 2× contributes half as much story time as video watched. Total length is
+the max end across **all** tracks.
 
 ### 7E/F. The Timeline Is One Shared Time Axis
-The ruler, the spine row and the overlay rows are all drawn on a single px-per-second scale, with
-`x = 0` at time 0, so vertical alignment across lanes is literal. Track labels sit in a fixed-width
-gutter **outside** the horizontal `ScrollViewer`, so they stay put while the lanes scroll. The
-playhead is drawn full-height across every lane.
+Every lane is drawn on a single px-per-second scale with `x = 0` at time 0, so vertical alignment
+across lanes is literal. Track headers sit in a fixed-width gutter **outside** the horizontal
+`ScrollViewer`, so they stay put while the lanes scroll. The playhead is drawn full-height across
+every lane. All track-to-y mapping goes through `TimelineGeometry` — pure, WinUI-free and
+unit-tested, because a lane-mapping error is invisible in review and obvious only on screen.
 
-The pointer model follows standard NLE convention: the top ruler scrubs, clip rows drag clips, a tap
-in a row selects, and empty row space scrubs. ⚠ The scale is currently *proportional*
-(`_timelinePxPerSec = width / totalDuration`) rather than a true px-per-second, and lane order is
-inverted relative to compositing — see plan phases C1 and A3.
+The pointer model follows standard NLE convention: the ruler (or Ctrl+drag anywhere) scrubs, lanes
+drag clips, a press in a lane selects, and empty lane space scrubs. ⚠ The scale is *proportional*
+(`_timelinePxPerSec = width / extent`) rather than a true px-per-second with cursor-anchored zoom —
+see plan phase C1's optional note.
 
 ### 7G. Static Composite Seek
-Scrubbing shows the composite at story-time *t* **without playing**: the spine frame (main player
+Scrubbing shows the composite at story-time *t* **without playing**: track 0's frame (main player
 seeked to the right clip and offset, marks applied at the corresponding progress) plus whichever
-overlays are active then. A drag on the timeline means "navigate the whole thing", so it drops out
+upper-track clips are active then. A drag on the timeline means "navigate the whole thing", so it drops out
 of Edit into Arrange first. Scrubbing while paused means "take over" — it ends the playback loop and
 settles into Arrange at the scrubbed point, rather than leaving a suspended loop alive.
