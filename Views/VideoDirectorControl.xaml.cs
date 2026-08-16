@@ -97,7 +97,7 @@ namespace VideoDirector.Views
         }
 
         // Each overlay track owns its own clip collection, so the timeline has to watch them all.
-        private readonly System.Collections.Generic.HashSet<OverlayTrack> _hookedTracks = new();
+        private readonly System.Collections.Generic.HashSet<TimelineTrack> _hookedTracks = new();
         private void HookOverlayTrackClips()
         {
             foreach (var track in ViewModel.OverlayTracks)
@@ -107,7 +107,7 @@ namespace VideoDirector.Views
 
 
         // The track that owns a given upper-track clip (null if it's a spine clip).
-        private OverlayTrack TrackOf(CinematicOperation clip)
+        private TimelineTrack TrackOf(CinematicOperation clip)
         {
             foreach (var track in ViewModel.OverlayTracks)
                 if (track.Clips.Contains(clip)) return track;

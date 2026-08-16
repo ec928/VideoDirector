@@ -1405,7 +1405,7 @@ namespace VideoDirector.Models
             => (track >= 0 && track < MaxOverlayTracks) ? _activeOverlay[track] : null;
 
         // Strict track ⇒ the first clip whose window contains t is the only one.
-        private static CinematicOperation ResolveActiveClip(OverlayTrack track, TimeSpan t)
+        private static CinematicOperation ResolveActiveClip(TimelineTrack track, TimeSpan t)
         {
             foreach (var clip in track.Clips)
                 if (clip.IsActiveAt(t)) return clip;

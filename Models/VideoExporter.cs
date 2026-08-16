@@ -75,7 +75,7 @@ namespace VideoDirector.Models
         // per overlay track. Overlays within a track never overlap in time (enforced on add/move),
         // which is exactly the constraint MediaOverlayLayer requires.
         public async Task<MediaComposition> BuildCompositionAsync(
-            IEnumerable<CinematicOperation> spine, IEnumerable<OverlayTrack> overlayTracks, List<string> skipped)
+            IEnumerable<CinematicOperation> spine, IEnumerable<TimelineTrack> overlayTracks, List<string> skipped)
         {
             var composition = new MediaComposition();
 
@@ -125,7 +125,7 @@ namespace VideoDirector.Models
         // Render the composite to `output`. Reports 0..100 progress. Never throws for the expected
         // cases (missing files, nothing to render) — returns a described ExportResult.
         public async Task<ExportResult> ExportAsync(
-            IEnumerable<CinematicOperation> spine, IEnumerable<OverlayTrack> overlayTracks,
+            IEnumerable<CinematicOperation> spine, IEnumerable<TimelineTrack> overlayTracks,
             StorageFile output, IProgress<double> progress)
         {
             var skipped = new List<string>();
