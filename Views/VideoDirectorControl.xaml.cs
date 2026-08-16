@@ -93,6 +93,7 @@ namespace VideoDirector.Views
             ViewModel.OverlayTracks.CollectionChanged += (s, ev) => { HookOverlayTrackClips(); BuildTimelineBar(); _playbackEngine?.RefreshComposite(); };
             HookOverlayTrackClips();
             BuildTimelineBar();
+            UpdateZoomReadout();
         }
 
         // Each overlay track owns its own clip collection, so the timeline has to watch them all.
@@ -462,30 +463,6 @@ namespace VideoDirector.Views
                     _clipBlockElements[clip] = list;
                 }
                 list.Add(r);
-            }
-
-            if (ViewModel.ShowAudioWaveforms && width > 10 && height > 10)
-            {
-                var wf = new Microsoft.UI.Xaml.Shapes.Polyline
-                {
-                    Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(110, 255, 255, 255)),
-                    StrokeThickness = 1,
-                    IsHitTestVisible = false,
-                    Opacity = dim
-                };
-                int pointsCount = (int)Math.Max(5, Math.Min(width / 3, 150));
-                double stepX = width / (pointsCount - 1);
-                double midY = height * 0.75;
-                for (int i = 0; i < pointsCount; i++)
-                {
-                    double amp = (Math.Sin(i * 1.3 + (clip?.GetHashCode() ?? 0)) * Math.Cos(i * 0.7) * 0.45) * (height * 0.22);
-                    wf.Points.Add(new Windows.Foundation.Point(i * stepX, midY + amp));
-                }
-                Canvas.SetLeft(wf, x);
-                Canvas.SetTop(wf, y);
-                TimelineBar.Children.Add(wf);
-
-                if (clip != null && _clipBlockElements.TryGetValue(clip, out var listWf)) listWf.Add(wf);
             }
 
             // File-name label inside the block, in whichever of black/white reads on this colour.
@@ -1039,6 +1016,10 @@ namespace VideoDirector.Views
                 Canvas.SetLeft(_playheadTime, System.Math.Max(0, tx));
                 Canvas.SetTop(_playheadTime, RulerH + 1);
             }
+
+            // Follow the playhead while it is moving under its own steam. Only while playing —
+            // during Arrange the user drives the scroll and auto-scrolling would fight them.
+            if (ViewModel.IsPlaying) ScrollPlayheadIntoView(centre: false);
         }
 
         private void PlayerControl_SizeChanged(object? sender, SizeChangedEventArgs e)
@@ -1118,34 +1099,79 @@ namespace VideoDirector.Views
             }
         }
 
-        private void RippleEditButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
-            {
-                ViewModel.IsRippleEditEnabled = tb.IsChecked ?? true;
-            }
-        }
+        // ---- Timeline zoom ----------------------------------------------------------------
+        // The scale is proportional (px/sec = width / totalDuration), so zoom is a multiplier on
+        // the viewport width: 1.0 == the whole project fits. Every zoom change keeps the playhead
+        // on screen, otherwise zooming in on a long project strands you at an arbitrary offset.
 
-        private void WaveformButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
-            {
-                ViewModel.ShowAudioWaveforms = tb.IsChecked ?? false;
-                BuildTimelineBar();
-            }
-        }
+        private const double ZoomStep = 1.3333333;
+        private const double MaxZoom = 16.0;
 
-        private void ZoomInTimeline_Click(object? sender, RoutedEventArgs e)
+        private void SetTimelineZoom(double factor)
         {
-            _timelineZoomFactor = Math.Min(16.0, _timelineZoomFactor * 1.3333333);
+            factor = Math.Clamp(factor, 1.0, MaxZoom);
+            if (factor <= 1.01) factor = 1.0;
+            if (Math.Abs(factor - _timelineZoomFactor) < 0.0001) return;
+            _timelineZoomFactor = factor;
             BuildTimelineBar();
+            UpdateZoomReadout();
+            ScrollPlayheadIntoView(centre: true);
         }
 
-        private void ZoomOutTimeline_Click(object? sender, RoutedEventArgs e)
+        private void UpdateZoomReadout()
         {
-            _timelineZoomFactor = Math.Max(1.0, _timelineZoomFactor / 1.3333333);
-            if (_timelineZoomFactor <= 1.01) _timelineZoomFactor = 1.0;
-            BuildTimelineBar();
+            if (ZoomReadout != null) ZoomReadout.Text = $"{_timelineZoomFactor * 100:0}%";
+        }
+
+        private void ZoomInTimeline_Click(object? sender, RoutedEventArgs e) => SetTimelineZoom(_timelineZoomFactor * ZoomStep);
+        private void ZoomOutTimeline_Click(object? sender, RoutedEventArgs e) => SetTimelineZoom(_timelineZoomFactor / ZoomStep);
+        private void FitTimeline_Click(object? sender, RoutedEventArgs e) => SetTimelineZoom(1.0);
+
+        // Ctrl+scroll over the timeline zooms; a bare scroll falls through to the ScrollViewer so
+        // it still pans horizontally.
+        private void TimelineBar_PointerWheelChanged(object? sender, PointerRoutedEventArgs e)
+        {
+            var point = e.GetCurrentPoint(TimelineBar);
+            if (!e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control)) return;
+            e.Handled = true;
+            SetTimelineZoom(point.Properties.MouseWheelDelta > 0
+                ? _timelineZoomFactor * ZoomStep
+                : _timelineZoomFactor / ZoomStep);
+        }
+
+        // Keep the playhead visible when the timeline is wider than its viewport. Called on zoom
+        // (centring it, since the user's focus is the playhead) and during playback (nudging it
+        // back into view only once it leaves, so it doesn't fight a manual scroll).
+        private void ScrollPlayheadIntoView(bool centre)
+        {
+            if (TimelineScroller == null || _timelinePxPerSec <= 0) return;
+
+            // The zoom path calls this immediately after BuildTimelineBar has set a new canvas
+            // width, so the ScrollViewer's extent is still the old one. Force layout first.
+            // Only on that path: the playback path runs per frame, where layout is already settled
+            // and an UpdateLayout call every frame would be far too expensive.
+            if (centre) TimelineScroller.UpdateLayout();
+
+            double viewport = TimelineScroller.ViewportWidth;
+            double extent = TimelineScroller.ExtentWidth;
+            if (viewport <= 0 || extent <= viewport) return;
+
+            double x = ViewModel.CurrentStoryTime.TotalSeconds * _timelinePxPerSec;
+            double offset = TimelineScroller.HorizontalOffset;
+
+            double target;
+            if (centre)
+            {
+                target = x - viewport / 2;
+            }
+            else
+            {
+                const double margin = 48;
+                if (x >= offset + margin && x <= offset + viewport - margin) return; // already comfortable
+                target = x - viewport / 2;
+            }
+
+            TimelineScroller.ChangeView(Math.Clamp(target, 0, extent - viewport), null, null, disableAnimation: true);
         }
 
         private void SetStart_Click(object? sender, RoutedEventArgs e)
@@ -1377,13 +1403,11 @@ namespace VideoDirector.Views
             _playbackEngine?.SkipNext();
         }
 
+        // Resizes the APPLICATION WINDOW to match the video's aspect ratio. Deliberately no longer
+        // touches timeline zoom — that is FitTimeline_Click, and conflating the two was why this
+        // button read as a view control.
         private async void FitWindow_Click(object? sender, RoutedEventArgs e)
         {
-            if (_timelineZoomFactor > 1.0)
-            {
-                _timelineZoomFactor = 1.0;
-                BuildTimelineBar();
-            }
             double targetAspect = 16.0 / 9.0;
             var mpA = PlayerControl.PlayerA?.MediaPlayer;
             var mpB = PlayerControl.PlayerB?.MediaPlayer;
@@ -1718,6 +1742,52 @@ namespace VideoDirector.Views
             if (IsTextInputFocused() || !ViewModel.HasSelection) return;
             args.Handled = true;
             PlaybarSplit_Click(this, null);
+        }
+
+        private void SnapAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                             Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextInputFocused()) return;
+            args.Handled = true;
+            ViewModel.IsSnappingEnabled = !ViewModel.IsSnappingEnabled;
+            if (MagnetButton != null) MagnetButton.IsChecked = ViewModel.IsSnappingEnabled;
+        }
+
+        private void HomeAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                             Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextInputFocused()) return;
+            args.Handled = true;
+            _playbackEngine?.SeekCompositeToStoryTime(TimeSpan.Zero);
+        }
+
+        private void EndAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                            Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextInputFocused()) return;
+            args.Handled = true;
+            _playbackEngine?.SeekCompositeToStoryTime(ViewModel.TotalStoryDuration);
+        }
+
+        private void ZoomInAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                               Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            args.Handled = true;
+            SetTimelineZoom(_timelineZoomFactor * ZoomStep);
+        }
+
+        private void ZoomOutAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                                Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            args.Handled = true;
+            SetTimelineZoom(_timelineZoomFactor / ZoomStep);
+        }
+
+        private void FitTimelineAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                                    Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            args.Handled = true;
+            SetTimelineZoom(1.0);
         }
 
         // A NumberBox hosts an inner TextBox, so a focused TextBox means the user is typing —

@@ -22,8 +22,9 @@
     </UserControl.Resources>
 
     <UserControl.KeyboardAccelerators>
-        <!-- Escape leaves Edit mode; Space toggles play/pause; Delete removes the selected clip.
-             Space/Delete are ignored while a text field has focus (see the handlers). -->
+        <!-- Every accelerator here is also named in the tooltip of the control it drives; if you
+             add or change one, update that tooltip in the same edit. Unmodified letter keys are
+             ignored while a text field has focus (see IsTextInputFocused). -->
         <KeyboardAccelerator Key="Escape" Invoked="EscapeAccelerator_Invoked" />
         <KeyboardAccelerator Key="Space" Invoked="PlayPauseAccelerator_Invoked" />
         <KeyboardAccelerator Key="Delete" Invoked="DeleteAccelerator_Invoked" />
@@ -32,6 +33,13 @@
         <KeyboardAccelerator Key="J" Invoked="LeftAccelerator_Invoked" />
         <KeyboardAccelerator Key="L" Invoked="RightAccelerator_Invoked" />
         <KeyboardAccelerator Key="S" Invoked="SplitAccelerator_Invoked" />
+        <!-- Snapping. Deliberately N, not S: S is Split, and the magnet tooltip used to claim S. -->
+        <KeyboardAccelerator Key="N" Invoked="SnapAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Home" Invoked="HomeAccelerator_Invoked" />
+        <KeyboardAccelerator Key="End" Invoked="EndAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Add" Modifiers="Control" Invoked="ZoomInAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Subtract" Modifiers="Control" Invoked="ZoomOutAccelerator_Invoked" />
+        <KeyboardAccelerator Key="Number0" Modifiers="Control" Invoked="FitTimelineAccelerator_Invoked" />
         <KeyboardAccelerator Key="Z" Modifiers="Control" Invoked="UndoAccelerator_Invoked" />
         <KeyboardAccelerator Key="Y" Modifiers="Control" Invoked="RedoAccelerator_Invoked" />
         <KeyboardAccelerator Key="Z" Modifiers="Control,Shift" Invoked="RedoAccelerator_Invoked" />
@@ -292,9 +300,6 @@
 
                     <!-- Toggles Column -->
                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <ToggleButton x:Name="ShuffleButton" Width="32" Height="32" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Toggle Shuffle">
-                            <SymbolIcon Symbol="Shuffle" />
-                        </ToggleButton>
                         <ToggleButton x:Name="LoopButton" IsChecked="{x:Bind ViewModel.IsLooping, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Toggle Loop" Padding="0">
                             <FontIcon Glyph="&#xE8EE;" FontSize="14" />
                         </ToggleButton>
@@ -371,37 +376,51 @@
                             <SymbolIcon Symbol="Redo" />
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
-                        <ToggleButton x:Name="MagnetButton" IsChecked="True" Click="MagnetButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Snapping (Magnet Tool): Snap clips to edges and playhead (S)">
+                        <ToggleButton x:Name="MagnetButton" IsChecked="True" Click="MagnetButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Snapping: snap clips to edges and the playhead (N)">
                             <FontIcon Glyph="&#xE81E;" FontSize="13" />
-                        </ToggleButton>
-                        <ToggleButton x:Name="RippleEditButton" IsChecked="True" Click="RippleEditButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Magnetic Timeline: Automatically ripple clips when inserting, trimming, or deleting (R)">
-                            <FontIcon Glyph="&#xE8DE;" FontSize="13" />
-                        </ToggleButton>
-                        <ToggleButton x:Name="WaveformButton" Click="WaveformButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Show Audio Waveforms on timeline clips (W)">
-                            <FontIcon Glyph="&#xE8D6;" FontSize="13" />
                         </ToggleButton>
                     </StackPanel>
 
-                    <!-- Right: Zoom, Fit, Project File operations, and Export -->
+                    <!-- Right: timeline view controls, project file operations, and Export.
+                         View controls act on the TIMELINE only. Window sizing lives in the
+                         project overflow menu — it is not a view control, and sitting it next to
+                         the zoom buttons made it read as "zoom timeline to fit". -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <Button x:Name="ZoomOutTimelineButton" Click="ZoomOutTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom Out Timeline (Ctrl + -)">
+                        <TextBlock x:Name="ZoomReadout" Text="100%" FontSize="10" MinWidth="34" TextAlignment="Right"
+                                   VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   ToolTipService.ToolTip="Timeline zoom (100% = whole project fits the window)" />
+                        <Button x:Name="ZoomOutTimelineButton" Click="ZoomOutTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom out timeline (Ctrl+NumPad-, or Ctrl+scroll on the timeline)">
                             <FontIcon Glyph="&#xE71F;" FontSize="13" />
                         </Button>
-                        <Button x:Name="ZoomInTimelineButton" Click="ZoomInTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom In Timeline (Ctrl + +)">
+                        <Button x:Name="ZoomInTimelineButton" Click="ZoomInTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom in timeline (Ctrl+NumPad+, or Ctrl+scroll on the timeline)">
                             <FontIcon Glyph="&#xE71E;" FontSize="13" />
                         </Button>
-                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
-                        <Button Click="FitWindow_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Auto-size window to fit background video">
-                            <SymbolIcon Symbol="FullScreen" />
+                        <Button x:Name="FitTimelineButton" Click="FitTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Fit whole project in the timeline (Ctrl+0)">
+                            <FontIcon Glyph="&#xE9A6;" FontSize="13" />
                         </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
                         <Button Click="Save_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Save project">
                             <SymbolIcon Symbol="Save" />
                         </Button>
                         <Button Click="Load_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Load project">
                             <SymbolIcon Symbol="OpenFile" />
                         </Button>
-                        <Button Click="Clear_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Clear project">
-                            <SymbolIcon Symbol="Delete" />
+                        <!-- Infrequent / destructive project actions. Clear used to sit inline two
+                             buttons from Load as a bare Delete glyph. -->
+                        <Button x:Name="ProjectMoreButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="More project actions">
+                            <SymbolIcon Symbol="More" />
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Resize window to video aspect" Click="FitWindow_Click"
+                                                    ToolTipService.ToolTip="Auto-size the application window to match the video's shape">
+                                        <MenuFlyoutItem.Icon><SymbolIcon Symbol="FullScreen" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem Text="Clear project…" Click="Clear_Click">
+                                        <MenuFlyoutItem.Icon><SymbolIcon Symbol="Delete" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </Button.Flyout>
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
                         <!-- Export -->
@@ -426,12 +445,13 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Canvas x:Name="TimelineLabels" Grid.Column="0" Background="Transparent" />
-                        <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch">
+                        <ScrollViewer x:Name="TimelineScroller" Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch">
                             <Canvas x:Name="TimelineBar" Height="52" HorizontalAlignment="Stretch"
                                     Background="Transparent" SizeChanged="TimelineBar_SizeChanged"
                                     PointerPressed="TimelineBar_PointerPressed"
                                     PointerMoved="TimelineBar_PointerMoved"
-                                    PointerReleased="TimelineBar_PointerReleased">
+                                    PointerReleased="TimelineBar_PointerReleased"
+                                    PointerWheelChanged="TimelineBar_PointerWheelChanged">
                                 <!-- A real ContextFlyout: the platform shows this on right-click /
                                      menu key / long-press, rather than us hand-rolling it from a
                                      pointer event (which never fired reliably). -->

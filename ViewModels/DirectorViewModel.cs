@@ -275,12 +275,6 @@ namespace VideoDirector.ViewModels
         private bool _isSnappingEnabled = true;
         public bool IsSnappingEnabled { get => _isSnappingEnabled; set => SetProperty(ref _isSnappingEnabled, value); }
 
-        private bool _isRippleEditEnabled = true;
-        public bool IsRippleEditEnabled { get => _isRippleEditEnabled; set => SetProperty(ref _isRippleEditEnabled, value); }
-
-        private bool _showAudioWaveforms = false;
-        public bool ShowAudioWaveforms { get => _showAudioWaveforms; set => SetProperty(ref _showAudioWaveforms, value); }
-
         public double CurrentOperationTimeSeconds
         {
             get => _currentOperationTime.TotalSeconds;
