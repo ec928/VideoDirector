@@ -66,10 +66,7 @@ Decide when the owning phase starts, not before:
 - **Should clicking a spine clip during playback still jump playback to it?** Preserved as-is in B1
   to limit blast radius, but it made more sense when selecting a clip meant "work on this clip".
   Now that selection is just selection, it may be a non-sequitur.
-- **Test strategy.** There is no test project. Most of this code is WinUI-coupled and awkward to
-  unit test, but the pure helpers (row geometry, the retime constraint solver in D4, mark
-  conversion in D1) are testable and are exactly where silent regressions would hide. Needs a
-  decision on framework and how far to go before the end-to-end regression pass.
+- ~~**Test strategy.**~~ Resolved — see §5.
 
 ---
 
@@ -563,7 +560,38 @@ Real problems found during the audit that no phase above addresses. Listed so th
 
 ---
 
-## 5. Maintaining this document
+## 5. Testing
+
+`Tests/VideoDirector.Tests.csproj` — xUnit, run with:
+
+```bash
+dotnet test Tests -p:Platform=x64
+```
+
+**Proportional by design.** Most of this app is WinUI-coupled and genuinely awkward to unit test;
+driving the UI is not the goal. The suite targets the logic where a regression is *silent* — maths
+whose wrongness is invisible in code review and only shows up as something looking subtly off on
+screen. Everything else is covered by building and launching.
+
+Three areas, chosen because they are exactly what the remaining phases churn:
+
+| File | Covers | Why |
+|---|---|---|
+| `TimelineGeometryTests` | Track ↔ lane ↔ y mapping | A lane-mapping error is invisible in review. These tests are the substitute for looking at the screen, and they are what verified the A3 flip. |
+| `OverlayTrackTests` | `ResolveOverlaps`, `ClampToFreeSlot` | The one-active-clip-per-track invariant (§5.3) is load-bearing for the player/surface mapping, and C2 merges the collections that enforce it. |
+| `ClipTimingTests` | The trim/speed/duration constraint | D4 replaces the yield rules outright. The invariant tests should survive untouched; the yield-rule tests are *expected* to change, so that the change is deliberate and visible rather than silent. |
+
+**Guidance for future phases.** To be testable, logic must be free of WinUI types — which is why
+`TimelineGeometry` was lifted out of `VideoDirectorControl`. Do the same for D4's retime solver and
+D1's mark conversion: put the maths in a plain class, leave the control as a thin binding over it.
+That is better design regardless, and it is the only way the maths gets covered.
+
+Note the app project excludes `Tests\**` from its compile glob — the test project sits inside the
+app directory, so the SDK's default `**\*.cs` would otherwise pull test files into the app.
+
+---
+
+## 6. Maintaining this document
 
 - Mark a phase ✅ Done the moment it lands, and move anything it invalidated out of
   "Known issues not scheduled here".

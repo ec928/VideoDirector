@@ -120,43 +120,20 @@ namespace VideoDirector.Views
         // A scrub ruler on top, then one lane per track, all on one shared px=seconds scale.
         // Scrub on the ruler; drag clips in their lanes.
         //
-        // THE TOP LANE IS THE TOPMOST COMPOSITING LAYER (invariant §5.4: z-order is track index).
-        // So lanes run Track 4, Track 3, Track 2, Track 1 top-to-bottom, matching both the
-        // compositor and standard NLE convention — dragging a clip up moves it up the stack.
-        //
-        // Every conversion between a track and a y coordinate goes through the four helpers below.
-        // This maths used to be inlined at seven call sites, each free to drift from the others.
-        private const double RulerH = 14, RowTop = 16, BlockH = 16, RowPitch = 18;
+        // The maths lives in TimelineGeometry (pure, WinUI-free, unit-tested) — these are just
+        // the bindings of it to this control's track count. It used to be inlined at seven call
+        // sites, each free to drift from the others.
+        private const double RulerH = TimelineGeometry.RulerH;
+        private const double RowTop = TimelineGeometry.RowTop;
+        private const double BlockH = TimelineGeometry.BlockH;
+        private const double RowPitch = TimelineGeometry.RowPitch;
 
-        // Track index convention used throughout: -1 = the spine (Track 1); 0..n-1 = overlay
-        // tracks (Track 2..n+1). Lane index is a pure display position, 0 = topmost lane.
-        private int LaneCount => 1 + ViewModel.OverlayTracks.Count;
+        private int OverlayCount => ViewModel.OverlayTracks.Count;
 
-        private int LaneOfTrack(int trackIndex)
-        {
-            int overlays = ViewModel.OverlayTracks.Count;
-            return trackIndex < 0 ? overlays : overlays - 1 - trackIndex;
-        }
-
-        private int TrackOfLane(int lane)
-        {
-            int overlays = ViewModel.OverlayTracks.Count;
-            return lane >= overlays ? -1 : overlays - 1 - lane;
-        }
-
-        private double RowYForTrack(int trackIndex) => RowTop + LaneOfTrack(trackIndex) * RowPitch;
-
-        // True when y is in the scrub ruler above the lanes.
-        private bool IsRulerY(double y) => y < RowTop;
-
-        // y -> track index. Clamped, so a point above or below the lanes resolves to the nearest
-        // one rather than to nothing. Callers that need to distinguish the ruler check IsRulerY.
-        private int TrackAtY(double y)
-            => TrackOfLane(Math.Clamp((int)((y - RowTop) / RowPitch), 0, Math.Max(0, LaneCount - 1)));
-
-        // Bar height covers every lane plus a small bottom margin, otherwise the bottom lane gets
-        // clipped by a few pixels.
-        private double TimelineBarHeight => RowTop + Math.Max(1, LaneCount) * RowPitch + 6;
+        private double RowYForTrack(int trackIndex) => TimelineGeometry.RowYForTrack(trackIndex, OverlayCount);
+        private static bool IsRulerY(double y) => TimelineGeometry.IsRulerY(y);
+        private int TrackAtY(double y) => TimelineGeometry.TrackAtY(y, OverlayCount);
+        private double TimelineBarHeight => TimelineGeometry.BarHeight(OverlayCount);
 
         private void BuildTimelineBar()
         {
@@ -972,14 +949,11 @@ namespace VideoDirector.Views
         // clip full-frame. Edit is now entered deliberately — see BeginEditSelected.
         private void SelectClip(CinematicOperation clip, bool isSpine)
         {
-            if (isSpine)
-            {
-                ViewModel.SelectedTimelineNode = clip;
-                // While playing, picking a different spine clip jumps playback to it.
-                int idx = ViewModel.TimelineNodes.IndexOf(clip);
-                if (ViewModel.IsPlaying && _playbackEngine?.CurrentPlayingOperation != clip && idx >= 0)
-                    _ = _playbackEngine?.StartPlaybackAsync(idx);
-            }
+            // Selecting a clip means "work on this clip" and nothing else — on EVERY track.
+            // Selecting a Track 1 clip used to also jump playback to it, which only made sense
+            // while Track 1 was a privileged sequential spine. It is not one for much longer
+            // (phase C2), and the behaviour had no counterpart on any other track.
+            if (isSpine) ViewModel.SelectedTimelineNode = clip;
             else ViewModel.SelectedOverlay = clip;
         }
 

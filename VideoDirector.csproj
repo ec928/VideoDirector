@@ -30,6 +30,16 @@
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>
 
+  <!-- The test project lives under Tests\ inside this directory, so the SDK's default **\*.cs
+       glob would otherwise compile its files into the app (and fail: the app has no xunit
+       reference). Keep these excludes in step with any new folder that holds its own project. -->
+  <ItemGroup>
+    <Compile Remove="Tests\**" />
+    <None Remove="Tests\**" />
+    <Page Remove="Tests\**" />
+    <PRIResource Remove="Tests\**" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
     <ProjectCapability Include="Msix" />
   </ItemGroup>
