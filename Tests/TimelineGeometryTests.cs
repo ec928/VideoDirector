@@ -26,10 +26,9 @@ namespace VideoDirector.Tests
         [Fact]
         public void RowYIncreasesAsCompositingOrderDecreases()
         {
-            Assert.Equal(16, TimelineGeometry.RowYForTrack(3, Tracks));
-            Assert.Equal(34, TimelineGeometry.RowYForTrack(2, Tracks));
-            Assert.Equal(52, TimelineGeometry.RowYForTrack(1, Tracks));
-            Assert.Equal(70, TimelineGeometry.RowYForTrack(0, Tracks));
+            for (int lane = 0; lane < Tracks; lane++)
+                Assert.Equal(TimelineGeometry.RowTop + lane * TimelineGeometry.RowPitch,
+                             TimelineGeometry.RowYForTrack(Tracks - 1 - lane, Tracks), 6);
 
             // The property that actually matters: a higher track sits higher on screen, so
             // dragging a clip up a lane moves it UP the compositing stack.
@@ -51,17 +50,16 @@ namespace VideoDirector.Tests
 
         [Theory]
         // A point anywhere inside a lane's pitch band resolves to that lane's track.
-        [InlineData(16, 3)]
-        [InlineData(20, 3)]
-        [InlineData(33, 3)]
-        [InlineData(34, 2)]
-        [InlineData(51, 2)]
-        [InlineData(52, 1)]
-        [InlineData(69, 1)]
-        [InlineData(70, 0)]
-        [InlineData(87, 0)]
-        public void TrackAtYResolvesEveryPointInALaneBand(double y, int expected)
+        [InlineData(0.0, 3)]     // top of the top lane
+        [InlineData(0.5, 3)]     // half-way down it
+        [InlineData(0.99, 3)]    // just before the next lane starts
+        [InlineData(1.0, 2)]
+        [InlineData(2.0, 1)]
+        [InlineData(3.0, 0)]     // bottom lane
+        [InlineData(3.9, 0)]
+        public void TrackAtYResolvesEveryPointInALaneBand(double lanesDown, int expected)
         {
+            double y = TimelineGeometry.RowTop + lanesDown * TimelineGeometry.RowPitch;
             Assert.Equal(expected, TimelineGeometry.TrackAtY(y, Tracks));
         }
 
@@ -104,7 +102,7 @@ namespace VideoDirector.Tests
             Assert.True(TimelineGeometry.IsRulerY(0));
             Assert.True(TimelineGeometry.IsRulerY(TimelineGeometry.RowTop - 0.01));
             Assert.False(TimelineGeometry.IsRulerY(TimelineGeometry.RowTop));
-            Assert.False(TimelineGeometry.IsRulerY(70));
+            Assert.False(TimelineGeometry.IsRulerY(TimelineGeometry.RowTop + 1));
         }
 
         [Fact]

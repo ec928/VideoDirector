@@ -61,8 +61,9 @@ Decide when the owning phase starts, not before:
 
 - **Do Mute / Hide affect export, or preview only?** Currently **preview only** — C2b wires them
   into the live compositor; the exporter does not read them yet. (Phase C3)
-- **Does Lock block selection, or only mutation?** Recommendation: mutation only, so a locked clip
-  can still be inspected. (Phase C3)
+- ~~**Does Lock block selection, or only mutation?**~~ Resolved in C3: **mutation only**. A locked
+  track's clips still select and inspect; they cannot be dragged, removed, split, duplicated, or
+  moved onto/off the track.
 - **Framing migration tolerance**: identity marks convert exactly; non-identity marks from existing
   projects convert best-effort and may need a visual check. Confirm that is acceptable. (Phase D1)
 - **Should clicking a spine clip during playback still jump playback to it?** Preserved as-is in B1
@@ -224,7 +225,7 @@ shell that the Group D framing UI will live inside — hence decision 4.
 
 ## Group C — Track model
 
-### C1 — Timeline runway ✅ **Done** (density deferred to C3)
+### C1 — Timeline runway ✅ **Done** (density landed with C3)
 
 **Why.** Two things block C2:
 
@@ -314,7 +315,7 @@ Track 1 can have gaps and a placement box.
 
 ---
 
-### C3 — Real track headers ⬜
+### C3 — Real track headers ✅ **Done**
 
 Depends on C2. This is where the per-clip/per-track QoL controls live.
 

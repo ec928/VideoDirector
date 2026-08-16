@@ -19,8 +19,12 @@ namespace VideoDirector.Views
     {
         public const double RulerH = 14;   // scrub strip above the lanes
         public const double RowTop = 16;   // y of the first (topmost) lane
-        public const double BlockH = 16;   // drawn height of a clip block
-        public const double RowPitch = 18; // lane-to-lane spacing; the 2px surplus is the gutter
+        public const double BlockH = 28;   // drawn height of a clip block
+        public const double RowPitch = 32; // lane-to-lane spacing; the 4px surplus is the gutter
+
+        // Width of the fixed label gutter to the left of the lanes. A track header carries an
+        // identity chip, a name and four state toggles, none of which fit the 58px it used to be.
+        public const double GutterW = 168;
 
         public static int LaneOfTrack(int trackIndex, int trackCount)
             => Math.Max(1, trackCount) - 1 - trackIndex;

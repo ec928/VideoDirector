@@ -307,44 +307,143 @@ namespace VideoDirector.Views
             TimelineLabels.Height = TimelineBarHeight;
 
             for (int ti = 0; ti < TrackCount; ti++)
-                AddTrackLabel("Track " + (ti + 1), RowYForTrack(ti), TrackPalette.For(ti), ti);
+                AddTrackHeader(RowYForTrack(ti), TrackPalette.For(ti), ti);
         }
 
         // Each track label is a button: click it to load a video into that track via a file picker
         // (trackIndex -1 = spine/Track 1, 0..2 = overlay tracks). Drag & drop still works too.
-        private void AddTrackLabel(string text, double y, Windows.UI.Color color, int trackIndex)
+        // A track header: identity chip + name, the four state toggles, and an overflow menu.
+        // This replaces a single 18px button whose only action was opening a file picker, which
+        // meant a track had no way to be silenced, hidden, protected, or switched between
+        // sequence and free placement.
+        private void AddTrackHeader(double y, Windows.UI.Color color, int trackIndex)
         {
-            // A colour cap ties the label to the track's identity colour (same as its blocks/PiP).
-            var cap = new Microsoft.UI.Xaml.Shapes.Rectangle
+            var track = ViewModel.Tracks[trackIndex];
+            var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+
+            var row = new StackPanel
             {
-                Width = 4, Height = BlockH - 2, RadiusX = 2, RadiusY = 2,
-                VerticalAlignment = VerticalAlignment.Center,
-                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color)
+                Orientation = Orientation.Horizontal,
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center
             };
-            var label = new TextBlock
+
+            // Identity chip — the same colour as this track's clip blocks and its PiP frame.
+            row.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle
             {
-                Text = text, FontSize = 10, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 0, 1) // Nudge text slightly to center visually
+                Width = 4, Height = BlockH - 8, RadiusX = 2, RadiusY = 2,
+                VerticalAlignment = VerticalAlignment.Center, Fill = brush,
+                Margin = new Thickness(0, 0, 4, 0)
+            });
+
+            var name = new TextBlock
+            {
+                Text = track.Name,
+                FontSize = 10,
+                Width = 46,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center
             };
-            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-            content.Children.Add(cap); content.Children.Add(label);
+            ToolTipService.SetToolTip(name, track.Name + " — double-click a clip to edit it");
+            row.Children.Add(name);
+
+            row.Children.Add(TrackToggle("", "", track.IsMuted,
+                "Mute this track", v => { track.IsMuted = v; _playbackEngine?.RefreshComposite(); }));
+            row.Children.Add(TrackToggle("", "", track.IsHidden,
+                "Hide this track from the composite", v => { track.IsHidden = v; _playbackEngine?.RefreshComposite(); }));
+            row.Children.Add(TrackToggle("", "", track.IsLocked,
+                "Lock this track against edits", v => track.IsLocked = v));
+            row.Children.Add(TrackToggle("", "", track.IsGapless,
+                "Sequence: clips butt up end-to-end with no gaps", v =>
+                {
+                    track.IsGapless = v;
+                    ViewModel.RecordIfChanged();
+                    BuildTimelineBar();
+                    _playbackEngine?.RefreshComposite();
+                }));
+
+            row.Children.Add(TrackOverflow(trackIndex, track));
+
+            Canvas.SetLeft(row, 4);
+            Canvas.SetTop(row, y);
+            TimelineLabels.Children.Add(row);
+        }
+
+        // A compact state toggle. `onGlyph` shows when the flag is set.
+        private static Microsoft.UI.Xaml.Controls.Primitives.ToggleButton TrackToggle(
+            string offGlyph, string onGlyph, bool isOn, string tooltip, Action<bool> apply)
+        {
+            var icon = new FontIcon { Glyph = isOn ? onGlyph : offGlyph, FontSize = 11 };
+            var btn = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton
+            {
+                Content = icon,
+                IsChecked = isOn,
+                Width = 22, Height = 22, MinWidth = 0, MinHeight = 0,
+                Padding = new Thickness(0),
+                CornerRadius = new CornerRadius(3),
+                BorderThickness = new Thickness(0),
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent)
+            };
+            ToolTipService.SetToolTip(btn, tooltip);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, tooltip);
+            btn.Click += (s, e) =>
+            {
+                bool on = btn.IsChecked ?? false;
+                icon.Glyph = on ? onGlyph : offGlyph;
+                apply(on);
+            };
+            return btn;
+        }
+
+        // Everything a track needs but not often enough to spend a button on.
+        private Button TrackOverflow(int trackIndex, TimelineTrack track)
+        {
+            var menu = new MenuFlyout();
+
+            var load = new MenuFlyoutItem { Text = "Add clips to this track…" };
+            load.Click += (s, e) => LoadIntoTrack(trackIndex);
+            menu.Items.Add(load);
+
+            menu.Items.Add(new MenuFlyoutSeparator());
+
+            // Track-level placement defaults. DefaultCenterX/Y already existed with no UI at all,
+            // and no default size to go with them.
+            var fullFrame = new MenuFlyoutItem { Text = "New clips: full frame" };
+            fullFrame.Click += (s, e) => { track.DefaultCenterX = 0.5; track.DefaultCenterY = 0.5; ViewModel.RecordIfChanged(); };
+            menu.Items.Add(fullFrame);
+
+            var corner = new MenuFlyoutItem { Text = "New clips: corner PiP" };
+            corner.Click += (s, e) => { track.DefaultCenterX = 0.72; track.DefaultCenterY = 0.72; ViewModel.RecordIfChanged(); };
+            menu.Items.Add(corner);
+
+            menu.Items.Add(new MenuFlyoutSeparator());
+
+            var clear = new MenuFlyoutItem { Text = "Clear this track" };
+            clear.Click += (s, e) =>
+            {
+                if (track.IsLocked) return;
+                track.Clips.Clear();
+                track.Normalize();
+                if (ViewModel.TrackIndexOf(ViewModel.SelectedClip) < 0) ViewModel.SelectedClip = null;
+                ViewModel.RecordIfChanged();
+                BuildTimelineBar();
+                _playbackEngine?.RefreshComposite();
+            };
+            menu.Items.Add(clear);
 
             var btn = new Button
             {
-                Content = content,
-                Padding = new Thickness(4, 0, 4, 0),
-                CornerRadius = new CornerRadius(4),
-                BorderThickness = new Thickness(1),
-                MinHeight = 0,
-                MinWidth = 0,
-                Height = 18 // Fits precisely in RowPitch (18)
+                Content = new FontIcon { Glyph = "", FontSize = 11 },
+                Width = 22, Height = 22, MinWidth = 0, MinHeight = 0,
+                Padding = new Thickness(0),
+                CornerRadius = new CornerRadius(3),
+                BorderThickness = new Thickness(0),
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                Flyout = menu
             };
-            ToolTipService.SetToolTip(btn, "Load a video into " + text + " (or drag & drop)");
-            btn.Click += (s, e) => LoadIntoTrack(trackIndex);
-
-            Canvas.SetLeft(btn, 2);
-            Canvas.SetTop(btn, y - 1);
-            TimelineLabels.Children.Add(btn);
+            ToolTipService.SetToolTip(btn, "More actions for " + track.Name);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, "More actions for " + track.Name);
+            return btn;
         }
 
         // Open a file picker and add the chosen video(s)/image(s) to a track, then drop into Edit —
@@ -524,9 +623,15 @@ namespace VideoDirector.Views
             var hit = HitClip(p);
             if (hit.clip != null)
             {
-                _dragClip = hit.clip;
-                _dragTrackIndex = hit.trackIndex;
-                _dragGrabOffsetSec = (p.X / _timelinePxPerSec) - hit.startSec;
+                // A locked track's clips still SELECT — you can inspect them — but never move.
+                // Lock guards mutation, not visibility.
+                SelectClip(hit.clip);
+                if (!ViewModel.Tracks[hit.trackIndex].IsLocked)
+                {
+                    _dragClip = hit.clip;
+                    _dragTrackIndex = hit.trackIndex;
+                    _dragGrabOffsetSec = (p.X / _timelinePxPerSec) - hit.startSec;
+                }
             }
             else { _timelineScrubbing = true; ScrubToX(p.X); }
         }
@@ -552,8 +657,9 @@ namespace VideoDirector.Views
             {
                 var from = ViewModel.Tracks[_dragTrackIndex];
                 var to = ViewModel.Tracks[hoverTrack];
-                // Never empty a gapless track's last clip out from under the drag.
-                if (from.Clips.Count > 1 || !from.IsGapless)
+                // Never empty a gapless track's last clip out from under the drag, and never move
+                // onto or off a locked track.
+                if ((from.Clips.Count > 1 || !from.IsGapless) && !from.IsLocked && !to.IsLocked)
                 {
                     from.Clips.Remove(_dragClip);
                     if (to.IsGapless)
@@ -627,17 +733,19 @@ namespace VideoDirector.Views
 
             if (_dragClip != null)
             {
-                if (!wasMoving) SelectClip(_dragClip); // a tap selects
-                else if (DragIsGapless)
+                var dropTrack = TrackOf(_dragClip);
+                if (wasMoving && DragIsGapless && dropTrack != null)
                 {
-                    // Commit the reorder exactly once, at the ghost's drop position.
-                    int cur = ViewModel.TimelineNodes.IndexOf(_dragClip);
-                    int target = Math.Clamp(_dragInsertIndex, 0, ViewModel.TimelineNodes.Count - 1);
-                    if (cur >= 0 && target != cur) ViewModel.TimelineNodes.Move(cur, target);
+                    // Commit the reorder exactly once, at the ghost's drop position. Reads the
+                    // clip's OWN track rather than assuming track 0 — any track can be gapless.
+                    int cur = dropTrack.Clips.IndexOf(_dragClip);
+                    int target = Math.Clamp(_dragInsertIndex, 0, dropTrack.Clips.Count - 1);
+                    if (cur >= 0 && target != cur) dropTrack.Clips.Move(cur, target);
+                    dropTrack.Normalize();
                 }
                 else
                 {
-                    TrackOf(_dragClip)?.ResolveOverlaps();
+                    dropTrack?.Normalize();
                     _playbackEngine?.RefreshComposite();
                 }
             }
@@ -645,6 +753,7 @@ namespace VideoDirector.Views
             _timelineScrubbing = false;
             _timelineMovingClip = false;
             _dragClip = null;
+            _dragTrackIndex = -1;
             if (wasMoving)
             {
                 BuildTimelineBar();          // clear the drag ghost
@@ -717,7 +826,8 @@ namespace VideoDirector.Views
         private void InsertAfter(CinematicOperation after, CinematicOperation toInsert, double desiredStartSec)
         {
             var track = TrackOf(after);
-            int i = track?.Clips.IndexOf(after) ?? -1;
+            if (track == null || track.IsLocked) return;
+            int i = track.Clips.IndexOf(after);
             if (i < 0) return;
 
             if (!track.IsGapless)
@@ -804,7 +914,7 @@ namespace VideoDirector.Views
         private void RemoveClip(CinematicOperation clip)
         {
             var track = TrackOf(clip);
-            if (track == null) return;
+            if (track == null || track.IsLocked) return;
             track.Clips.Remove(clip);
             track.Normalize();
             if (ReferenceEquals(ViewModel.SelectedClip, clip)) ViewModel.SelectedClip = null;

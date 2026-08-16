@@ -454,7 +454,7 @@
                 <Border Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" CornerRadius="4">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="58" />
+                            <ColumnDefinition Width="168" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Canvas x:Name="TimelineLabels" Grid.Column="0" Background="Transparent" />

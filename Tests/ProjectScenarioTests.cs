@@ -134,6 +134,77 @@ namespace VideoDirector.Tests
             Assert.False(vm.IsSelectedTransitionApplicable);
         }
 
+        // ---- Track flags (C3) ----------------------------------------------------------------
+
+        [Fact]
+        public void TrackFlagsDefaultOff()
+        {
+            var vm = new DirectorViewModel();
+            foreach (var t in vm.Tracks)
+            {
+                Assert.False(t.IsMuted);
+                Assert.False(t.IsHidden);
+                Assert.False(t.IsLocked);
+            }
+        }
+
+        [Fact]
+        public void TrackFlagsSurviveASaveAndReload()
+        {
+            var vm = Project();
+            vm.Tracks[0].IsLocked = true;
+            vm.Tracks[1].IsMuted = true;
+            vm.Tracks[2].IsHidden = true;
+            vm.Tracks[3].IsGapless = true;
+
+            var reloaded = new DirectorViewModel();
+            reloaded.LoadProjectJson(vm.ToProjectJson());
+
+            Assert.True(reloaded.Tracks[0].IsLocked);
+            Assert.True(reloaded.Tracks[1].IsMuted);
+            Assert.True(reloaded.Tracks[2].IsHidden);
+            Assert.True(reloaded.Tracks[3].IsGapless);
+        }
+
+        [Fact]
+        public void TrackNamesSurviveASaveAndReload()
+        {
+            var vm = Project();
+            vm.Tracks[2].Name = "B-roll";
+            var reloaded = new DirectorViewModel();
+            reloaded.LoadProjectJson(vm.ToProjectJson());
+            Assert.Equal("B-roll", reloaded.Tracks[2].Name);
+        }
+
+        [Fact]
+        public void SwitchingATrackToGaplessClosesItsGaps()
+        {
+            var vm = new DirectorViewModel();
+            vm.Tracks[1].Clips.Add(Clip("a", 5));
+            vm.Tracks[1].Clips.Add(Clip("b", 5));
+            vm.Tracks[1].Clips[1].StartTimeSeconds = 90;
+
+            vm.Tracks[1].IsGapless = true;
+
+            Assert.Equal(0, vm.Tracks[1].Clips[0].StartTimeSeconds, 6);
+            Assert.Equal(5, vm.Tracks[1].Clips[1].StartTimeSeconds, 6);
+        }
+
+        [Fact]
+        public void ATrackDefaultPlacementIsPerTrack()
+        {
+            // Track 0 defaults to centre (full frame); the others to their own corners, so
+            // stacked PiPs do not land on top of each other.
+            var vm = new DirectorViewModel();
+            Assert.Equal(0.5, vm.Tracks[0].DefaultCenterX, 6);
+            Assert.Equal(0.5, vm.Tracks[0].DefaultCenterY, 6);
+
+            var corners = new System.Collections.Generic.HashSet<(double, double)>();
+            for (int i = 1; i < vm.Tracks.Count; i++)
+                corners.Add((vm.Tracks[i].DefaultCenterX, vm.Tracks[i].DefaultCenterY));
+            Assert.Equal(vm.Tracks.Count - 1, corners.Count);
+        }
+
         // ---- Round trip and history ----------------------------------------------------------
 
         [Fact]

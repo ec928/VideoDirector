@@ -24,8 +24,23 @@ Write-Output '-------------------'
 
 if (-not (Test-Path $exe)) {
     Write-Output "  FAIL  build output present ($exe)"
+    Write-Output '        run: dotnet build -c Debug -p:Platform=x64'
     exit 1
 }
+
+# State exactly what is under test. The path is deep (TFM + RID) and gitignored, so it is not
+# obvious from a file listing, and a stale binary would otherwise pass silently.
+$exeInfo = Get-Item $exe
+Write-Output "  exe   $($exeInfo.FullName)"
+Write-Output "  built $($exeInfo.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))"
+
+# Only APP sources count. Test sources are not compiled into the binary under test, so including
+# them made this fail whenever a test was edited after the last app build.
+$newestSource = Get-ChildItem -Path (Join-Path $PSScriptRoot '..') -Recurse -Include *.cs, *.xaml |
+    Where-Object { $_.FullName -notmatch '\\(bin|obj|Tests)\\' } |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Check 'binary is newer than sources' ($exeInfo.LastWriteTime -ge $newestSource.LastWriteTime) `
+    "(stale: $($newestSource.Name) changed $($newestSource.LastWriteTime.ToString('HH:mm:ss')))"
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 
@@ -60,10 +75,19 @@ try {
         try { if ($d.Current.Name) { $names += $d.Current.Name } } catch { }
     }
 
-    # The four track load buttons are built in code from the unified track list, so their presence
-    # confirms the timeline actually laid itself out against the new model.
+    # Track headers are built in code from the unified track list, so their presence confirms the
+    # timeline actually laid itself out against the new model.
     foreach ($t in 1..4) {
-        Check "track $t label present" ($names -contains "Track $t")
+        Check "track $t overflow present" (($names | Where-Object { $_ -eq "More actions for Track $t" }).Count -eq 1)
+    }
+
+    # Phase C3: every track carries its own state toggles, one set per track.
+    foreach ($flag in 'Mute this track',
+                      'Hide this track from the composite',
+                      'Lock this track against edits',
+                      'Sequence: clips butt up end-to-end with no gaps') {
+        $found = ($names | Where-Object { $_ -eq $flag }).Count
+        Check "track flag '$($flag.Split(':')[0])' on every track" ($found -eq 4) "(found $found, expected 4)"
     }
 
     # Transport and toolbar controls, by tooltip/name.
