@@ -19,6 +19,9 @@ namespace VideoDirector.Views
 
         public static Color Overlay(int index) => Overlays[((index % Overlays.Length) + Overlays.Length) % Overlays.Length];
 
+        // Identity colour by uniform track index (0 = the base track).
+        public static Color For(int trackIndex) => trackIndex <= 0 ? Spine : Overlay(trackIndex - 1);
+
         // Readable text colour for a given background (black on light, white on dark).
         public static Color TextOn(Color bg) => Luminance(bg) > 150 ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
 

@@ -147,32 +147,15 @@ namespace VideoDirector.ViewModels
             set => SetProperty(ref _currentStoryTime, value);
         }
 
-        private CinematicOperation _selectedTimelineNode;
-        public CinematicOperation SelectedTimelineNode
+        // ---- Selection -----------------------------------------------------------------------
+        // ONE selected clip, whatever track it is on. There used to be two mutually-exclusive
+        // selection properties that had to null each other out, purely because track 0's clips
+        // lived in a different collection from everyone else's.
+        private CinematicOperation _selectedClip;
+        public CinematicOperation SelectedClip
         {
-            get => _selectedTimelineNode;
-            set
-            {
-                if (SetProperty(ref _selectedTimelineNode, value))
-                {
-                    if (value != null) SelectedOverlay = null;
-                    RaiseSelectionChanged();
-                }
-            }
-        }
-
-        private CinematicOperation _selectedOverlay;
-        public CinematicOperation SelectedOverlay
-        {
-            get => _selectedOverlay;
-            set
-            {
-                if (SetProperty(ref _selectedOverlay, value))
-                {
-                    if (value != null) SelectedTimelineNode = null;
-                    RaiseSelectionChanged();
-                }
-            }
+            get => _selectedClip;
+            set { if (SetProperty(ref _selectedClip, value)) RaiseSelectionChanged(); }
         }
 
         // Everything that derives from "which clip is selected". IsStoryboardVisible is in here
@@ -180,42 +163,58 @@ namespace VideoDirector.ViewModels
         private void RaiseSelectionChanged()
         {
             OnPropertyChanged(nameof(HasSelection));
-            OnPropertyChanged(nameof(SelectedClip));
-            OnPropertyChanged(nameof(IsTrack1Selected));
-            OnPropertyChanged(nameof(IsOverlaySelected));
+            OnPropertyChanged(nameof(SelectedTrackIndex));
+            OnPropertyChanged(nameof(SelectedTrack));
             OnPropertyChanged(nameof(SelectedTrackLabel));
+            OnPropertyChanged(nameof(IsSelectedPositionEditable));
+            OnPropertyChanged(nameof(IsSelectedTransitionApplicable));
             OnPropertyChanged(nameof(ModeLabel));
             OnPropertyChanged(nameof(IsStoryboardVisible));
             OnPropertyChanged(nameof(IsDockVisible));
         }
 
-        // True when either a Track 1 clip or an overlay is selected — the right panel shows
-        // the relevant inspector, otherwise a "nothing selected" hint.
-        public bool HasSelection => _selectedTimelineNode != null || _selectedOverlay != null;
+        public bool HasSelection => _selectedClip != null;
 
-        // The single selected clip regardless of track — the unified inspector binds to this so
-        // Track 1 and Track 2+ share one layout. IsTrack1Selected / IsOverlaySelected drive the
-        // visibility of the track-specific rows (Speed/Transition vs Size/Opacity).
-        public CinematicOperation SelectedClip => _selectedTimelineNode ?? _selectedOverlay;
-        public bool IsTrack1Selected => _selectedTimelineNode != null;
-        public bool IsOverlaySelected => _selectedOverlay != null;
+        // Index of the track owning a clip, or -1 if it is on none.
+        public int TrackIndexOf(CinematicOperation clip)
+        {
+            if (clip == null) return -1;
+            for (int i = 0; i < Tracks.Count; i++)
+                if (Tracks[i].Clips.Contains(clip)) return i;
+            return -1;
+        }
 
-        // Plain, correct track label for the selected clip — "Track 1 · main" for the spine, or the
-        // real overlay track number (Track 2/3/4 · overlay). Replaces the old two hardcoded labels
-        // that always said "Track 2" even for track 3/4.
+        public TimelineTrack TrackOf(CinematicOperation clip)
+        {
+            int i = TrackIndexOf(clip);
+            return i >= 0 ? Tracks[i] : null;
+        }
+
+        public int SelectedTrackIndex => TrackIndexOf(_selectedClip);
+        public TimelineTrack SelectedTrack => TrackOf(_selectedClip);
+
+        // A clip's timeline position is editable only where the user owns it. On a gapless track
+        // position is derived from clip order, so the field would be writing a value that
+        // Normalize immediately overwrites.
+        public bool IsSelectedPositionEditable
+        {
+            get { var t = SelectedTrack; return t != null && !t.IsGapless; }
+        }
+
+        // Transitions bridge one clip into the next, which only means something where clips are
+        // adjacent by construction — i.e. on a gapless track.
+        public bool IsSelectedTransitionApplicable
+        {
+            get { var t = SelectedTrack; return t != null && t.IsGapless; }
+        }
+
         public string SelectedTrackLabel
         {
             get
             {
-                if (_selectedTimelineNode != null) return "Track 1 · main";
-                if (_selectedOverlay != null)
-                {
-                    for (int i = 0; i < OverlayTracks.Count; i++)
-                        if (OverlayTracks[i].Clips.Contains(_selectedOverlay))
-                            return $"Track {i + 2} · overlay";
-                    return "Overlay";
-                }
-                return string.Empty;
+                var track = SelectedTrack;
+                if (track == null) return string.Empty;
+                return $"Track {SelectedTrackIndex + 1} · {(track.IsGapless ? "sequence" : "free")}";
             }
         }
 
@@ -390,66 +389,111 @@ namespace VideoDirector.ViewModels
             }
         }
 
-        public async Task AddFilesAsync(IEnumerable<string> filePaths)
+        // ---- Adding clips --------------------------------------------------------------------
+        // One path for every track. Track 0 used to have its own method that appended in order and
+        // gave clips full volume, while every other track had a different one that placed by time
+        // and muted them. Those differences are now DEFAULTS chosen from the track, not separate
+        // code paths -- which is why LoadIntoTrack could no longer tell them apart correctly.
+
+        private static async Task<CinematicOperation> CreateClipAsync(string path, TimelineTrack track, bool isBaseTrack)
         {
+            TimeSpan duration = TimeSpan.FromSeconds(10);
+            double sourceAspect = 0;
+            Microsoft.UI.Xaml.Media.Imaging.BitmapImage? thumbnail = null;
+            try
+            {
+                var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
+                var props = await file.Properties.GetVideoPropertiesAsync();
+                if (props != null && props.Duration.TotalSeconds > 0) duration = props.Duration;
+
+                // Real frame dimensions -- the PiP box is shaped from these. Never assume an
+                // aspect: a .jpg/.png has no video properties, and a portrait photo must not be
+                // forced into a landscape box.
+                if (props != null && props.Width > 0 && props.Height > 0)
+                {
+                    sourceAspect = (double)props.Width / props.Height;
+                }
+                else
+                {
+                    var imageProps = await file.Properties.GetImagePropertiesAsync();
+                    if (imageProps != null && imageProps.Width > 0 && imageProps.Height > 0)
+                    {
+                        sourceAspect = (double)imageProps.Width / imageProps.Height;
+                        if (props == null || props.Duration.TotalSeconds <= 0)
+                            duration = TimeSpan.FromSeconds(5);   // default hold for a still
+                    }
+                }
+
+                var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, 480, Windows.Storage.FileProperties.ThumbnailOptions.UseCurrentScale);
+                if (thumb != null)
+                {
+                    thumbnail = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+                    await thumbnail.SetSourceAsync(thumb);
+                }
+            }
+            catch { }
+
+            return new CinematicOperation
+            {
+                FilePath = path,
+                SourceDuration = duration,   // full source length; trim In/Out live within it
+                OpDuration = duration,
+                VideoEndTime = duration,
+                SourceAspect = sourceAspect,
+                // Defaults, not rules. The base track is the audio bed and fills the frame; upper
+                // tracks start muted and land in their own corner so stacked PiPs do not collide.
+                Volume = isBaseTrack ? 1.0 : 0.0,
+                PlacementWidth = isBaseTrack ? 1.0 : 0.3,
+                PlacementHeight = isBaseTrack ? 1.0 : 0.3,
+                PlacementCenterX = track.DefaultCenterX,
+                PlacementCenterY = track.DefaultCenterY,
+                Thumbnail = thumbnail
+            };
+        }
+
+        public async Task AddClipsToTrackAsync(IEnumerable<string> filePaths, int trackIndex, TimeSpan startTime)
+        {
+            EnsureTracks();
+            trackIndex = Math.Clamp(trackIndex, 0, Tracks.Count - 1);
+            var track = Tracks[trackIndex];
+
             foreach (var path in filePaths)
             {
-                TimeSpan duration = TimeSpan.FromSeconds(10);
-                Microsoft.UI.Xaml.Media.Imaging.BitmapImage? thumbnail = null;
-                try
+                var clip = await CreateClipAsync(path, track, trackIndex == 0);
+
+                if (track.IsGapless)
                 {
-                    var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
-                    var props = await file.Properties.GetVideoPropertiesAsync();
-                    if (props != null && props.Duration.TotalSeconds > 0)
+                    // Order is position, so append. Give the previous clip a crossfade if it has
+                    // none yet -- that is what makes a dropped sequence play as one piece.
+                    if (track.Clips.Count > 0)
                     {
-                        duration = props.Duration;
-                    }
-                    else
-                    {
-                        var imgProps = await file.Properties.GetImagePropertiesAsync();
-                        if (imgProps != null && imgProps.Width > 0)
+                        var last = track.Clips[^1];
+                        if (last.TransitionDuration == TimeSpan.Zero)
                         {
-                            duration = TimeSpan.FromSeconds(5); // Default 5s for images
+                            last.TransitionDuration = TimeSpan.FromSeconds(1);
+                            if (last.TransitionStyle == TransitionStyle.HardSnap)
+                                last.TransitionStyle = TransitionStyle.Crossfade;
                         }
                     }
-
-                    // Get Thumbnail
-                    var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, 480, Windows.Storage.FileProperties.ThumbnailOptions.UseCurrentScale);
-                    if (thumb != null)
-                    {
-                        thumbnail = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
-                        await thumbnail.SetSourceAsync(thumb);
-                    }
+                    track.Clips.Add(clip);
                 }
-                catch { }
-
-                // Update previous clip's transition if it doesn't have one
-                if (TimelineNodes.Count > 0)
+                else
                 {
-                    var lastNode = TimelineNodes[^1];
-                    if (lastNode.TransitionDuration == TimeSpan.Zero)
-                    {
-                        lastNode.TransitionDuration = TimeSpan.FromSeconds(1);
-                        if (lastNode.TransitionStyle == TransitionStyle.HardSnap)
-                        {
-                            lastNode.TransitionStyle = TransitionStyle.Crossfade;
-                        }
-                    }
+                    // Free track: place at the requested time, clamped off its siblings, since
+                    // only one clip per track can be active at a time.
+                    clip.StartTime = TimeSpan.FromSeconds(track.ClampToFreeSlot(
+                        null, Math.Max(0, startTime.TotalSeconds), clip.OpDuration.TotalSeconds));
+                    track.Clips.Add(clip);
                 }
 
-                // Insert the new operation
-                TimelineNodes.Add(new CinematicOperation
-                {
-                    FilePath = path,
-                    SourceDuration = duration,   // full source length; trim In/Out live within it
-                    OpDuration = duration,
-                    VideoEndTime = duration,
-                    TransitionDuration = TimeSpan.Zero, // Default 0s transition for the new last clip
-                    Thumbnail = thumbnail
-                });
+                track.Normalize();
             }
+
             RecordIfChanged();
         }
+
+        public Task AddFilesAsync(IEnumerable<string> filePaths)
+            => AddClipsToTrackAsync(filePaths, 0, TimeSpan.Zero);
 
         // Which track-0 clip a given absolute story time falls within. Reads the clips' real
         // StartTimes rather than re-walking a cumulative sum, so it agrees with the timeline by
@@ -501,73 +545,11 @@ namespace VideoDirector.ViewModels
             return index >= 0 && index < clips.Count ? clips[index].StartTime : TimeSpan.Zero;
         }
 
-        public async Task AddOverlayAsync(string filePath, TimeSpan startTime, int trackIndex = 0)
-        {
-            TimeSpan duration = TimeSpan.FromSeconds(5);
-            double sourceAspect = 0;
-            Microsoft.UI.Xaml.Media.Imaging.BitmapImage? thumbnail = null;
-            try
-            {
-                var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(filePath);
-                var props = await file.Properties.GetVideoPropertiesAsync();
-                if (props != null && props.Duration.TotalSeconds > 0)
-                {
-                    duration = props.Duration;
-                }
-                // Real frame dimensions — the PiP box is shaped from these. We never assume an
-                // aspect, so read it properly for images too (a .jpg/.png overlay has no video
-                // properties, and a portrait photo must not be forced into a landscape box).
-                if (props != null && props.Width > 0 && props.Height > 0)
-                {
-                    sourceAspect = (double)props.Width / props.Height;
-                }
-                else
-                {
-                    var imageProps = await file.Properties.GetImagePropertiesAsync();
-                    if (imageProps != null && imageProps.Width > 0 && imageProps.Height > 0)
-                        sourceAspect = (double)imageProps.Width / imageProps.Height;
-                }
-
-                var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, 480, Windows.Storage.FileProperties.ThumbnailOptions.UseCurrentScale);
-                if (thumb != null)
-                {
-                    thumbnail = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
-                    await thumbnail.SetSourceAsync(thumb);
-                }
-            }
-            catch { }
-
-            // An upper-track clip is a normal CinematicOperation placed at the current playhead.
-            // Content framing defaults to full-frame (marks at scale 1); the clip appears as a
-            // 30% corner PiP via its placement (PlacementScale/Center defaults on the clip).
-            EnsureTracks();
-            trackIndex = Math.Clamp(trackIndex, 0, OverlayTracks.Count - 1);
-            var track = OverlayTracks[trackIndex];
-
-            // Same clamp as dragging: a dropped file must not land on top of an existing clip,
-            // since only one clip per track can be active at a time.
-            startTime = TimeSpan.FromSeconds(
-                track.ClampToFreeSlot(null, Math.Max(0, startTime.TotalSeconds), duration.TotalSeconds));
-
-            var overlay = new CinematicOperation
-            {
-                FilePath = filePath,
-                SourceDuration = duration,   // full source length; trim In/Out live within it
-                OpDuration = duration,
-                VideoEndTime = duration,
-                StartTime = startTime,
-                SourceAspect = sourceAspect,
-                Volume = 0.0,                // overlays start muted; opt in per-clip if the PiP's audio matters
-                PlacementCenterX = track.DefaultCenterX,
-                PlacementCenterY = track.DefaultCenterY,
-                Thumbnail = thumbnail
-            };
-            track.Clips.Add(overlay);
-            RecordIfChanged();
-            // Deliberately does NOT select the new clip: selecting an overlay enters Edit mode,
-            // and in Edit mode Play previews that one clip instead of the composite (so the global
-            // playhead appears frozen). Adding clips is an Arrange activity — stay in Arrange.
-        }
+        // Back-compat entry point. trackIndex is now a UNIFORM track index (0..n-1), not an
+        // overlay-relative one -- the two used to differ by one, which is exactly the bug that
+        // sent track 0 down the overlay path once the timeline started passing uniform indices.
+        public Task AddOverlayAsync(string filePath, TimeSpan startTime, int trackIndex = 1)
+            => AddClipsToTrackAsync(new[] { filePath }, trackIndex, startTime);
 
         // Serialization wrapper. OverlayTracks is the current shape; OverlayClips is the legacy
         // flat list, still read so older project files migrate into track 0.
@@ -796,8 +778,7 @@ namespace VideoDirector.ViewModels
             catch { return; }
             if (data == null) return;
 
-            SelectedTimelineNode = null;
-            SelectedOverlay = null;
+            SelectedClip = null;
 
             ApplyProjectData(data, Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread());
         }

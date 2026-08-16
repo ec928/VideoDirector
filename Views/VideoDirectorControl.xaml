@@ -93,9 +93,9 @@
                     <TextBlock Text="Select a clip in the timeline below to edit it." TextWrapping="Wrap" TextAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorDisabledBrush}" />
                 </StackPanel>
 
-                <!-- Unified Inspector: one layout for every track. Binds to SelectedClip (whichever
-                     track is selected); track-specific rows toggle via IsTrack1Selected /
-                     IsOverlaySelected so Track 1 and Track 2+ share an identical skeleton. -->
+                <!-- Unified Inspector: one layout for every track, bound to SelectedClip. Rows key
+                     off what the clip's TRACK does (IsSelectedPositionEditable,
+                     IsSelectedTransitionApplicable), never off which track it happens to be. -->
                 <Border Grid.Row="1" Background="{ThemeResource LayerFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
                         Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
@@ -142,7 +142,7 @@
                                                 <TextBlock Text="{Binding SelectedClip.StartTimeFormatted, FallbackValue='00:00.0'}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" HorizontalAlignment="Right" />
                                             </Grid>
                                             <NumberBox local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.StartTimeSeconds, Mode=TwoWay, FallbackValue=0.0}"
-                                                       IsEnabled="{Binding IsOverlaySelected}" SmallChange="0.5" LargeChange="1.0" Minimum="0" SpinButtonPlacementMode="Compact" />
+                                                       IsEnabled="{Binding IsSelectedPositionEditable}" SmallChange="0.5" LargeChange="1.0" Minimum="0" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Position on the timeline (derived from clip order on a sequence track)" />
                                         </StackPanel>
                                         
                                         <!-- Source Length & Duration -->
@@ -209,7 +209,7 @@
                                                 <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Volume, Mode=TwoWay, FallbackValue=1.0}"
                                                            SmallChange="0.1" LargeChange="0.25" Minimum="0" Maximum="1" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Volume" />
                                                 <NumberBox Grid.Column="2" local:NumberBoxExtensions.FractionDigits="2" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}"
-                                                           SmallChange="0.1" LargeChange="0.25" Minimum="0" Maximum="1" SpinButtonPlacementMode="Compact" IsEnabled="{Binding IsOverlaySelected}" ToolTipService.ToolTip="Opacity (Overlay Only)" />
+                                                           SmallChange="0.1" LargeChange="0.25" Minimum="0" Maximum="1" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Opacity" />
                                             </Grid>
                                         </StackPanel>
                                     </StackPanel>
@@ -217,7 +217,7 @@
 
                                 <!-- 4. Transitions (Track 1 only) -->
                                 <Expander Header="Transitions" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0,0,4,4"
-                                          Visibility="{Binding IsTrack1Selected, Converter={StaticResource BoolToVisConverter}}">
+                                          Visibility="{Binding IsSelectedTransitionApplicable, Converter={StaticResource BoolToVisConverter}}">
                                     <StackPanel Spacing="4">
                                         <TextBlock Text="Transition Style / Length (s)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         <Grid ColumnSpacing="8">

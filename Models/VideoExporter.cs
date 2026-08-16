@@ -75,11 +75,14 @@ namespace VideoDirector.Models
         // per overlay track. Overlays within a track never overlap in time (enforced on add/move),
         // which is exactly the constraint MediaOverlayLayer requires.
         public async Task<MediaComposition> BuildCompositionAsync(
-            IEnumerable<CinematicOperation> spine, IEnumerable<TimelineTrack> overlayTracks, List<string> skipped)
+            IReadOnlyList<TimelineTrack> tracks, List<string> skipped)
         {
             var composition = new MediaComposition();
+            if (tracks == null || tracks.Count == 0) return composition;
 
-            foreach (var op in spine)
+            // Track 0 is the base video track; every other track becomes an overlay layer, added
+            // in track order so compositing matches the preview (ARCHITECTURE.md §5.4).
+            foreach (var op in tracks[0].Clips)
             {
                 if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) continue;
                 var clip = await CreateClipAsync(op);
@@ -87,10 +90,10 @@ namespace VideoDirector.Models
                 else skipped?.Add(System.IO.Path.GetFileName(op.FilePath));
             }
 
-            if (overlayTracks != null)
             {
-                foreach (var track in overlayTracks)
+                for (int ti = 1; ti < tracks.Count; ti++)
                 {
+                    var track = tracks[ti];
                     if (track?.Clips == null || track.Clips.Count == 0) continue;
 
                     var layer = new MediaOverlayLayer();
@@ -125,14 +128,13 @@ namespace VideoDirector.Models
         // Render the composite to `output`. Reports 0..100 progress. Never throws for the expected
         // cases (missing files, nothing to render) — returns a described ExportResult.
         public async Task<ExportResult> ExportAsync(
-            IEnumerable<CinematicOperation> spine, IEnumerable<TimelineTrack> overlayTracks,
-            StorageFile output, IProgress<double> progress)
+            IReadOnlyList<TimelineTrack> tracks, StorageFile output, IProgress<double> progress)
         {
             var skipped = new List<string>();
             MediaComposition composition;
             try
             {
-                composition = await BuildCompositionAsync(spine, overlayTracks, skipped);
+                composition = await BuildCompositionAsync(tracks, skipped);
             }
             catch (Exception ex)
             {
@@ -140,7 +142,7 @@ namespace VideoDirector.Models
             }
 
             if (composition.Clips.Count == 0)
-                return new ExportResult { Outcome = ExportOutcome.NothingToRender, Message = "No renderable Track 1 clips.", SkippedFiles = skipped };
+                return new ExportResult { Outcome = ExportOutcome.NothingToRender, Message = "No renderable clips on the base track.", SkippedFiles = skipped };
 
             var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
 

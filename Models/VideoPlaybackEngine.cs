@@ -374,26 +374,18 @@ namespace VideoDirector.Models
             }
         }
 
+        // Skip is relative to the playhead, not to the selection. It used to require a track-0
+        // clip to be selected, so it silently did nothing whenever an overlay was selected.
         public void SkipNext()
         {
-            if (_viewModel.SelectedTimelineNode != null)
-            {
-                int idx = _viewModel.TimelineNodes.IndexOf(_viewModel.SelectedTimelineNode as CinematicOperation);
-                if (idx < _viewModel.TimelineNodes.Count - 1)
-                {
-                    _ = StartPlaybackAsync(idx + 1);
-                }
-            }
+            int idx = _viewModel.GetTimelineIndexForStoryTime(_viewModel.CurrentStoryTime);
+            if (idx < _viewModel.TimelineNodes.Count - 1) _ = StartPlaybackAsync(idx + 1);
         }
 
         public void SkipPrevious()
         {
-            if (_viewModel.SelectedTimelineNode != null)
-            {
-                int idx = _viewModel.TimelineNodes.IndexOf(_viewModel.SelectedTimelineNode as CinematicOperation);
-                if (idx > 0) idx--;
-                _ = StartPlaybackAsync(idx);
-            }
+            int idx = _viewModel.GetTimelineIndexForStoryTime(_viewModel.CurrentStoryTime);
+            _ = StartPlaybackAsync(Math.Max(0, idx - 1));
         }
 
         private async Task PlaybackLoopAsync(int startIndex, CancellationToken token, TimeSpan startOffset = default)
@@ -410,11 +402,6 @@ namespace VideoDirector.Models
                     var op = _viewModel.TimelineNodes[i] as CinematicOperation;
                     
                     CurrentPlayingOperation = op;
-                    _dispatcher.TryEnqueue(() => 
-                    {
-                        _viewModel.SelectedTimelineNode = op;
-                    });
-
                     
                     var nextOp = i + 1 < _viewModel.TimelineNodes.Count ? _viewModel.TimelineNodes[i + 1] as CinematicOperation : null;
                     if (nextOp == null && _viewModel.IsLooping && _viewModel.TimelineNodes.Count > 0)
@@ -912,7 +899,7 @@ namespace VideoDirector.Models
                     _playerControl.TelemetryClipTime.Text = $"Clip Time : {currentActivePlayer.PlaybackSession.Position:hh\\:mm\\:ss\\.ff} / {clipEndTime:hh\\:mm\\:ss\\.ff} [{currentFileName}]";
                     uint nw = currentActivePlayer.PlaybackSession.NaturalVideoWidth;
                     uint nh = currentActivePlayer.PlaybackSession.NaturalVideoHeight;
-                    if (activeOp != null && (_viewModel.IsOverlaySelected || _isEditingOverlay || activeOp.PlacementWidth < 1.0 || activeOp.PlacementHeight < 1.0))
+                    if (activeOp != null && (_isEditingOverlay || activeOp.PlacementWidth < 1.0 || activeOp.PlacementHeight < 1.0))
                     {
                         _playerControl.TelemetryVideoSize.Text = $"PiP Size  : W:{activeOp.PlacementWidth * 100:F1}% H:{activeOp.PlacementHeight * 100:F1}% (Res: {nw}x{nh})";
                     }
@@ -1014,7 +1001,7 @@ namespace VideoDirector.Models
             // If we're editing an overlay track, the crop box aspect ratio must match the PiP's aspect ratio.
             double boxW = W;
             double boxH = H;
-            if (_viewModel.IsOverlaySelected)
+            if (_viewModel.SelectedTrackIndex > 0)
             {
                 double pipAspect = (16.0 / 9.0) * (op.PlacementWidth / op.PlacementHeight);
                 double videoAspect = W / H;
