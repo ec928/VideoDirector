@@ -11,7 +11,6 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
-    <PublishProfile>win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
@@ -42,6 +41,11 @@
     -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+
+    <!-- Pinned here so EVERY publish lands in the Release folder, however it is invoked.
+         Without it a bare `dotnet publish` uses the SDK default and buries the output in
+         bin\x64\Release\win-x64\publish\ — a nested copy of the folder it just built. -->
+    <PublishDir>bin\$(Platform)\$(Configuration)\</PublishDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -82,7 +86,14 @@
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
     <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
     <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">False</PublishTrimmed>
-    <PublishSingleFile Condition="'$(Configuration)' != 'Debug'">True</PublishSingleFile>
+    <!--
+      Never single-file, in any configuration. Single-file self-extracts the entire runtime
+      to %TEMP% on the first launch after every publish, which measurably slows cold start.
+      This was True for non-Debug while publish.bat and FolderProfile.pubxml both passed
+      False, so the setting was inert but contradicted them (and the README) — a trap for
+      anyone publishing without one of those.
+    -->
+    <PublishSingleFile>False</PublishSingleFile>
     <ApplicationIcon>VideoDirector.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>
