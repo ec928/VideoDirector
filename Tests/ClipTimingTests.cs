@@ -146,6 +146,89 @@ namespace VideoDirector.Tests
             Assert.True(c.PlaybackSpeed >= 0);
         }
 
+        // ---- Placement and reset (D5) --------------------------------------------------------
+
+        [Fact]
+        public void AFormattedClipReportsThatItHasPlacementChanges()
+        {
+            // The bug this fixes: HasModifications ignored placement entirely, so the reset button
+            // sat DISABLED on a clip that had been moved and resized.
+            var c = Video(60);
+            c.PlaceFullFrame();
+            Assert.False(c.HasPlacementChanges);
+
+            c.PlaceAt(0.72, 0.72);
+            Assert.True(c.HasPlacementChanges);
+            Assert.True(c.HasModifications);
+        }
+
+        [Fact]
+        public void OpacityCountsAsPlacementFormatting()
+        {
+            var c = Video(60);
+            c.PlaceFullFrame();
+            c.Opacity = 0.5f;
+            Assert.True(c.HasPlacementChanges);
+        }
+
+        [Fact]
+        public void ResettingPlacementLeavesFramingAndTimingAlone()
+        {
+            var c = Video(600);
+            c.VideoStartTime = TimeSpan.FromSeconds(10);
+            c.VideoEndTime = TimeSpan.FromSeconds(40);
+            c.StartMark = new SpatialMark(2.0, 0.3, 0.3);
+            c.PlaceAt(0.72, 0.72);
+
+            c.ResetPlacement();
+
+            Assert.False(c.HasPlacementChanges);
+            Assert.Equal(2.0, c.StartMark.Zoom, 6);                  // framing untouched
+            Assert.Equal(10, c.VideoStartTime.TotalSeconds, 6);      // trim untouched
+            Assert.Equal(40, c.VideoEndTime.TotalSeconds, 6);
+        }
+
+        [Fact]
+        public void ResettingFramingLeavesPlacementAndTimingAlone()
+        {
+            var c = Video(600);
+            c.VideoStartTime = TimeSpan.FromSeconds(10);
+            c.PlaceAt(0.72, 0.72);
+            c.StartMark = new SpatialMark(2.0, 0.3, 0.3);
+            c.MidMark = new SpatialMark(1.5, 0.5, 0.5);
+
+            c.ResetFraming();
+
+            Assert.True(c.StartMark.IsIdentity);
+            Assert.Null(c.MidMark);
+            Assert.True(c.HasPlacementChanges);                      // placement untouched
+            Assert.Equal(10, c.VideoStartTime.TotalSeconds, 6);      // trim untouched
+        }
+
+        [Fact]
+        public void AFullResetRestoresTheWholeSourceWindow()
+        {
+            // A trimmed clip used to stay trimmed through a reset, because Reset never restored
+            // the out-point.
+            var c = Video(600);
+            c.VideoStartTime = TimeSpan.FromSeconds(100);
+            c.VideoEndTime = TimeSpan.FromSeconds(150);
+
+            c.Reset();
+
+            Assert.Equal(0, c.VideoStartTime.TotalSeconds, 6);
+            Assert.Equal(600, c.VideoEndTime.TotalSeconds, 6);
+            Assert.False(c.HasModifications);
+        }
+
+        [Fact]
+        public void PlacementCanExceedTheFitSoAClipCanFillTheScreen()
+        {
+            var c = Video(60);
+            c.PlacementWidth = 1.8;
+            Assert.Equal(1.8, c.PlacementWidth, 6);   // the old 1.0 ceiling made fill unreachable
+        }
+
         // ---- Retime modes (D4) ---------------------------------------------------------------
 
         [Fact]

@@ -70,6 +70,60 @@ namespace VideoDirector.Tests
             Assert.Equal(H * 0.25, box.Height, 6);
         }
 
+        // ---- Fill (D5) -----------------------------------------------------------------------
+
+        [Fact]
+        public void FillingAMatchingShapeIsJustFullFrame()
+        {
+            var (fw, fh) = PlacementBox.FillFractions(16.0 / 9.0, W, H);
+            Assert.Equal(1.0, fw, 6);
+            Assert.Equal(1.0, fh, 6);
+        }
+
+        [Fact]
+        public void FillingANarrowerSourceOverflowsTheWidth()
+        {
+            // The reason PlacementWidth/Height had to allow more than 1.0. A source narrower than
+            // the output is pillarboxed at (1,1) — bars down the sides — so covering it means
+            // going past the fit horizontally. True of 4:3 and of portrait alike.
+            foreach (double aspect in new[] { 4.0 / 3.0, 9.0 / 16.0 })
+            {
+                var (fw, fh) = PlacementBox.FillFractions(aspect, W, H);
+                Assert.True(fw > 1.0, $"aspect {aspect}: expected to overflow the width, got {fw}");
+                Assert.Equal(1.0, fh, 6);
+            }
+        }
+
+        [Fact]
+        public void FillingAWiderSourceOverflowsTheHeight()
+        {
+            // A source wider than the output is letterboxed instead, so it overflows the other way.
+            var (fw, fh) = PlacementBox.FillFractions(2.35, W, H);
+            Assert.Equal(1.0, fw, 6);
+            Assert.True(fh > 1.0, $"expected to overflow the height, got {fh}");
+        }
+
+        [Fact]
+        public void AFilledBoxActuallyCoversTheViewport()
+        {
+            // The property that matters, checked across a spread of source shapes.
+            foreach (double aspect in new[] { 0.5, 4.0 / 3.0, 16.0 / 9.0, 2.35, 9.0 / 16.0 })
+            {
+                var (fw, fh) = PlacementBox.FillFractions(aspect, W, H);
+                var box = PlacementBox.Compute(aspect, W, H, fw, fh, 0.5, 0.5);
+                Assert.True(box.Width >= W - 1e-6, $"aspect {aspect}: width {box.Width} < {W}");
+                Assert.True(box.Height >= H - 1e-6, $"aspect {aspect}: height {box.Height} < {H}");
+            }
+        }
+
+        [Fact]
+        public void FillWithAnUnknownAspectFallsBackToFullFrame()
+        {
+            var (fw, fh) = PlacementBox.FillFractions(0, W, H);
+            Assert.Equal(1.0, fw, 6);
+            Assert.Equal(1.0, fh, 6);
+        }
+
         [Fact]
         public void UnknownAspectProducesNoBoxRatherThanAGuess()
         {

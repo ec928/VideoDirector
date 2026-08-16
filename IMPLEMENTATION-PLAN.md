@@ -1,6 +1,6 @@
 # VideoDirector — Implementation Plan
 
-**Status**: active · **Last updated**: 2026-08-16
+**Status**: active — every planned phase done except C2d; see §4 for what remains · **Last updated**: 2026-08-16
 
 This document owns all *forward-looking* work. [ARCHITECTURE.md](ARCHITECTURE.md) describes the
 system as it **is today**; this describes what it is becoming and why. If the two disagree about
@@ -502,7 +502,7 @@ not require knowing that `speed = 0` is a secret mode.
 
 ---
 
-### D5 — Placement presets + Reset ⬜
+### D5 — Placement presets + Reset ✅ **Done**
 
 Needs C2 (placement must exist on every track first).
 

@@ -52,6 +52,7 @@ namespace VideoDirector.Models
         [JsonIgnore]
         public bool HasModifications =>
             !StartMark.IsIdentity || !EndMark.IsIdentity || MidMark != null ||
+            HasPlacementChanges ||
             PlaybackSpeed != 1.0 ||
             TransitionDuration > TimeSpan.Zero ||
             TransitionStyle != TransitionStyle.HardSnap ||
@@ -360,6 +361,11 @@ namespace VideoDirector.Models
             set => SetProperty(ref _sourceAspect, value);
         }
 
+        // Above 1.0 the box is larger than the aspect-fit size, which is what "fill the screen"
+        // requires when the source and the output are different shapes. The old 1.0 ceiling made
+        // a true fill unreachable for any mismatched aspect.
+        public const double MaxPlacementFraction = 4.0;
+
         // Box size as INDEPENDENT fractions of the video's viewport-fit size (0.3 = 30%).
         // Width and Height are decoupled so the PiP box can be reshaped to any aspect; the
         // video content crop-fills the box (UniformToFill + clip) so it never distorts.
@@ -368,14 +374,14 @@ namespace VideoDirector.Models
         public double PlacementWidth
         {
             get => _placementWidth;
-            set => SetProperty(ref _placementWidth, Math.Clamp(value, 0.05, 1.0));
+            set => SetProperty(ref _placementWidth, Math.Clamp(value, 0.05, MaxPlacementFraction));
         }
 
         private double _placementHeight = 0.3;
         public double PlacementHeight
         {
             get => _placementHeight;
-            set => SetProperty(ref _placementHeight, Math.Clamp(value, 0.05, 1.0));
+            set => SetProperty(ref _placementHeight, Math.Clamp(value, 0.05, MaxPlacementFraction));
         }
 
         // Box centre as a fraction of the viewport (0.5,0.5 = centre). Default lower-right.
@@ -391,6 +397,53 @@ namespace VideoDirector.Models
         {
             get => _placementCenterY;
             set => SetProperty(ref _placementCenterY, Math.Clamp(value, 0.0, 1.0));
+        }
+
+        // Percent-facing placement, for the inspector. Nobody thinks in 0.72.
+        [JsonIgnore] public double PlacementWidthPercent { get => _placementWidth * 100; set => PlacementWidth = value / 100; }
+        [JsonIgnore] public double PlacementHeightPercent { get => _placementHeight * 100; set => PlacementHeight = value / 100; }
+        [JsonIgnore] public double PlacementCenterXPercent { get => _placementCenterX * 100; set => PlacementCenterX = value / 100; }
+        [JsonIgnore] public double PlacementCenterYPercent { get => _placementCenterY * 100; set => PlacementCenterY = value / 100; }
+
+        // True when the clip is anything other than an untouched full-frame picture. Drives the
+        // "reset placement" button, which used to be gated on HasModifications — and that ignored
+        // placement entirely, so the button sat disabled on a heavily formatted clip.
+        [JsonIgnore]
+        public bool HasPlacementChanges =>
+            Math.Abs(_placementWidth - 1.0) > 1e-6 || Math.Abs(_placementHeight - 1.0) > 1e-6 ||
+            Math.Abs(_placementCenterX - 0.5) > 1e-6 || Math.Abs(_placementCenterY - 0.5) > 1e-6 ||
+            Math.Abs(_opacity - 1.0) > 1e-6;
+
+        // ---- Placement presets ---------------------------------------------------------------
+        // The only way to set a PiP box used to be dragging it on the canvas, pixel by pixel.
+
+        public void PlaceFullFrame()
+        {
+            PlacementWidth = 1.0;
+            PlacementHeight = 1.0;
+            PlacementCenterX = 0.5;
+            PlacementCenterY = 0.5;
+        }
+
+        // Cover the whole output, cropping whatever does not fit. Needs the viewport because
+        // "fill" depends on how the source's shape compares to the output's.
+        public void PlaceFill(double viewportW, double viewportH)
+        {
+            double aspect = _sourceAspect > 0 ? _sourceAspect : (viewportH > 0 ? viewportW / viewportH : 0);
+            var (fw, fh) = PlacementBox.FillFractions(aspect, viewportW, viewportH);
+            PlacementWidth = fw;
+            PlacementHeight = fh;
+            PlacementCenterX = 0.5;
+            PlacementCenterY = 0.5;
+        }
+
+        // Shrink to a corner (or the centre) at the given size.
+        public void PlaceAt(double centerX, double centerY, double size = 0.3)
+        {
+            PlacementWidth = size;
+            PlacementHeight = size;
+            PlacementCenterX = centerX;
+            PlacementCenterY = centerY;
         }
 
         private SpatialMark _startMark = new();
@@ -472,7 +525,8 @@ namespace VideoDirector.Models
             _endMark.PropertyChanged += Mark_PropertyChanged;
         }
 
-        public void Reset()
+        // Clear the zoom/pan motion, leaving where the clip sits and how long it runs alone.
+        public void ResetFraming()
         {
             StartMark.Zoom = 1.0;
             StartMark.CenterX = 0.5;
@@ -485,19 +539,37 @@ namespace VideoDirector.Models
             EndMark.CenterX = 0.5;
             EndMark.CenterY = 0.5;
 
+            CurveProfile = CurveProfile.Linear;
+            OnPropertyChanged(nameof(HasModifications));
+        }
+
+        // Clear where the clip sits on screen, leaving its framing and timing alone. Resetting a
+        // trim is a different intent from resetting a move, which is why these are separate: one
+        // button conflating all three gets used and then undone.
+        public void ResetPlacement()
+        {
+            PlaceFullFrame();
+            Opacity = 1.0f;
+            OnPropertyChanged(nameof(HasPlacementChanges));
+            OnPropertyChanged(nameof(HasModifications));
+        }
+
+        // Everything: framing, placement and timing.
+        public void Reset()
+        {
+            ResetFraming();
+            ResetPlacement();
+
             PlaybackSpeed = 1.0;
             TransitionDuration = TimeSpan.Zero;
             TransitionStyle = TransitionStyle.HardSnap;
-            CurveProfile = CurveProfile.Linear;
+            RetimeMode = RetimeMode.HoldSource;
             VideoStartTime = TimeSpan.Zero;
-
-            // Revert duration to match the full clip duration
-            if (_videoEndTime > TimeSpan.Zero)
-            {
-                OpDuration = _videoEndTime;
-            }
+            // Restore the full source window; a trimmed clip used to stay trimmed through a reset.
+            if (_sourceDuration > TimeSpan.Zero) VideoEndTime = _sourceDuration;
 
             OnPropertyChanged(nameof(HasModifications));
+            OnPropertyChanged(nameof(HasPlacementChanges));
         }
 
         private void Mark_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

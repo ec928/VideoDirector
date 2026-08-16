@@ -153,6 +153,59 @@
                                                 </Button>
                                             </Grid>
                                         </StackPanel>
+                                        <!-- ===== Placement =====
+                                             Where the clip sits in the picture. The only way to set
+                                             this used to be dragging the box on the canvas, pixel by
+                                             pixel, with no numbers and no presets anywhere. -->
+                                        <TextBlock Text="Placement" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" />
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Button Content="Full frame" Click="PlaceFullFrame_Click" FontSize="11" Padding="8,4"
+                                                    AutomationProperties.Name="Placement full frame"
+                                                    ToolTipService.ToolTip="Fit the whole picture, letterboxed if its shape differs from the output" />
+                                            <Button Content="Fill" Click="PlaceFill_Click" FontSize="11" Padding="8,4"
+                                                    AutomationProperties.Name="Placement fill"
+                                                    ToolTipService.ToolTip="Cover the whole output, cropping whatever does not fit" />
+                                            <Button Click="ResetPlacement_Click" FontSize="11" Padding="8,4"
+                                                    IsEnabled="{Binding SelectedClip.HasPlacementChanges}"
+                                                    AutomationProperties.Name="Reset placement"
+                                                    ToolTipService.ToolTip="Back to a plain full-frame picture at full opacity">
+                                                <FontIcon Glyph="&#xE72C;" FontSize="12" />
+                                            </Button>
+                                        </StackPanel>
+
+                                        <!-- Corner presets, laid out the way they appear on screen. -->
+                                        <Grid ColumnSpacing="4" RowSpacing="4" HorizontalAlignment="Left">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Button Grid.Row="0" Grid.Column="0" Tag="0.28,0.28" Click="PlaceCorner_Click" Width="30" Height="26" Padding="0" AutomationProperties.Name="Place top left" ToolTipService.ToolTip="Top left"><FontIcon Glyph="&#xE7A7;" FontSize="10" /></Button>
+                                            <Button Grid.Row="0" Grid.Column="2" Tag="0.72,0.28" Click="PlaceCorner_Click" Width="30" Height="26" Padding="0" AutomationProperties.Name="Place top right" ToolTipService.ToolTip="Top right"><FontIcon Glyph="&#xE7A8;" FontSize="10" /></Button>
+                                            <Button Grid.Row="1" Grid.Column="1" Tag="0.5,0.5" Click="PlaceCorner_Click" Width="30" Height="26" Padding="0" AutomationProperties.Name="Place centre" ToolTipService.ToolTip="Centre"><FontIcon Glyph="&#xE799;" FontSize="10" /></Button>
+                                            <Button Grid.Row="2" Grid.Column="0" Tag="0.28,0.72" Click="PlaceCorner_Click" Width="30" Height="26" Padding="0" AutomationProperties.Name="Place bottom left" ToolTipService.ToolTip="Bottom left"><FontIcon Glyph="&#xE7A9;" FontSize="10" /></Button>
+                                            <Button Grid.Row="2" Grid.Column="2" Tag="0.72,0.72" Click="PlaceCorner_Click" Width="30" Height="26" Padding="0" AutomationProperties.Name="Place bottom right" ToolTipService.ToolTip="Bottom right"><FontIcon Glyph="&#xE7AA;" FontSize="10" /></Button>
+                                        </Grid>
+
+                                        <!-- Numbers, for when a corner preset is not quite it. -->
+                                        <Grid ColumnSpacing="8" RowSpacing="4">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <NumberBox Grid.Row="0" Grid.Column="0" Header="Width %" local:NumberBoxExtensions.FractionDigits="0"
+                                                       Value="{Binding SelectedClip.PlacementWidthPercent, Mode=TwoWay, FallbackValue=100.0}"
+                                                       SmallChange="1" LargeChange="10" Minimum="5" Maximum="400" SpinButtonPlacementMode="Compact"
+                                                       AutomationProperties.Name="Placement width percent" />
+                                            <NumberBox Grid.Row="0" Grid.Column="1" Header="Height %" local:NumberBoxExtensions.FractionDigits="0"
+                                                       Value="{Binding SelectedClip.PlacementHeightPercent, Mode=TwoWay, FallbackValue=100.0}"
+                                                       SmallChange="1" LargeChange="10" Minimum="5" Maximum="400" SpinButtonPlacementMode="Compact"
+                                                       AutomationProperties.Name="Placement height percent" />
+                                            <NumberBox Grid.Row="1" Grid.Column="0" Header="Centre X %" local:NumberBoxExtensions.FractionDigits="0"
+                                                       Value="{Binding SelectedClip.PlacementCenterXPercent, Mode=TwoWay, FallbackValue=50.0}"
+                                                       SmallChange="1" LargeChange="10" Minimum="0" Maximum="100" SpinButtonPlacementMode="Compact"
+                                                       AutomationProperties.Name="Placement centre X percent" />
+                                            <NumberBox Grid.Row="1" Grid.Column="1" Header="Centre Y %" local:NumberBoxExtensions.FractionDigits="0"
+                                                       Value="{Binding SelectedClip.PlacementCenterYPercent, Mode=TwoWay, FallbackValue=50.0}"
+                                                       SmallChange="1" LargeChange="10" Minimum="0" Maximum="100" SpinButtonPlacementMode="Compact"
+                                                       AutomationProperties.Name="Placement centre Y percent" />
+                                        </Grid>
+
                                         <ToggleButton x:Name="ResultViewToggle" Click="ResultView_Click" IsEnabled="{Binding IsEditMode}"
                                                       HorizontalAlignment="Stretch" AutomationProperties.Name="Result view"
                                                       ToolTipService.ToolTip="Show what the viewer sees at the playhead, instead of the framing rectangles">

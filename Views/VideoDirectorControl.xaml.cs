@@ -1334,6 +1334,43 @@ namespace VideoDirector.Views
             PickTarget(EditTarget.Mid);
         }
 
+        // ---- Placement presets ---------------------------------------------------------------
+        // Applied straight to the selected clip, on any track — track 0 has a placement box like
+        // everything else since C2b, so these work on it too.
+
+        private void ApplyPlacement(Action<CinematicOperation> change)
+        {
+            var clip = ViewModel.SelectedClip;
+            if (clip == null) return;
+            var track = ViewModel.TrackOf(clip);
+            if (track != null && track.IsLocked) return;
+
+            change(clip);
+            ViewModel.RecordIfChanged();
+            _playbackEngine?.RefreshComposite();
+            _playbackEngine?.RefreshEditView();
+        }
+
+        private void PlaceFullFrame_Click(object? sender, RoutedEventArgs e)
+            => ApplyPlacement(c => c.PlaceFullFrame());
+
+        // Fill depends on how the source's shape compares to the output's, so it needs the viewport.
+        private void PlaceFill_Click(object? sender, RoutedEventArgs e)
+            => ApplyPlacement(c => c.PlaceFill(PlayerControl.ActualWidth, PlayerControl.ActualHeight));
+
+        private void PlaceCorner_Click(object? sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement el || el.Tag is not string tag) return;
+            var parts = tag.Split(',');
+            if (parts.Length != 2) return;
+            if (!double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double cx)) return;
+            if (!double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double cy)) return;
+            ApplyPlacement(c => c.PlaceAt(cx, cy));
+        }
+
+        private void ResetPlacement_Click(object? sender, RoutedEventArgs e)
+            => ApplyPlacement(c => c.ResetPlacement());
+
         private void ResultView_Click(object? sender, RoutedEventArgs e)
         {
             if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)

@@ -46,5 +46,22 @@ namespace VideoDirector.Models
 
         public static PlacementBox FullFrame(double aspect, double viewportW, double viewportH)
             => Compute(aspect, viewportW, viewportH, 1.0, 1.0, 0.5, 0.5);
+
+        // The fractions that make a clip COVER the whole viewport, cropping whatever does not fit.
+        //
+        // Fractions are of the aspect-fit size, so (1, 1) means "fit" — letterboxed whenever the
+        // source and the output are different shapes. Filling therefore needs a fraction above 1
+        // on the short axis, which is why PlacementWidth/Height allow more than 1.
+        public static (double fracW, double fracH) FillFractions(
+            double aspect, double viewportW, double viewportH)
+        {
+            if (aspect <= 0 || viewportW <= 0 || viewportH <= 0) return (1.0, 1.0);
+
+            double fitW, fitH;
+            if (aspect >= viewportW / viewportH) { fitW = viewportW; fitH = viewportW / aspect; }
+            else { fitH = viewportH; fitW = viewportH * aspect; }
+
+            return (viewportW / fitW, viewportH / fitH);
+        }
     }
 }
