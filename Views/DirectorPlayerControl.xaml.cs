@@ -10,7 +10,7 @@ namespace VideoDirector.Views
     // editor mode — nothing else influences input routing (strict mode segregation).
     public enum PlayerInputMode
     {
-        Content,     // Edit mode: drag = pan the clip's content, wheel = zoom it.
+        Framing,     // Edit mode: drag the keyframe rectangles over the whole source frame.
         ArrangePips  // Arrange mode: drag = move the PiP under the cursor, wheel = resize it.
     }
 
@@ -58,7 +58,68 @@ namespace VideoDirector.Views
         public event EventHandler<int> EditRequested;
         public event EventHandler ExitEditRequested;
 
-        public PlayerInputMode InputMode { get; set; } = PlayerInputMode.Content;
+        public PlayerInputMode InputMode { get; set; } = PlayerInputMode.ArrangePips;
+
+        // ---- Framing editor -----------------------------------------------------------------
+        // The three keyframe rectangles the engine has drawn, in viewport pixels, indexed by
+        // EditTarget (0 = Start, 1 = Mid, 2 = End). A null entry means that keyframe does not
+        // exist — Mid is optional. Set by the engine each time it lays the overlay out; read here
+        // to decide what a click landed on.
+        public Models.ScreenRect?[] FramingRects { get; } = new Models.ScreenRect?[3];
+
+        // Which of them is being framed. -1 while not in Edit.
+        public int SelectedFramingTarget { get; set; } = -1;
+
+        // Raised when a click lands on a keyframe rectangle that is not the selected one.
+        public event EventHandler<int> FramingTargetPicked;
+
+        // A drag on the selected rectangle: move it, or resize it from an edge/corner.
+        public event EventHandler<(BoxGrab grab, double dx, double dy)> FramingRectDragged;
+
+        // Wheel over the framing editor zooms the selected rectangle.
+        public event EventHandler<int> FramingWheel;
+
+        // Raised when a framing drag finishes, so the engine can settle and record one undo step.
+        public event EventHandler FramingGestureCompleted;
+
+        private BoxGrab _framingGrab;
+        private bool _framingDragging;
+
+        // Which keyframe rectangle is under a point. The selected one wins so it can always be
+        // grabbed even when the rectangles overlap, which they usually do.
+        private int HitFramingTarget(Point p)
+        {
+            if (SelectedFramingTarget >= 0)
+            {
+                var sel = FramingRects[SelectedFramingTarget];
+                if (sel.HasValue && sel.Value.Contains(p.X, p.Y)) return SelectedFramingTarget;
+            }
+            for (int i = 0; i < FramingRects.Length; i++)
+            {
+                var r = FramingRects[i];
+                if (r.HasValue && r.Value.Contains(p.X, p.Y)) return i;
+            }
+            return -1;
+        }
+
+        // Where in the selected rectangle the cursor is: near an edge or corner means resize,
+        // the interior means move. Same geometric-band approach as the PiP boxes in Arrange.
+        private BoxGrab ClassifyFramingGrab(Models.ScreenRect r, Point p)
+        {
+            double t = Math.Min(HandleThreshold, Math.Min(r.Width, r.Height) / 3.0);
+            bool left = p.X - r.Left <= t, right = r.Right - p.X <= t;
+            bool top = p.Y - r.Top <= t, bottom = r.Bottom - p.Y <= t;
+
+            if (top && left) return BoxGrab.TopLeft;
+            if (top && right) return BoxGrab.TopRight;
+            if (bottom && left) return BoxGrab.BottomLeft;
+            if (bottom && right) return BoxGrab.BottomRight;
+            if (left) return BoxGrab.Left;
+            if (right) return BoxGrab.Right;
+            if (top) return BoxGrab.Top;
+            if (bottom) return BoxGrab.Bottom;
+            return BoxGrab.Move;
+        }
 
         public DirectorPlayerControl()
         {
@@ -163,6 +224,20 @@ namespace VideoDirector.Views
                 return;
             }
 
+            // Framing: a click either picks a different keyframe to work on, or starts a
+            // move/resize of the one already selected.
+            int target = HitFramingTarget(p);
+            if (target < 0) return;
+            if (target != SelectedFramingTarget)
+            {
+                FramingTargetPicked?.Invoke(this, target);
+                return;
+            }
+
+            var rect = FramingRects[target];
+            if (!rect.HasValue) return;
+            _framingGrab = ClassifyFramingGrab(rect.Value, p);
+            _framingDragging = true;
             _isDragging = true;
             _lastPointerPosition = p;
             InputLayer.CapturePointer(e.Pointer);
@@ -183,24 +258,21 @@ namespace VideoDirector.Views
                 return;
             }
 
-            if (ActiveTransform == null) return;
-            ActiveTransform.TranslateX += deltaX;
-            ActiveTransform.TranslateY += deltaY;
-            ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
+            if (_framingDragging) FramingRectDragged?.Invoke(this, (_framingGrab, deltaX, deltaY));
         }
 
-        private void InputLayer_PointerReleased(object? sender, PointerRoutedEventArgs e)
-        {
-            _isDragging = false;
-            _dragSlot = -1;
-            InputLayer.ReleasePointerCapture(e.Pointer);
-        }
+        private void InputLayer_PointerReleased(object? sender, PointerRoutedEventArgs e) => EndDrag(e);
 
-        private void InputLayer_PointerCanceled(object? sender, PointerRoutedEventArgs e)
+        private void InputLayer_PointerCanceled(object? sender, PointerRoutedEventArgs e) => EndDrag(e);
+
+        private void EndDrag(PointerRoutedEventArgs e)
         {
+            bool wasFraming = _framingDragging;
             _isDragging = false;
             _dragSlot = -1;
+            _framingDragging = false;
             InputLayer.ReleasePointerCapture(e.Pointer);
+            if (wasFraming) FramingGestureCompleted?.Invoke(this, EventArgs.Empty);
         }
 
         private void InputLayer_PointerWheelChanged(object? sender, PointerRoutedEventArgs e)
@@ -215,12 +287,9 @@ namespace VideoDirector.Views
                 return;
             }
 
-            if (ActiveTransform == null) return;
-            double zoomFactor = delta > 0 ? 1.1 : (1.0 / 1.1);
-            double newScale = Math.Clamp(ActiveTransform.ScaleX * zoomFactor, 0.1, 10.0);
-            ActiveTransform.ScaleX = newScale;
-            ActiveTransform.ScaleY = newScale;
-            ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
+            // Framing: the wheel zooms the SELECTED rectangle, which is the shortcut kept from the
+            // old content-zoom gesture (decision 1).
+            FramingWheel?.Invoke(this, delta);
         }
 
         private void InputLayer_DoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)

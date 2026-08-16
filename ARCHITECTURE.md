@@ -46,10 +46,8 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
 ### C. EDIT Mode (Red Badge)
 * **Purpose**: Micro-framing and motion design.
 * **Behavior**: Isolates and displays **one clip full-frame** on a clean canvas without redundant outer borders.
-* **Input Rules**: Canvas manipulation adjusts the clip's internal Ken Burns content framing (drag to pan content, mouse wheel to zoom content).
+* **Input Rules**: The canvas is the **framing editor**. The whole source frame is shown undistorted, and the Start / Mid / End keyframes are drawn as camera rectangles inside it — drag one to move it, its handles to resize (aspect locked to the frame), the wheel to zoom the selected one. Clicking a rectangle chooses which keyframe you are working on. The dim outside the selected rectangle shows what will actually be seen; a dashed path joins the keyframe centres; a red rectangle tracks the camera at the playhead, so scrubbing shows the real motion. A **Result view** toggle swaps the rectangles for what the viewer gets.
 * **Entry is deliberate** - double-click a timeline clip, press Enter on a selection, double-tap a canvas PiP, or use the inspector's "Edit framing" button. **Selecting a clip does not enter Edit**: selection means "work on this clip" and shows it in the inspector, nothing more. Exit via the mode badge, Esc, or clicking the timeline, which exits *and* does its normal job in the same gesture.
-
-> ⚠ **Scheduled to change** - **canvas input** (plan phase D2): direct content pan/zoom is replaced by directly manipulating the Start/Mid/End keyframe rectangles over the whole source frame. The wheel will zoom the *selected rectangle*.
 
 ---
 
@@ -82,6 +80,7 @@ This chronological ledger records all established solutions and performance opti
 * **Drags preview and commit on drop**, with Esc to cancel (§5.7).
 * **Real track headers**: Mute / Hide / Lock / Sequence + overflow.
 * **Placement for every track**: track 0 renders inside a `BaseBox` and can be a PiP like any other; geometry is the shared, tested `PlacementBox`.
+* **Framing is normalised and directly editable**: marks are zoom + centre in source-frame terms (`Framing`), and the Edit canvas draws them as draggable camera rectangles over the whole frame (`FramingRects`). Both are pure and unit-tested.
 * **Regression suite**: `Tests/` (xunit) plus `Tests/run-ui-smoke.ps1` for UI Automation checks against the running app.
 
 ### 🎬 Timeline & Track Behavior Unification (pre-C2)

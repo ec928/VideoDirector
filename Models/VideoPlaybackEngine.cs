@@ -83,6 +83,12 @@ namespace VideoDirector.Models
             _playerControl.OverlayBoxDragged += OnOverlayBoxDragged;
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
 
+            // Edit mode: direct manipulation of the keyframe rectangles.
+            _playerControl.FramingTargetPicked += OnFramingTargetPicked;
+            _playerControl.FramingRectDragged += OnFramingRectDragged;
+            _playerControl.FramingWheel += OnFramingWheel;
+            _playerControl.FramingGestureCompleted += OnFramingGestureCompleted;
+
             // Start in Arrange (the default mode) — PiP input active.
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
         }
@@ -170,6 +176,10 @@ namespace VideoDirector.Models
             {
                 _editPlayer.PlaybackSession.Position = position;
                 if (!_editPreviewPlaying) RenderPausedFrame(_editPlayer);
+                // Scrubbing now moves the FRAMING too. It used to move only the decode position,
+                // so you could scrub to the middle of a clip and still be looking at whatever
+                // framing you last dragged — the motion was invisible unless you pressed play.
+                RefreshEditView();
                 return;
             }
 
@@ -255,7 +265,7 @@ namespace VideoDirector.Models
 
             _dispatcher.TryEnqueue(() =>
             {
-                UpdateWysiwygOverlay();
+                RefreshEditView();
                 // The render loop is stopped now, so nothing else will re-evaluate the composite:
                 // switch the PiPs back to arrangeable stills (frame + handles) explicitly.
                 RefreshComposite();
@@ -961,73 +971,249 @@ namespace VideoDirector.Models
             }
         }
 
-        public void UpdateWysiwygOverlay()
+        // ==================== Framing editor (Edit mode) ====================
+        //
+        // The whole source frame is shown undistorted, and the three keyframes are drawn as camera
+        // rectangles inside it. That is the inversion this replaced: framing used to mean moving
+        // the PICTURE and snapshotting the result, so the rectangles were drawn relative to the
+        // live transform and flew apart the moment you zoomed.
+        //
+        // While framing, the content transform is IDENTITY — you are looking at the whole frame,
+        // not through any one keyframe. Result view (see IsResultView) switches to the interpolated
+        // framing at the playhead so you can see what the viewer will get.
+
+        private bool _isResultView;
+        public bool IsResultView => _isResultView;
+
+        public void SetResultView(bool on)
         {
-            // The Ken Burns edit rectangles belong to Edit mode only, and to the CURRENT SUBJECT
-            // (SelectedClip) whatever track it's on — not just Track 1. Keying this off
-            // SelectedTimelineNode was why editing an overlay drew nothing. Mode is the authority
-            // (during composite play _mode is Arrange, so the rects stay hidden).
-            if (_mode != EditorMode.Edit || _viewModel.SelectedClip == null)
+            if (_isResultView == on) return;
+            _isResultView = on;
+            RefreshEditView();
+        }
+
+        // Which keyframe is being framed. Drives the rectangle selection and, at last, gives
+        // DirectorViewModel.CurrentEditTarget something in the UI that reads it.
+        private int TargetIndex => (int)_viewModel.CurrentEditTarget;
+
+        private SpatialMark MarkAt(CinematicOperation clip, int index) => index switch
+        {
+            0 => clip?.StartMark,
+            1 => clip?.MidMark,
+            _ => clip?.EndMark
+        };
+
+        private static string TargetName(int index) => index switch
+        {
+            0 => "Start",
+            1 => "Mid",
+            _ => "End"
+        };
+
+        // Put the edit surface into whichever view is current, then redraw the overlay.
+        public void RefreshEditView()
+        {
+            if (_mode != EditorMode.Edit || _editClip == null)
             {
-                _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                _playerControl.FramingCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                 return;
             }
 
-            var op = _viewModel.SelectedClip as CinematicOperation;
             var transform = _playerControl.ActiveTransform;
-            if (op == null || transform == null) return;
+            var (sw, sh) = EditSurfaceSize();
 
-            _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
-            UpdateTelemetryOverlay(true);
-
-            double W = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
-            double H = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
-
-            // The surface the clip's content is drawn on, and where it sits in the viewport. The
-            // aspect used to be hardcoded to 16:9 and scaled by the PiP fractions, which was wrong
-            // for any output that is not 16:9; the real box size is now simply asked for.
-            var (surfaceW, surfaceH) = EditSurfaceSize();
-            if (surfaceW <= 0) surfaceW = W;
-            if (surfaceH <= 0) surfaceH = H;
-            double originX = (W - surfaceW) / 2;
-            double originY = (H - surfaceH) / 2;
-
-            // Live transform currently showing the content.
-            double sc = transform.ScaleX <= 0 ? 1 : transform.ScaleX;
-            double tx = transform.TranslateX;
-            double ty = transform.TranslateY;
-
-            // A mark's camera rectangle covers 1/zoom of the frame, centred on its centre point.
-            // Map it from surface space into the viewport through the live transform, so the rects
-            // sit over the picture you are actually looking at.
-            void DrawRect(Microsoft.UI.Xaml.Shapes.Rectangle rect, SpatialMark mark, bool show)
+            if (_isResultView)
             {
-                if (!show || mark == null)
-                {
-                    rect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-                    return;
-                }
-                rect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
-
-                double zoom = mark.Zoom <= 0 ? 1 : mark.Zoom;
-                double rectW = surfaceW / zoom;
-                double rectH = surfaceH / zoom;
-                double surfaceLeft = mark.CenterX * surfaceW - rectW / 2;
-                double surfaceTop = mark.CenterY * surfaceH - rectH / 2;
-
-                // surface point -> viewport, under the current scale about the surface centre.
-                double screenLeft = originX + surfaceW / 2 + sc * (surfaceLeft - surfaceW / 2) + tx;
-                double screenTop = originY + surfaceH / 2 + sc * (surfaceTop - surfaceH / 2) + ty;
-
-                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(rect, screenLeft);
-                Microsoft.UI.Xaml.Controls.Canvas.SetTop(rect, screenTop);
-                rect.Width = Math.Max(0, sc * rectW);
-                rect.Height = Math.Max(0, sc * rectH);
+                // Show what the viewer sees at the playhead.
+                double dur = _editClip.OpDuration.TotalSeconds;
+                double progress = 0;
+                if (dur > 0 && _editPlayer?.PlaybackSession != null)
+                    progress = (_editPlayer.PlaybackSession.Position - _editClip.VideoStartTime).TotalSeconds / dur;
+                ApplyMarksAtProgress(_editClip, progress, transform, sw, sh);
+            }
+            else if (transform != null)
+            {
+                // Framing view: the picture is shown whole and untransformed, because the
+                // rectangles describe where the camera looks WITHIN it.
+                if (transform.ScaleX != 1.0) { transform.ScaleX = 1.0; transform.ScaleY = 1.0; }
+                if (transform.TranslateX != 0) transform.TranslateX = 0;
+                if (transform.TranslateY != 0) transform.TranslateY = 0;
             }
 
-            DrawRect(_playerControl.WysiwygStartRect, op.StartMark, true);
-            DrawRect(_playerControl.WysiwygMidRect, op.MidMark, true);
-            DrawRect(_playerControl.WysiwygEndRect, op.EndMark, true);
+            UpdateFramingOverlay();
+        }
+
+        // Lay out the framing overlay: frame bounds, the three keyframe rectangles, the dim outside
+        // the selected one, its handles, the motion path, and the playhead's interpolated camera.
+        public void UpdateFramingOverlay()
+        {
+            var canvas = _playerControl.FramingCanvas;
+            var clip = _viewModel.SelectedClip;
+
+            if (_mode != EditorMode.Edit || clip == null || _isResultView)
+            {
+                canvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                for (int i = 0; i < 3; i++) _playerControl.FramingRects[i] = null;
+                _playerControl.SelectedFramingTarget = -1;
+                return;
+            }
+
+            canvas.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            UpdateTelemetryOverlay(true);
+
+            double vpW = _playerControl.ActualWidth;
+            double vpH = _playerControl.ActualHeight;
+
+            // The frame is drawn where the content actually is: the edit surface, which for an
+            // upper-track clip is its box filling the video fit.
+            var (sw, sh) = EditSurfaceSize();
+            double aspect = clip.SourceAspect > 0 ? clip.SourceAspect
+                          : (sh > 0 ? sw / sh : 16.0 / 9.0);
+            var frame = FramingRects.FrameOnScreen(aspect, vpW, vpH);
+            if (frame.IsEmpty) { canvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed; return; }
+
+            Place(_playerControl.FrameBounds, frame);
+
+            int selected = Math.Clamp(TargetIndex, 0, 2);
+            if (selected == 1 && clip.MidMark == null) selected = 0;   // Mid is optional
+            _playerControl.SelectedFramingTarget = selected;
+
+            var rects = new[]
+            {
+                (rect: _playerControl.StartRect, mark: clip.StartMark),
+                (rect: _playerControl.MidRect,   mark: clip.MidMark),
+                (rect: _playerControl.EndRect,   mark: clip.EndMark)
+            };
+
+            ScreenRect? selectedRect = null;
+            var path = new Microsoft.UI.Xaml.Media.PointCollection();
+
+            for (int i = 0; i < rects.Length; i++)
+            {
+                var (shape, mark) = rects[i];
+                if (mark == null)
+                {
+                    shape.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    _playerControl.FramingRects[i] = null;
+                    continue;
+                }
+
+                var r = FramingRects.RectFor(mark, frame);
+                _playerControl.FramingRects[i] = r;
+                Place(shape, r);
+                shape.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                // The one being worked on reads solid; the others recede to dashes.
+                shape.StrokeThickness = i == selected ? 3 : 1.5;
+                shape.StrokeDashArray = i == selected
+                    ? new Microsoft.UI.Xaml.Media.DoubleCollection()
+                    : new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
+                shape.Opacity = i == selected ? 1.0 : 0.65;
+
+                path.Add(new Windows.Foundation.Point(r.CenterX, r.CenterY));
+                if (i == selected) selectedRect = r;
+            }
+
+            _playerControl.MotionPath.Points = path;
+
+            // Dim everything outside the selected rectangle.
+            if (selectedRect.HasValue) DimAround(selectedRect.Value, vpW, vpH);
+            DrawHandles(selectedRect);
+
+            // Where the camera actually is at the playhead, so scrubbing shows the real motion.
+            var playhead = CurrentFramingAtPlayhead(clip);
+            if (playhead.HasValue)
+            {
+                var pr = FramingRects.RectFor(playhead.Value.zoom, playhead.Value.cx, playhead.Value.cy, frame);
+                Place(_playerControl.PlayheadRect, pr);
+                _playerControl.PlayheadRect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            }
+            else _playerControl.PlayheadRect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+
+            _playerControl.FramingBadgeText.Text = $"Framing: {TargetName(selected)}";
+            _playerControl.FramingBadge.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(_playerControl.FramingBadge, frame.Left + 8);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(_playerControl.FramingBadge, frame.Top + 8);
+        }
+
+        // The interpolated framing at the current position within the clip, or null if it is not
+        // meaningful (no motion authored).
+        private (double zoom, double cx, double cy)? CurrentFramingAtPlayhead(CinematicOperation clip)
+        {
+            if (clip.StartMark == null || clip.EndMark == null) return null;
+            double dur = clip.OpDuration.TotalSeconds;
+            if (dur <= 0) return null;
+
+            double progress = 0;
+            if (_editPlayer?.PlaybackSession != null)
+                progress = (_editPlayer.PlaybackSession.Position - clip.VideoStartTime).TotalSeconds / dur;
+            progress = Math.Clamp(progress, 0, 1);
+
+            double eased = progress;
+            if (clip.CurveProfile == CurveProfile.Bezier)
+                eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2;
+            else if (clip.CurveProfile == CurveProfile.DirectorsArc)
+                eased = 1 - Math.Pow(1 - progress, 3);
+
+            SpatialMark from, to;
+            double p;
+            if (clip.MidMark != null)
+            {
+                if (eased < 0.5) { from = clip.StartMark; to = clip.MidMark; p = eased * 2; }
+                else { from = clip.MidMark; to = clip.EndMark; p = (eased - 0.5) * 2; }
+            }
+            else { from = clip.StartMark; to = clip.EndMark; p = eased; }
+
+            return (from.Zoom + (to.Zoom - from.Zoom) * p,
+                    from.CenterX + (to.CenterX - from.CenterX) * p,
+                    from.CenterY + (to.CenterY - from.CenterY) * p);
+        }
+
+        private static void Place(Microsoft.UI.Xaml.Shapes.Rectangle shape, ScreenRect r)
+        {
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(shape, r.Left);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(shape, r.Top);
+            shape.Width = Math.Max(0, r.Width);
+            shape.Height = Math.Max(0, r.Height);
+        }
+
+        private void DimAround(ScreenRect r, double vpW, double vpH)
+        {
+            Place(_playerControl.DimTop, new ScreenRect(0, 0, vpW, Math.Max(0, r.Top)));
+            Place(_playerControl.DimBottom, new ScreenRect(0, r.Bottom, vpW, Math.Max(0, vpH - r.Bottom)));
+            Place(_playerControl.DimLeft, new ScreenRect(0, r.Top, Math.Max(0, r.Left), Math.Max(0, r.Height)));
+            Place(_playerControl.DimRight, new ScreenRect(r.Right, r.Top, Math.Max(0, vpW - r.Right), Math.Max(0, r.Height)));
+        }
+
+        private const double HandleSize = 10;
+
+        private void DrawHandles(ScreenRect? selected)
+        {
+            var layer = _playerControl.HandleLayer;
+            layer.Children.Clear();
+            if (!selected.HasValue) return;
+
+            var r = selected.Value;
+            var points = new (double x, double y)[]
+            {
+                (r.Left, r.Top), (r.CenterX, r.Top), (r.Right, r.Top),
+                (r.Left, r.CenterY),                 (r.Right, r.CenterY),
+                (r.Left, r.Bottom), (r.CenterX, r.Bottom), (r.Right, r.Bottom)
+            };
+
+            foreach (var (x, y) in points)
+            {
+                var h = new Microsoft.UI.Xaml.Shapes.Rectangle
+                {
+                    Width = HandleSize,
+                    Height = HandleSize,
+                    Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                    Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Black),
+                    StrokeThickness = 1
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(h, x - HandleSize / 2);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(h, y - HandleSize / 2);
+                layer.Children.Add(h);
+            }
         }
 
         // Backfill the true source length from the opened media. Covers clips from older projects
@@ -1125,7 +1311,7 @@ namespace VideoDirector.Models
                 activeTransform.TranslateX = mTx;
                 activeTransform.TranslateY = mTy;
                 _playerControl.ActiveTransform = activeTransform;
-                UpdateWysiwygOverlay();
+                RefreshEditView();
             });
         }
 
@@ -1708,9 +1894,6 @@ namespace VideoDirector.Models
         private (double w, double h) EditSurfaceSize()
             => _isEditingOverlay ? OverlaySurfaceSize(0) : BaseSurfaceSize();
 
-        // The view needs this when capturing a keyframe from the on-screen framing.
-        public (double w, double h) EditSurfaceSizePublic() => EditSurfaceSize();
-
         private void ApplyOverlayDriftCorrection(int slot, CinematicOperation overlay, TimeSpan currentStoryTime)
         {
             var player = _overlayPlayer[slot];
@@ -1799,11 +1982,12 @@ namespace VideoDirector.Models
         private void SetEditModeState(CinematicOperation clip, MediaPlayer player, bool isOverlayEdit)
         {
             StopEditPreview();
+            _isResultView = false;   // always open on the framing view
             _mode = EditorMode.Edit;
             _editClip = clip;
             _editPlayer = player;
             _isEditingOverlay = isOverlayEdit;
-            _playerControl.InputMode = Views.PlayerInputMode.Content;
+            _playerControl.InputMode = Views.PlayerInputMode.Framing;
             _viewModel.IsEditMode = true;
         }
 
@@ -1818,7 +2002,9 @@ namespace VideoDirector.Models
             _editPlayer = null;
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
             _viewModel.IsEditMode = false;
-            UpdateWysiwygOverlay();                        // hide Track-1 edit rectangles
+            _isResultView = false;
+            _playerControl.FramingCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            _playerControl.SelectedFramingTarget = -1;
             // Restore the Track 1 base (a Track 2 edit had hidden the main players).
             _playerA.Opacity = _isPlayerAActive ? 1 : 0;
             _playerB.Opacity = _isPlayerAActive ? 0 : 1;
@@ -1847,7 +2033,7 @@ namespace VideoDirector.Models
             // clip, whichever track it belongs to; every other track is hidden while editing.
             SetEditModeState(overlay, _overlayPlayer[0], isOverlayEdit: true);
             StopPlayback();
-            UpdateWysiwygOverlay();
+            RefreshEditView();
             for (int i = 1; i < MaxOverlayTracks; i++)
                 if (_activeOverlay[i] != null) ReleaseOverlaySlot(i);
 
@@ -1919,7 +2105,7 @@ namespace VideoDirector.Models
                     _viewModel.CurrentOperationTime = player.PlaybackSession.Position;
                 }
                 RenderPausedFrame(player); // show the frame now, not just after you press play
-                UpdateWysiwygOverlay();
+                RefreshEditView();
             });
         }
 
@@ -1928,7 +2114,7 @@ namespace VideoDirector.Models
 
         public void OnViewportResized()
         {
-            UpdateWysiwygOverlay();
+            RefreshEditView();
             if (_isEditingOverlay && _activeOverlay[0] != null)
                 ApplyOverlayBox(0, _activeOverlay[0], true);
         }
@@ -2018,6 +2204,114 @@ namespace VideoDirector.Models
                 _lastTelemetryUpdate = DateTime.Now;
                 UpdateTelemetryOverlay(true);
             }
+        }
+
+        // ---- Edit mode: drag / resize / zoom the selected keyframe rectangle ----
+        //
+        // Every gesture goes through the same path: read the mark, express it as a rectangle in
+        // frame space, apply the gesture to that rectangle, convert back. The rectangle can never
+        // leave the frame because FramingRects.Clamp is applied on the way back.
+
+        private void OnFramingTargetPicked(object? sender, int target)
+        {
+            if (_mode != EditorMode.Edit) return;
+            _viewModel.CurrentEditTarget = (ViewModels.EditTarget)Math.Clamp(target, 0, 2);
+            RefreshEditView();
+        }
+
+        // The frame's on-screen rectangle for the clip being edited, or null if it cannot be known.
+        private ScreenRect? EditFrameOnScreen(CinematicOperation clip)
+        {
+            if (clip == null) return null;
+            var (sw, sh) = EditSurfaceSize();
+            double aspect = clip.SourceAspect > 0 ? clip.SourceAspect : (sh > 0 ? sw / sh : 0);
+            if (aspect <= 0) return null;
+            var frame = FramingRects.FrameOnScreen(aspect, _playerControl.ActualWidth, _playerControl.ActualHeight);
+            return frame.IsEmpty ? null : frame;
+        }
+
+        private void OnFramingRectDragged(object? sender, (Views.BoxGrab grab, double dx, double dy) e)
+        {
+            if (_mode != EditorMode.Edit || _isResultView) return;
+            var clip = _viewModel.SelectedClip;
+            var mark = MarkAt(clip, _playerControl.SelectedFramingTarget);
+            if (mark == null) return;
+
+            var frameOpt = EditFrameOnScreen(clip);
+            if (!frameOpt.HasValue) return;
+            var frame = frameOpt.Value;
+
+            var r = FramingRects.RectFor(mark, frame);
+            double left = r.Left, top = r.Top, right = r.Right, bottom = r.Bottom;
+
+            if (e.grab == Views.BoxGrab.Move)
+            {
+                left += e.dx; right += e.dx;
+                top += e.dy; bottom += e.dy;
+            }
+            else
+            {
+                // Resizing keeps the frame's aspect: the camera rectangle is always the same shape
+                // as the picture, so width drives height. Horizontal-only grabs use dx, vertical
+                // ones use dy, corners take whichever moved more.
+                var g = e.grab;
+                bool movesLeft = g is Views.BoxGrab.Left or Views.BoxGrab.TopLeft or Views.BoxGrab.BottomLeft;
+                bool movesRight = g is Views.BoxGrab.Right or Views.BoxGrab.TopRight or Views.BoxGrab.BottomRight;
+                bool movesTop = g is Views.BoxGrab.Top or Views.BoxGrab.TopLeft or Views.BoxGrab.TopRight;
+                bool movesBottom = g is Views.BoxGrab.Bottom or Views.BoxGrab.BottomLeft or Views.BoxGrab.BottomRight;
+
+                double delta;
+                if ((movesLeft || movesRight) && (movesTop || movesBottom))
+                    delta = Math.Abs(e.dx) >= Math.Abs(e.dy) ? (movesLeft ? -e.dx : e.dx)
+                                                             : (movesTop ? -e.dy : e.dy);
+                else if (movesLeft) delta = -e.dx;
+                else if (movesRight) delta = e.dx;
+                else if (movesTop) delta = -e.dy * (frame.Width / Math.Max(1, frame.Height));
+                else delta = e.dy * (frame.Width / Math.Max(1, frame.Height));
+
+                double newWidth = Math.Max(frame.Width / Framing.MaxZoom, r.Width + delta);
+                newWidth = Math.Min(newWidth, frame.Width);
+                double newHeight = newWidth * (frame.Height / frame.Width);
+
+                // Grow or shrink about the opposite edge, so the corner you are not holding stays put.
+                double anchorX = movesLeft ? r.Right : movesRight ? r.Left : r.CenterX;
+                double anchorY = movesTop ? r.Bottom : movesBottom ? r.Top : r.CenterY;
+                left = movesLeft ? anchorX - newWidth : movesRight ? anchorX : anchorX - newWidth / 2;
+                top = movesTop ? anchorY - newHeight : movesBottom ? anchorY : anchorY - newHeight / 2;
+                right = left + newWidth;
+                bottom = top + newHeight;
+            }
+
+            var dragged = new ScreenRect(left, top, right - left, bottom - top);
+            var (zoom, cx, cy) = FramingRects.MarkFor(dragged, frame);
+            // Settle onto the frame's centre and edges rather than landing a pixel or two off them.
+            (zoom, cx, cy) = FramingRects.SnapCentre(zoom, cx, cy, 0.01);
+
+            mark.Zoom = zoom;
+            mark.CenterX = cx;
+            mark.CenterY = cy;
+            UpdateFramingOverlay();
+        }
+
+        private void OnFramingWheel(object? sender, int delta)
+        {
+            if (_mode != EditorMode.Edit || _isResultView) return;
+            var mark = MarkAt(_viewModel.SelectedClip, _playerControl.SelectedFramingTarget);
+            if (mark == null) return;
+
+            double factor = delta > 0 ? 1.08 : 1.0 / 1.08;
+            var (zoom, cx, cy) = FramingRects.Clamp(mark.Zoom * factor, mark.CenterX, mark.CenterY);
+            mark.Zoom = zoom;
+            mark.CenterX = cx;
+            mark.CenterY = cy;
+            UpdateFramingOverlay();
+        }
+
+        // One undo step per gesture, not per pointer move.
+        private void OnFramingGestureCompleted(object? sender, EventArgs e)
+        {
+            if (_mode != EditorMode.Edit) return;
+            _viewModel.RecordIfChanged();
         }
 
         // ---- Arrange mode: drag / wheel the PiP under the cursor (the hit slot) ----

@@ -402,7 +402,7 @@ longer shifts its Ken Burns.
 
 ---
 
-### D2 — The framing canvas ⬜
+### D2 — The framing canvas ✅ **Done**
 
 The main event. Implements decision 1.
 

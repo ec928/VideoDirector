@@ -1175,7 +1175,7 @@ namespace VideoDirector.Views
             if (op == null || transform == null) return;
             
             // Only update the WYSIWYG overlay visual positions based on current viewport
-            _playbackEngine?.UpdateWysiwygOverlay();
+            _playbackEngine?.RefreshEditView();
         }
 
         // Keyframe capture is identical for every track: it grabs the current content framing
@@ -1304,48 +1304,40 @@ namespace VideoDirector.Views
             TimelineScroller.ChangeView(Math.Clamp(target, 0, extent - viewport), null, null, disableAnimation: true);
         }
 
-        // Turn the framing currently on screen into a mark. The conversion needs the size of the
-        // surface the content is drawn on, which the engine owns — a mark is expressed in
-        // source-frame terms, so it must not inherit whatever pixel size the window happens to be.
-        private SpatialMark CaptureMark(Microsoft.UI.Xaml.Media.CompositeTransform transform)
+        // Choose which keyframe the framing canvas is working on. These used to CAPTURE the
+        // current on-screen framing into a mark; now the rectangles are the marks, so picking a
+        // target just moves the selection (and the canvas seeks to that point in the clip).
+        private void PickTarget(EditTarget target)
         {
-            var (w, h) = _playbackEngine?.EditSurfaceSizePublic() ?? (PlayerControl.ActualWidth, PlayerControl.ActualHeight);
-            var (zoom, cx, cy) = Framing.FromTransform(
-                transform.ScaleX, transform.TranslateX, transform.TranslateY, w, h);
-            return new SpatialMark(zoom, cx, cy);
+            if (!ViewModel.IsEditMode || ViewModel.SelectedClip == null) return;
+            ViewModel.CurrentEditTarget = target;
+            _playbackEngine?.RefreshEditView();
         }
 
-        private void SetStart_Click(object? sender, RoutedEventArgs e)
+        private void PickStart_Click(object? sender, RoutedEventArgs e) => PickTarget(EditTarget.Start);
+        private void PickEnd_Click(object? sender, RoutedEventArgs e) => PickTarget(EditTarget.End);
+
+        // Mid is optional, so picking it creates one if the clip has none — starting from the
+        // framing that is already interpolated there, which is the least surprising place for it.
+        private void PickMid_Click(object? sender, RoutedEventArgs e)
         {
-            var op = ViewModel.SelectedClip;
-            var transform = PlayerControl.ActiveTransform;
-            if (op != null && transform != null)
+            var clip = ViewModel.SelectedClip;
+            if (!ViewModel.IsEditMode || clip == null) return;
+            if (clip.MidMark == null)
             {
-                op.StartMark = CaptureMark(transform);
-                _playbackEngine?.UpdateWysiwygOverlay();
+                clip.MidMark = new SpatialMark(
+                    (clip.StartMark.Zoom + clip.EndMark.Zoom) / 2,
+                    (clip.StartMark.CenterX + clip.EndMark.CenterX) / 2,
+                    (clip.StartMark.CenterY + clip.EndMark.CenterY) / 2);
+                ViewModel.RecordIfChanged();
             }
+            PickTarget(EditTarget.Mid);
         }
 
-        private void SetMid_Click(object? sender, RoutedEventArgs e)
+        private void ResultView_Click(object? sender, RoutedEventArgs e)
         {
-            var op = ViewModel.SelectedClip;
-            var transform = PlayerControl.ActiveTransform;
-            if (op != null && transform != null)
-            {
-                op.MidMark = CaptureMark(transform);
-                _playbackEngine?.UpdateWysiwygOverlay();
-            }
-        }
-
-        private void SetEnd_Click(object? sender, RoutedEventArgs e)
-        {
-            var op = ViewModel.SelectedClip;
-            var transform = PlayerControl.ActiveTransform;
-            if (op != null && transform != null)
-            {
-                op.EndMark = CaptureMark(transform);
-                _playbackEngine?.UpdateWysiwygOverlay();
-            }
+            if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
+                _playbackEngine?.SetResultView(tb.IsChecked ?? false);
         }
 
         // Right-click the Mid button to clear it (back to a two-point Start -> End motion).
@@ -1355,7 +1347,9 @@ namespace VideoDirector.Views
             if (op != null)
             {
                 op.MidMark = null;
-                _playbackEngine?.UpdateWysiwygOverlay();
+                if (ViewModel.CurrentEditTarget == EditTarget.Mid) ViewModel.CurrentEditTarget = EditTarget.Start;
+                ViewModel.RecordIfChanged();
+                _playbackEngine?.RefreshEditView();
             }
             e.Handled = true;
         }
@@ -1410,7 +1404,7 @@ namespace VideoDirector.Views
                 {
                     PlayPauseIcon.Symbol = ViewModel.IsPlaying ? Symbol.Pause : Symbol.Play;
                 }
-                _playbackEngine?.UpdateWysiwygOverlay();
+                _playbackEngine?.RefreshEditView();
 
                 // Whenever playback stops by ANY route (pause, stop, reaching the end), put the
                 // PiPs back into arrangeable stills. Keying off the observable state rather than
@@ -1766,7 +1760,7 @@ namespace VideoDirector.Views
             if (ViewModel.SelectedClip != null)
             {
                 ViewModel.SelectedClip.Reset();
-                _playbackEngine?.UpdateWysiwygOverlay();
+                _playbackEngine?.RefreshEditView();
             }
         }
 

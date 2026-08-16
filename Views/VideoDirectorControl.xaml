@@ -114,22 +114,26 @@
                                 <Expander Header="Transform &amp; Overlay" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="4,4,0,0">
                                     <!-- Zoom & Motion (Always visible) -->
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="Zoom &amp; Motion Controls" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" ToolTipService.ToolTip="Open the clip for framing, scroll/drag the video to frame it, then set Start / Mid / End. Same on every track."/>
+                                        <TextBlock Text="Zoom &amp; Motion Controls" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" ToolTipService.ToolTip="Open the clip for framing, then drag the Start / Mid / End rectangles over the picture. Same on every track."/>
                                         <!-- Entry point into Edit mode. Selecting a clip shows this panel but stays in
                                              Arrange; framing is a deliberate step. Hidden once you are already in Edit. -->
                                         <Button Content="Edit framing…" Click="EditFraming_Click" HorizontalAlignment="Stretch"
                                                 IsEnabled="{Binding HasSelection}"
                                                 Visibility="{Binding IsEditMode, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}"
                                                 ToolTipService.ToolTip="Open this clip full-frame to set its zoom and motion (Enter, or double-click the clip)" />
-                                        <!-- Start/Mid/End capture the CURRENT canvas framing, which only means anything
-                                             in Edit mode — outside it the canvas is showing the whole composite.
-                                             IsEnabled sits on each Button, not the StackPanel: Panel is not a Control
-                                             and has no IsEnabled, which the XAML compiler rejects. -->
+                                        <!-- Pick which keyframe to frame. These no longer "capture"
+                                             anything — the rectangles on the canvas ARE the marks, so
+                                             these just choose which one you are working on. -->
                                         <StackPanel Orientation="Horizontal" Spacing="4">
-                                            <Button Content="Start" Width="60" FontWeight="SemiBold" Click="SetStart_Click" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Set Start Keyframe" Foreground="Cyan" />
-                                            <Button Content="Mid" Width="60" FontWeight="SemiBold" Click="SetMid_Click" RightTapped="ClearMid_RightTapped" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Set Mid Keyframe (right-click to clear)" Foreground="DeepSkyBlue" />
-                                            <Button Content="End" Width="60" FontWeight="SemiBold" Click="SetEnd_Click" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Set End Keyframe" Foreground="RoyalBlue" />
+                                            <Button Content="Start" Width="56" FontWeight="SemiBold" Click="PickStart_Click" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Frame the Start keyframe" Foreground="Cyan" />
+                                            <Button Content="Mid" Width="56" FontWeight="SemiBold" Click="PickMid_Click" RightTapped="ClearMid_RightTapped" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Frame the Mid keyframe (adds one if absent; right-click to remove)" Foreground="DeepSkyBlue" />
+                                            <Button Content="End" Width="56" FontWeight="SemiBold" Click="PickEnd_Click" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Frame the End keyframe" Foreground="RoyalBlue" />
                                         </StackPanel>
+                                        <ToggleButton x:Name="ResultViewToggle" Click="ResultView_Click" IsEnabled="{Binding IsEditMode}"
+                                                      HorizontalAlignment="Stretch" AutomationProperties.Name="Result view"
+                                                      ToolTipService.ToolTip="Show what the viewer sees at the playhead, instead of the framing rectangles">
+                                            <TextBlock Text="Result view" FontSize="12" />
+                                        </ToggleButton>
                                     </StackPanel>
                                 </Expander>
 
