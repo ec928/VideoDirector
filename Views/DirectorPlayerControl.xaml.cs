@@ -53,6 +53,15 @@ namespace VideoDirector.Views
         public event EventHandler<(int slot, BoxGrab grab, double dx, double dy)> OverlayBoxDragged;
         public event EventHandler<(int slot, int delta)> OverlayBoxWheel;
 
+        // Raised when a PiP is pressed in Arrange, so the clip it belongs to becomes the selection.
+        // Without this the highlight showed whatever was last picked in the timeline, which made it
+        // worse than useless: it pointed at a different clip from the one being dragged.
+        public event EventHandler<int> OverlayPicked;
+
+        // Right-click on a PiP. Carries the slot and where the cursor was, so the menu can open on
+        // the object being acted on rather than somewhere else entirely.
+        public event EventHandler<(int slot, Point at)> OverlayContextRequested;
+
         // Double-tap the image to enter Edit for the clip under the cursor (slot = overlay track
         // index, or -1 = Track 1). In Edit mode a double-tap exits instead.
         public event EventHandler<int> EditRequested;
@@ -85,6 +94,16 @@ namespace VideoDirector.Views
         private BoxGrab _framingGrab;
         private bool _framingDragging;
 
+        // How far outside a rectangle still counts as grabbing it. The resize handles are drawn
+        // CENTRED on the boundary, so half of every handle sits outside the rectangle — a strict
+        // bounds test rejected exactly the half the cursor usually lands on, which is why grabbing
+        // a node so often did nothing.
+        private const double GrabTolerance = 14.0;
+
+        private static bool WithinGrab(Models.ScreenRect r, Point p)
+            => p.X >= r.Left - GrabTolerance && p.X <= r.Right + GrabTolerance
+            && p.Y >= r.Top - GrabTolerance && p.Y <= r.Bottom + GrabTolerance;
+
         // Which keyframe rectangle is under a point. The selected one wins so it can always be
         // grabbed even when the rectangles overlap, which they usually do.
         private int HitFramingTarget(Point p)
@@ -92,12 +111,12 @@ namespace VideoDirector.Views
             if (SelectedFramingTarget >= 0)
             {
                 var sel = FramingRects[SelectedFramingTarget];
-                if (sel.HasValue && sel.Value.Contains(p.X, p.Y)) return SelectedFramingTarget;
+                if (sel.HasValue && WithinGrab(sel.Value, p)) return SelectedFramingTarget;
             }
             for (int i = 0; i < FramingRects.Length; i++)
             {
                 var r = FramingRects[i];
-                if (r.HasValue && r.Value.Contains(p.X, p.Y)) return i;
+                if (r.HasValue && WithinGrab(r.Value, p)) return i;
             }
             return -1;
         }
@@ -106,7 +125,9 @@ namespace VideoDirector.Views
         // the interior means move. Same geometric-band approach as the PiP boxes in Arrange.
         private BoxGrab ClassifyFramingGrab(Models.ScreenRect r, Point p)
         {
-            double t = Math.Min(HandleThreshold, Math.Min(r.Width, r.Height) / 3.0);
+            // Never narrower than the tolerance, or the band you can hit would be smaller than the
+            // band that counts as hitting the rectangle at all, leaving a dead ring around it.
+            double t = Math.Max(GrabTolerance, Math.Min(HandleThreshold, Math.Min(r.Width, r.Height) / 3.0));
             bool left = p.X - r.Left <= t, right = r.Right - p.X <= t;
             bool top = p.Y - r.Top <= t, bottom = r.Bottom - p.Y <= t;
 
@@ -217,6 +238,7 @@ namespace VideoDirector.Views
             {
                 _dragSlot = HitTestOverlaySlot(p);
                 if (_dragSlot < 0) return; // clicked empty canvas — nothing to arrange
+                OverlayPicked?.Invoke(this, _dragSlot);   // what you grab is what gets highlighted
                 _dragGrab = ClassifyGrab(_dragSlot, p);
                 _isDragging = true;
                 _lastPointerPosition = p;
@@ -224,14 +246,16 @@ namespace VideoDirector.Views
                 return;
             }
 
-            // Framing: a click either picks a different keyframe to work on, or starts a
-            // move/resize of the one already selected.
+            // Framing: pressing a rectangle picks it AND begins the gesture, in one press.
+            // Picking used to consume the press on its own, so every rectangle needed clicking
+            // once to select and again to actually move — which read as the drag not working.
             int target = HitFramingTarget(p);
             if (target < 0) return;
             if (target != SelectedFramingTarget)
             {
+                // The engine updates the selection and re-lays the overlay out synchronously, so
+                // FramingRects is current again by the time we read it below.
                 FramingTargetPicked?.Invoke(this, target);
-                return;
             }
 
             var rect = FramingRects[target];
@@ -290,6 +314,17 @@ namespace VideoDirector.Views
             // Framing: the wheel zooms the SELECTED rectangle, which is the shortcut kept from the
             // old content-zoom gesture (decision 1).
             FramingWheel?.Invoke(this, delta);
+        }
+
+        private void InputLayer_RightTapped(object? sender, RightTappedRoutedEventArgs e)
+        {
+            if (InputMode != PlayerInputMode.ArrangePips) return;
+            var p = e.GetPosition(InputLayer);
+            int slot = HitTestOverlaySlot(p);
+            if (slot < 0) return;
+            OverlayPicked?.Invoke(this, slot);            // act on what you right-clicked
+            OverlayContextRequested?.Invoke(this, (slot, p));
+            e.Handled = true;
         }
 
         private void InputLayer_DoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)

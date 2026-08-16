@@ -87,6 +87,7 @@ namespace VideoDirector.Views
             PlayerControl.ViewportTransformChanged += PlayerControl_ViewportTransformChanged;
             PlayerControl.SizeChanged += PlayerControl_SizeChanged;
             PlayerControl.EditRequested += PlayerControl_EditRequested;
+            PlayerControl.OverlayContextRequested += PlayerControl_OverlayContextRequested;
             PlayerControl.ExitEditRequested += (s, ev) => ExitEditMode();
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
             ViewModel.EditTargetChanged += ViewModel_EditTargetChanged;
@@ -1378,6 +1379,79 @@ namespace VideoDirector.Views
 
         private void ResetPlacement_Click(object? sender, RoutedEventArgs e)
             => ApplyPlacement(c => c.ResetPlacement());
+
+        // Right-clicking a clip on the canvas puts its placement controls ON the clip, where you
+        // are already looking, instead of in a panel on the other side of the window.
+        private void PlayerControl_OverlayContextRequested(object? sender, (int slot, Windows.Foundation.Point at) e)
+        {
+            var clip = ViewModel.SelectedClip;
+            if (clip == null) return;
+            var track = ViewModel.TrackOf(clip);
+            bool locked = track != null && track.IsLocked;
+
+            var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom };
+
+            MenuFlyoutItem Item(string text, Action act, bool enabled = true)
+            {
+                var item = new MenuFlyoutItem { Text = text, IsEnabled = enabled && !locked };
+                item.Click += (_, __) => { act(); AfterPlacementChange(); };
+                return item;
+            }
+
+            menu.Items.Add(Item("Full frame", () => clip.PlaceFullFrame()));
+            menu.Items.Add(Item("Fill screen", () => clip.PlaceFill(PlayerControl.ActualWidth, PlayerControl.ActualHeight)));
+
+            var corners = new MenuFlyoutSubItem { Text = "Move to" };
+            foreach (var (label, cx, cy) in new[]
+            {
+                ("Top left", 0.28, 0.28), ("Top right", 0.72, 0.28), ("Centre", 0.5, 0.5),
+                ("Bottom left", 0.28, 0.72), ("Bottom right", 0.72, 0.72)
+            })
+            {
+                double x = cx, y = cy;
+                corners.Items.Add(Item(label, () => { clip.PlacementCenterX = x; clip.PlacementCenterY = y; }));
+            }
+            menu.Items.Add(corners);
+
+            var sizes = new MenuFlyoutSubItem { Text = "Size" };
+            foreach (var (label, size) in new[] { ("25%", 0.25), ("40%", 0.4), ("60%", 0.6), ("80%", 0.8) })
+            {
+                double sz = size;
+                sizes.Items.Add(Item(label, () => { clip.PlacementWidth = sz; clip.PlacementHeight = sz; }));
+            }
+            menu.Items.Add(sizes);
+
+            var opacity = new MenuFlyoutSubItem { Text = "Opacity" };
+            foreach (var (label, value) in new[] { ("100%", 1.0f), ("75%", 0.75f), ("50%", 0.5f), ("25%", 0.25f) })
+            {
+                float v = value;
+                opacity.Items.Add(Item(label, () => clip.Opacity = v));
+            }
+            menu.Items.Add(opacity);
+
+            menu.Items.Add(new MenuFlyoutSeparator());
+            menu.Items.Add(Item("Reset placement", () => clip.ResetPlacement(), clip.HasPlacementChanges));
+
+            var edit = new MenuFlyoutItem { Text = "Edit framing…" };
+            edit.Click += (_, __) => BeginEditSelected();
+            menu.Items.Add(edit);
+
+            menu.Items.Add(new MenuFlyoutSeparator());
+            menu.Items.Add(Item("Remove clip", () => RemoveClip(clip)));
+
+            menu.ShowAt(PlayerControl, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+            {
+                Position = e.at,
+                Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft
+            });
+        }
+
+        private void AfterPlacementChange()
+        {
+            ViewModel.RecordIfChanged();
+            _playbackEngine?.RefreshComposite();
+            _playbackEngine?.RefreshEditView();
+        }
 
         private void ResultView_Click(object? sender, RoutedEventArgs e)
         {

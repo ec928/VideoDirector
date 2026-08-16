@@ -135,7 +135,8 @@
               PointerMoved="InputLayer_PointerMoved"
               PointerReleased="InputLayer_PointerReleased"
               PointerCanceled="InputLayer_PointerCanceled"
-              DoubleTapped="InputLayer_DoubleTapped" />
+              DoubleTapped="InputLayer_DoubleTapped"
+              RightTapped="InputLayer_RightTapped" />
 
         <!-- HUD Overlays -->
         <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="20" Spacing="16" IsHitTestVisible="False">

@@ -566,6 +566,16 @@ Real problems found during the audit that no phase above addresses. Listed so th
 - **Audio is one number per clip.** No master level, no mute toggle, no meters, no fades. Overlays
   default muted with no indication beyond a `0.00` in a NumberBox.
 - **Overlay scrubbing** shows a static frame rather than seeking live (ARCHITECTURE.md §6B).
+- **Shimmering edge on some clips during playback**, horizontal and vertical, while other clips are
+  completely clean. Two attempted fixes did not resolve it — guarding redundant per-frame writes
+  (real, and worth keeping) and cropping decoder padding (also real, also kept). A debug readout is
+  in the telemetry HUD: decoded size, file aspect, and computed overscan. Diagnose from those
+  numbers rather than a third guess from the outside.
+- **The Arrange and Edit interaction models need rethinking.** Reported directly: "not visual,
+  intuitive and hard to use", Edit worse than Arrange. Individual defects have been fixed (see
+  below), but the underlying complaint is about the model, not the bugs, and is not yet addressed.
+  The first step taken in that direction is putting placement controls on the clip itself via a
+  canvas right-click menu, rather than in the side panel.
 
 ---
 

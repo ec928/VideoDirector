@@ -89,6 +89,7 @@ namespace VideoDirector.Models
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
 
             // Edit mode: direct manipulation of the keyframe rectangles.
+            _playerControl.OverlayPicked += OnOverlayPicked;
             _playerControl.FramingTargetPicked += OnFramingTargetPicked;
             _playerControl.FramingRectDragged += OnFramingRectDragged;
             _playerControl.FramingWheel += OnFramingWheel;
@@ -925,6 +926,15 @@ namespace VideoDirector.Models
                     _playerControl.TelemetryClipTime.Text = $"Clip Time : {currentActivePlayer.PlaybackSession.Position:hh\\:mm\\:ss\\.ff} / {clipEndTime:hh\\:mm\\:ss\\.ff} [{currentFileName}]";
                     uint nw = currentActivePlayer.PlaybackSession.NaturalVideoWidth;
                     uint nh = currentActivePlayer.PlaybackSession.NaturalVideoHeight;
+                    // Shimmering-edge diagnosis (README known issues). The file's shape, the
+                    // decoder's padded shape, and the correction derived from the two — if the edge
+                    // shimmers while overscan reads 1.00, the padding theory is wrong.
+                    double decodedAspect = nh > 0 ? (double)nw / nh : 0;
+                    double realAspect = activeOp?.SourceAspect ?? 0;
+                    _playerControl.TelemetryOperationInfo.Text =
+                        $"Edge dbg  : decoded {nw}x{nh} ({decodedAspect:F4})  file {realAspect:F4}  " +
+                        $"overscan {OverscanFor(realAspect, decodedAspect):F4}";
+
                     if (activeOp != null && (_isEditingOverlay || activeOp.PlacementWidth < 1.0 || activeOp.PlacementHeight < 1.0))
                     {
                         _playerControl.TelemetryVideoSize.Text = $"PiP Size  : W:{activeOp.PlacementWidth * 100:F1}% H:{activeOp.PlacementHeight * 100:F1}% (Res: {nw}x{nh})";
@@ -2257,6 +2267,15 @@ namespace VideoDirector.Models
         // Every gesture goes through the same path: read the mark, express it as a rectangle in
         // frame space, apply the gesture to that rectangle, convert back. The rectangle can never
         // leave the frame because FramingRects.Clamp is applied on the way back.
+
+        // Grabbing a PiP makes it the selection, so the highlight marks the clip being moved.
+        // It used to mark whatever was last picked in the timeline, which pointed at a different
+        // clip from the one under the cursor.
+        private void OnOverlayPicked(object? sender, int slot)
+        {
+            var clip = GetActiveOverlay(slot);
+            if (clip != null) _viewModel.SelectedClip = clip;
+        }
 
         private void OnFramingTargetPicked(object? sender, int target)
         {
