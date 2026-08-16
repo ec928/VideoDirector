@@ -55,5 +55,24 @@ namespace VideoDirector.Views
         // Covers every lane plus a small bottom margin, otherwise the bottom lane gets clipped.
         public static double BarHeight(int overlayCount)
             => RowTop + Math.Max(1, LaneCount(overlayCount)) * RowPitch + 6;
+
+        // ---- Horizontal extent --------------------------------------------------------------
+
+        public const double MinExtentSeconds = 30;      // an empty project still shows a usable ruler
+        public const double MinRunwaySeconds = 10;      // ...and a short one still has room to grow
+
+        // How much time the timeline draws, given where the last clip ends.
+        //
+        // Deliberately LONGER than the content: the drawn width used to equal the project length
+        // exactly, so there was nowhere to drag a clip *to* in order to extend the project. That
+        // was survivable only because Track 1 defined the duration and you extended it by appending
+        // there. Once every track is a peer (C2) there is no privileged way to make a project
+        // longer, and every track hits a wall at the current end.
+        public static double ExtentSeconds(double contentEndSeconds)
+        {
+            if (double.IsNaN(contentEndSeconds) || contentEndSeconds < 0) contentEndSeconds = 0;
+            double runway = Math.Max(MinRunwaySeconds, contentEndSeconds * 0.2);
+            return Math.Max(MinExtentSeconds, contentEndSeconds + runway);
+        }
     }
 }

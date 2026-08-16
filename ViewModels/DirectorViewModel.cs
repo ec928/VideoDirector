@@ -477,6 +477,24 @@ namespace VideoDirector.ViewModels
             }
         }
 
+        // The latest point at which ANY clip on ANY track ends.
+        //
+        // Distinct from TotalStoryDuration, which is the spine's span — i.e. what actually plays.
+        // An overlay placed past the end of the spine extends this but not that. The timeline has
+        // to draw up to here regardless, or clips exist that cannot be seen. The two converge in
+        // phase C2, when duration stops being the spine's to define.
+        public TimeSpan ContentEnd
+        {
+            get
+            {
+                var end = TotalStoryDuration;
+                foreach (var track in OverlayTracks)
+                    foreach (var clip in track.Clips)
+                        if (clip.EndTimeOnTimeline > end) end = clip.EndTimeOnTimeline;
+                return end;
+            }
+        }
+
         // Story-time start of spine clip `index` = cumulative span of everything before it.
         public TimeSpan GetSpineClipStart(int index)
         {

@@ -148,11 +148,15 @@ namespace VideoDirector.Views
             double w = viewportW * _timelineZoomFactor;
             if (w > 0) TimelineBar.Width = w;
             double h = TimelineBarHeight;
-            double total = ViewModel.TotalStoryDuration.TotalSeconds;
+
+            // The drawn span is the content plus runway, never the content exactly — otherwise
+            // there is nowhere to drag a clip TO in order to extend the project, and an empty
+            // project draws nothing at all (no ruler, no lanes, just four floating labels).
+            double total = TimelineGeometry.ExtentSeconds(ViewModel.ContentEnd.TotalSeconds);
 
             BuildTrackLabels(); // Build track headers regardless of whether the timeline is empty
 
-            if (w <= 0 || total <= 0) { _timelinePxPerSec = 0; return; }
+            if (w <= 0) { _timelinePxPerSec = 0; return; }
             _timelinePxPerSec = w / total;
 
             // Per-lane bands: a faint tint of the track's own colour distinguishes the lanes by
@@ -998,10 +1002,13 @@ namespace VideoDirector.Views
 
             // Horizontal: set the start time, clamped so it can't overlap siblings on this track
             // (tracks are strict — an overlap would silently hide one clip at playback).
-            double total = ViewModel.TotalStoryDuration.TotalSeconds;
+            // The upper bound is the drawn extent, NOT the project length: clamping to the project
+            // length meant a clip could never be placed past the current end, so no track but the
+            // spine could ever make the project longer.
+            double extent = TimelineGeometry.ExtentSeconds(ViewModel.ContentEnd.TotalSeconds);
             double dur = _dragClip.OpDuration.TotalSeconds;
             double newStart = (p.X / _timelinePxPerSec) - _dragGrabOffsetSec;
-            newStart = Math.Clamp(newStart, 0, Math.Max(0, total - dur));
+            newStart = Math.Clamp(newStart, 0, Math.Max(0, extent - dur));
             newStart = ApplyClipSnapping(newStart, dur, _dragClip);
             _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
 

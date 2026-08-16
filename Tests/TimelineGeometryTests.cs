@@ -123,6 +123,42 @@ namespace VideoDirector.Tests
                 "the bar must be tall enough to draw the bottom lane's block");
         }
 
+        // ---- Horizontal extent ---------------------------------------------------------------
+
+        [Fact]
+        public void AnEmptyProjectStillGetsAUsableTimeline()
+        {
+            // It used to draw nothing at all below a zero-length project: no ruler, no lanes,
+            // just four floating track labels beside a blank strip.
+            Assert.True(TimelineGeometry.ExtentSeconds(0) >= TimelineGeometry.MinExtentSeconds);
+        }
+
+        [Fact]
+        public void ExtentAlwaysLeavesRoomPastTheLastClip()
+        {
+            // The property that matters: there is always somewhere to drag a clip TO in order to
+            // extend the project. Without it, no track but the spine could ever make one longer.
+            foreach (double contentEnd in new[] { 0, 1, 30, 120, 3600, 20000.0 })
+            {
+                double extent = TimelineGeometry.ExtentSeconds(contentEnd);
+                Assert.True(extent > contentEnd,
+                    $"content ends at {contentEnd} but the timeline only draws {extent}");
+            }
+        }
+
+        [Fact]
+        public void ExtentGrowsWithTheProject()
+        {
+            Assert.True(TimelineGeometry.ExtentSeconds(600) > TimelineGeometry.ExtentSeconds(60));
+        }
+
+        [Fact]
+        public void ExtentToleratesNonsenseInput()
+        {
+            Assert.True(TimelineGeometry.ExtentSeconds(-5) >= TimelineGeometry.MinExtentSeconds);
+            Assert.True(TimelineGeometry.ExtentSeconds(double.NaN) >= TimelineGeometry.MinExtentSeconds);
+        }
+
         [Theory]
         [InlineData(0)]
         [InlineData(1)]
