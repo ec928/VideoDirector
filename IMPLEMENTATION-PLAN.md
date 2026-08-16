@@ -44,6 +44,15 @@ Settled 2026-08-16. Recorded so they are not re-litigated in a later session.
 | 5 | Timeline row order | **Flip it** — Track 4 top row, Track 1 bottom row, matching compositing order and every other NLE. |
 | 6 | Track header scope | **Mute · Hide · Lock · Gapless + `⋯` overflow.** Not a full mixer strip; more than the current single load button. |
 
+### Decided during implementation
+
+| Decision | Choice | Phase |
+|---|---|---|
+| Waveform display | **Removed.** It was `Math.Sin` of the clip's hash, not audio — fake data you could trim against. Real waveforms can return later as an actual feature. Reverting is one commit. | A2 |
+| Snapping shortcut | **N**, because S was already Split and the magnet tooltip wrongly claimed S. | A2 |
+| Adding a clip | **Selects** it rather than diving into Edit, matching the reasoning `AddOverlayAsync` already applied to overlays. | B1 |
+| Leaving Edit | **Keeps** the selection. It had to clear it before, or selecting would immediately re-enter Edit. | B1 |
+
 ### Still open
 
 Decide when the owning phase starts, not before:
@@ -52,10 +61,15 @@ Decide when the owning phase starts, not before:
   alternative surprises people at render time. (Phase C3)
 - **Does Lock block selection, or only mutation?** Recommendation: mutation only, so a locked clip
   can still be inspected. (Phase C3)
-- **Waveform display**: wire to real audio, or remove? It is currently `Math.Sin` of the clip's hash
-  and is not audio data at all. (Phase A2)
 - **Framing migration tolerance**: identity marks convert exactly; non-identity marks from existing
   projects convert best-effort and may need a visual check. Confirm that is acceptable. (Phase D1)
+- **Should clicking a spine clip during playback still jump playback to it?** Preserved as-is in B1
+  to limit blast radius, but it made more sense when selecting a clip meant "work on this clip".
+  Now that selection is just selection, it may be a non-sequitur.
+- **Test strategy.** There is no test project. Most of this code is WinUI-coupled and awkward to
+  unit test, but the pure helpers (row geometry, the retime constraint solver in D4, mark
+  conversion in D1) are testable and are exactly where silent regressions would hide. Needs a
+  decision on framework and how far to go before the end-to-end regression pass.
 
 ---
 
@@ -96,7 +110,7 @@ Every phase must end in a green build and a clean commit (ARCHITECTURE.md §5.5)
 
 Pure subtraction. No new behaviour, no dependencies, safe to do at any time.
 
-### A1 — Remove Record ⬜
+### A1 — Remove Record ✅ **Done**
 
 **Why.** `StartRecordingMotion` captures the transform every frame into `RecordedPath`, then
 `DistillRecordedPath` discards all of it and keeps **first, middle, last**, forcing
@@ -124,7 +138,7 @@ hundreds of dead per-frame keyframes are serialised into every project file.
 
 ---
 
-### A2 — Toolbar cleanup ⬜
+### A2 — Toolbar cleanup ✅ **Done**
 
 **Why.** Several controls in the timeline toolbar do not do what they claim, and one does two
 unrelated things.
@@ -153,7 +167,7 @@ that isn't bound.
 
 ---
 
-### A3 — Row geometry + flip ⬜
+### A3 — Row geometry + flip ✅ **Done**
 
 **Why.** Track 1 draws at the **top** of the timeline but composites at the **bottom** of the
 picture; Track 4 draws at the bottom and composites on top. Dragging a clip up a lane moves it
@@ -180,7 +194,7 @@ pair knows where a row lives.
 
 ## Group B — Shell
 
-### B1 — Selection ≠ Edit mode ⬜
+### B1 — Selection ≠ Edit mode ✅ **Done**
 
 **Why.** `SelectClip` calls `BeginEdit` whenever playback is stopped
 (`Views/VideoDirectorControl.xaml.cs:958-976`). Clicking a clip to check its duration swaps the
