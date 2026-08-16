@@ -24,6 +24,24 @@
       through the diagnostics file by file.
     -->
     <Nullable>annotations</Nullable>
+
+    <!--
+      Output layout. Two builds, two folders, nothing anywhere else:
+
+          bin\x64\Debug\VideoDirector.exe      dotnet build          - the test build
+          bin\x64\Release\VideoDirector.exe    publish.bat           - the shippable build
+
+      Release IS the publish output. `dotnet publish` has to build before it copies, and
+      that build lands in bin\x64\Release regardless; pointing PublishDir anywhere else
+      just leaves a half-built Release folder beside the real one. So they are the same
+      folder, and a Release build is by definition the self-contained portable one.
+
+      The two Append switches drop the "net8.0-windows10.0.19041.0\win-x64" tail the SDK
+      adds by default. There is exactly one TFM and one RID here, so that tail carries no
+      information and only buries the exe four levels down.
+    -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

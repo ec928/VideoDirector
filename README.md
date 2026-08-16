@@ -56,17 +56,28 @@ development").
 ```
 git clone https://github.com/ec928/VideoDirector.git
 cd VideoDirector
-dotnet build -c Release -p:Platform=x64
+dotnet build -p:Platform=x64
 ```
 
-To produce a portable build, use the publish profile:
+To produce the portable, shippable build:
 
 ```
-dotnet publish -p:PublishProfile=FolderProfile -p:Platform=x64
+publish.bat
 ```
 
-`FolderProfile.pubxml` publishes self-contained, loose-file, ReadyToRun output. Note it writes to an
-absolute `PublishDir` — change that to a path of your own before publishing.
+There are two builds and two folders, and nothing is written anywhere else:
+
+| Folder | Produced by | What it is |
+|---|---|---|
+| `bin\x64\Debug\` | `dotnet build -p:Platform=x64` | the test build |
+| `bin\x64\Release\` | `publish.bat` | self-contained, loose-file, ReadyToRun — ship this |
+
+Release *is* the publish output. `dotnet publish` must build before it copies, and that build lands
+in `bin\x64\Release` regardless, so pointing the published files anywhere else only leaves a
+half-built Release folder beside the real one.
+
+`publish.bat "D:\somewhere"` publishes elsewhere; add `nosmoke` to skip the launch check. The
+`FolderProfile.pubxml` used by the Visual Studio Publish button targets the same folder.
 
 > Deliberately **not** published as a single file. Single-file self-extracts the entire runtime to
 > `%TEMP%` on the first launch after every publish, which measurably slows cold start.

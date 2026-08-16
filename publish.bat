@@ -9,9 +9,17 @@ REM  not depend on a .pubxml (the publish profiles are gitignored and local to
 REM  the author's machine).
 REM
 REM  Usage:
-REM    publish.bat                     -> publishes to .\publish\
+REM    publish.bat                     -> publishes to .\bin\x64\Release\
 REM    publish.bat "D:\somewhere"      -> publishes to that folder
 REM    publish.bat "D:\somewhere" nosmoke
+REM
+REM  Two builds, two folders, nothing anywhere else:
+REM
+REM      bin\x64\Debug\     dotnet build   - the test build
+REM      bin\x64\Release\   this script    - the shippable build
+REM
+REM  Release IS the publish output: dotnet publish has to build before it copies,
+REM  and that build lands in bin\x64\Release anyway.
 REM
 REM  Deliberately NOT single-file: single-file self-extracts the whole runtime
 REM  to %TEMP% on the first launch after every publish, which measurably slows
@@ -19,8 +27,8 @@ REM  cold start.
 REM ============================================================================
 
 set "OUTDIR=%~1"
-if "%OUTDIR%"=="" set "OUTDIR=%~dp0publish"
-if /i "%OUTDIR%"=="nosmoke" set "OUTDIR=%~dp0publish"
+if "%OUTDIR%"=="" set "OUTDIR=%~dp0bin\x64\Release"
+if /i "%OUTDIR%"=="nosmoke" set "OUTDIR=%~dp0bin\x64\Release"
 
 set "PROJ=%~dp0VideoDirector.csproj"
 
@@ -30,6 +38,9 @@ echo  Output: %OUTDIR%
 echo ============================================================
 echo.
 
+REM The trailing backslash on PublishDir is DOUBLED deliberately. MSBuild wants a trailing
+REM separator, but \" escapes the closing quote, which swallowed every argument after it
+REM into the directory name ("...publish   -p:PublishProfile=   --nologo").
 dotnet publish "%PROJ%" ^
   -c Release ^
   -r win-x64 ^
@@ -38,7 +49,7 @@ dotnet publish "%PROJ%" ^
   -p:PublishSingleFile=false ^
   -p:PublishTrimmed=false ^
   -p:PublishReadyToRun=true ^
-  -p:PublishDir="%OUTDIR%\" ^
+  -p:PublishDir="%OUTDIR%\\" ^
   -p:PublishProfile= ^
   --nologo
 
