@@ -219,7 +219,7 @@ shell that the Group D framing UI will live inside — hence decision 4.
 
 ## Group C — Track model
 
-### C1 — Timeline runway + density ⬜
+### C1 — Timeline runway ✅ **Done** (density deferred to C3)
 
 **Why.** Two things block C2:
 
