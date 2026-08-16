@@ -76,17 +76,21 @@ absolute `PublishDir` — change that to a path of your own before publishing.
 Active development. The timeline, compositor, framing model and mode system are implemented and in
 use. Expect rough edges.
 
-### ⚠ Known issue: shimmering edge on some clips
+### ✅ Fixed: shimmering edge on some clips
 
-A thin shimmering border appears along the edge of some clips during playback, on the horizontal
-edges as well as the vertical. Other clips are completely clean, which points at something
-source-dependent.
+A thin shimmering border used to appear along the edge of some clips during playback while others
+were completely clean. The cause was the shape of the placement box.
 
-Two fixes have been attempted and neither resolved it: guarding redundant per-frame writes to the
-render path, and cropping the decoder's macroblock padding. To diagnose it properly, pin the
-Properties panel to show the telemetry HUD — the "Edge dbg" line reports the decoded frame size,
-the file's own aspect ratio, and the overscan correction derived from the two. If the edge shimmers
-while overscan reads `1.0000`, padding is not the cause.
+`MediaPlayerElement` scales its video from the **decoded** frame, which the decoder pads out to
+macroblock multiples — a 1918×804 file arrives as 1920×816. Shaping the box from the file's real
+aspect instead made the two disagree, so `UniformToFill` overflowed and the grid's clip geometry
+had to cut a live GPU swapchain. The compositor re-resolved that boundary against a surface being
+rewritten at frame rate, and the edge crawled. Boxes are now shaped from the decoded aspect, so the
+overflow is exactly zero and there is no boundary to re-resolve. See `Models/SurfaceAspect.cs`.
+
+This is why it was source-dependent: a 1920×800 file needs no padding and never showed it, while a
+1918×804 file always did. If it ever reappears, pin the Properties panel for the telemetry HUD —
+the "Edge dbg" line ends in `crops`, which must read `no`.
 
 ### ⚠ Known limitation: export is not yet WYSIWYG
 

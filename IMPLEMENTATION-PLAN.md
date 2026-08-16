@@ -566,11 +566,15 @@ Real problems found during the audit that no phase above addresses. Listed so th
 - **Audio is one number per clip.** No master level, no mute toggle, no meters, no fades. Overlays
   default muted with no indication beyond a `0.00` in a NumberBox.
 - **Overlay scrubbing** shows a static frame rather than seeking live (ARCHITECTURE.md §6B).
-- **Shimmering edge on some clips during playback**, horizontal and vertical, while other clips are
-  completely clean. Two attempted fixes did not resolve it — guarding redundant per-frame writes
-  (real, and worth keeping) and cropping decoder padding (also real, also kept). A debug readout is
-  in the telemetry HUD: decoded size, file aspect, and computed overscan. Diagnose from those
-  numbers rather than a third guess from the outside.
+- ~~**Shimmering edge on some clips during playback.**~~ **Fixed** (2026-08-16). Diagnosed by
+  diffing against the previous release, which the user supplied after three wrong guesses from the
+  outside. It was a regression I introduced: shaping the placement box from the file's real aspect
+  rather than the decoder's padded one made `UniformToFill` overflow, so the grid's clip geometry
+  cut a live swapchain every frame. Boxes take the decoded aspect again; `OverscanFor` and the
+  whole-pixel rounding — both failed fixes for the mismatch they were compensating — are gone. Rule
+  and reasoning in `Models/SurfaceAspect.cs`, 10 regression tests in `Tests/SurfaceAspectTests.cs`.
+  **Lesson worth keeping: a known-good build is worth more than another theory.** Two of the three
+  wrong guesses were plausible mechanisms that were simply not this bug.
 - **The Arrange and Edit interaction models need rethinking.** Reported directly: "not visual,
   intuitive and hard to use", Edit worse than Arrange. Individual defects have been fixed (see
   below), but the underlying complaint is about the model, not the bugs, and is not yet addressed.
