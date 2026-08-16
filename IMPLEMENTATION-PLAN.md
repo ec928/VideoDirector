@@ -568,6 +568,47 @@ Real problems found during the audit that no phase above addresses. Listed so th
 
 ---
 
+## 4b. The export fork (phase E)
+
+The export does not match the preview: no Ken Burns, no per-clip speed, no transitions, and PiPs
+stretched rather than crop-filled. `Windows.Media.Editing.MediaComposition` can place and trim
+clips but cannot express per-frame motion, has no clip rate control and no transition support, so
+the gap is not closable on that renderer.
+
+**Decision (2026-08-16): a frame-server renderer using Win2D**, which is already referenced by the
+project. Rejected alternatives: staying on MediaComposition with a custom `IBasicVideoEffect`
+(gets motion and crop-fill, but speed and transitions remain impossible), and shelling out to
+ffmpeg (least code, but an ~80MB bundled binary and a licensing decision for a distributed app).
+
+The reason the frame-server path is worth its cost is that it reuses the same pure components the
+preview uses — `Framing`, `MotionPath`, `PlacementBox`, `RetimeSolver`, `CompositeSampler` — so
+preview and export agree **by construction** rather than by maintaining two implementations. That
+is the actual defect: they drifted because each carried its own idea of what to draw.
+
+### E1 — CompositeSampler ✅ **Done**
+The definition of what the composite looks like at story time *t*: which clip each track shows,
+where to read its source (honouring speed and stills), its framing at that instant, its placement,
+opacity and volume. Pure, WinUI-free, 17 tests. Anything that decides *what* is on screen belongs
+here; a renderer decides only *how* to draw it.
+
+### E2 — Win2D frame rendering ⬜
+Draw one sampled frame onto a `CanvasRenderTarget`: base layer, then each upper track composited
+in order, each cropped to its placement box with its framing transform applied.
+
+### E3 — Source frames and encoding ⬜
+Pull frames from the source media at arbitrary positions (`MediaPlayer` frame-server mode), and
+encode the rendered sequence (`MediaStreamSource` + `MediaTranscoder`).
+
+### E4 — Audio ⬜
+The frame server handles picture only. Audio needs mixing across tracks, honouring per-clip volume,
+track mute, and per-clip speed. Likely the largest remaining unknown.
+
+### E5 — Retire the limitations list ⬜
+`VideoExporter.Limitations` shrinks to empty as each of the above lands, and the export dialog
+stops warning about them.
+
+---
+
 ## 5. Testing
 
 `Tests/VideoDirector.Tests.csproj` — xUnit, run with:
