@@ -1351,9 +1351,15 @@ namespace VideoDirector.Models
                     v.Still.Source = clip?.Thumbnail;
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
                     // A frame marks every arrangeable PiP. No drawn handles: reshape grab-zones
-                    // are geometric edge/corner bands on the InputLayer, so handles were decoration
-                    // that also made chrome depend on a selection you cannot make while arranging.
-                    if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                    // are geometric edge/corner bands on the InputLayer, so handles were decoration.
+                    // The SELECTED clip's frame shows at full strength and the rest recede — now
+                    // that selection is possible while arranging, the chrome can reflect it.
+                    if (v.Frame != null)
+                    {
+                        v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                        bool selected = clip != null && ReferenceEquals(clip, _viewModel.SelectedClip);
+                        v.Frame.Opacity = selected ? 1.0 : 0.55;
+                    }
                     v.Grid.Opacity = clip?.Opacity ?? 1.0;
                     break;
 

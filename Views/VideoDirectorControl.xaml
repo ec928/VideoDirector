@@ -26,6 +26,8 @@
              add or change one, update that tooltip in the same edit. Unmodified letter keys are
              ignored while a text field has focus (see IsTextInputFocused). -->
         <KeyboardAccelerator Key="Escape" Invoked="EscapeAccelerator_Invoked" />
+        <!-- Enter opens the selected clip for framing. Selection alone never does. -->
+        <KeyboardAccelerator Key="Enter" Invoked="EnterAccelerator_Invoked" />
         <KeyboardAccelerator Key="Space" Invoked="PlayPauseAccelerator_Invoked" />
         <KeyboardAccelerator Key="Delete" Invoked="DeleteAccelerator_Invoked" />
         <KeyboardAccelerator Key="Left" Invoked="LeftAccelerator_Invoked" />
@@ -111,11 +113,21 @@
                                 <Expander Header="Transform &amp; Overlay" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="4,4,0,0">
                                     <!-- Zoom & Motion (Always visible) -->
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="Zoom &amp; Motion Controls" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" ToolTipService.ToolTip="Scroll/drag the video to frame it, then set Start / Mid / End. Same on every track."/>
+                                        <TextBlock Text="Zoom &amp; Motion Controls" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" ToolTipService.ToolTip="Open the clip for framing, scroll/drag the video to frame it, then set Start / Mid / End. Same on every track."/>
+                                        <!-- Entry point into Edit mode. Selecting a clip shows this panel but stays in
+                                             Arrange; framing is a deliberate step. Hidden once you are already in Edit. -->
+                                        <Button Content="Edit framing…" Click="EditFraming_Click" HorizontalAlignment="Stretch"
+                                                IsEnabled="{Binding HasSelection}"
+                                                Visibility="{Binding IsEditMode, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}"
+                                                ToolTipService.ToolTip="Open this clip full-frame to set its zoom and motion (Enter, or double-click the clip)" />
+                                        <!-- Start/Mid/End capture the CURRENT canvas framing, which only means anything
+                                             in Edit mode — outside it the canvas is showing the whole composite.
+                                             IsEnabled sits on each Button, not the StackPanel: Panel is not a Control
+                                             and has no IsEnabled, which the XAML compiler rejects. -->
                                         <StackPanel Orientation="Horizontal" Spacing="4">
-                                            <Button Content="Start" Width="60" FontWeight="SemiBold" Click="SetStart_Click" ToolTipService.ToolTip="Set Start Keyframe" Foreground="Cyan" />
-                                            <Button Content="Mid" Width="60" FontWeight="SemiBold" Click="SetMid_Click" RightTapped="ClearMid_RightTapped" ToolTipService.ToolTip="Set Mid Keyframe (right-click to clear)" Foreground="DeepSkyBlue" />
-                                            <Button Content="End" Width="60" FontWeight="SemiBold" Click="SetEnd_Click" ToolTipService.ToolTip="Set End Keyframe" Foreground="RoyalBlue" />
+                                            <Button Content="Start" Width="60" FontWeight="SemiBold" Click="SetStart_Click" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Set Start Keyframe" Foreground="Cyan" />
+                                            <Button Content="Mid" Width="60" FontWeight="SemiBold" Click="SetMid_Click" RightTapped="ClearMid_RightTapped" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Set Mid Keyframe (right-click to clear)" Foreground="DeepSkyBlue" />
+                                            <Button Content="End" Width="60" FontWeight="SemiBold" Click="SetEnd_Click" IsEnabled="{Binding IsEditMode}" ToolTipService.ToolTip="Set End Keyframe" Foreground="RoyalBlue" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Expander>
@@ -451,7 +463,8 @@
                                     PointerPressed="TimelineBar_PointerPressed"
                                     PointerMoved="TimelineBar_PointerMoved"
                                     PointerReleased="TimelineBar_PointerReleased"
-                                    PointerWheelChanged="TimelineBar_PointerWheelChanged">
+                                    PointerWheelChanged="TimelineBar_PointerWheelChanged"
+                                    DoubleTapped="TimelineBar_DoubleTapped">
                                 <!-- A real ContextFlyout: the platform shows this on right-click /
                                      menu key / long-press, rather than us hand-rolling it from a
                                      pointer event (which never fired reliably). -->

@@ -87,9 +87,10 @@ namespace VideoDirector.ViewModels
             private set => SetProperty(ref _isTelemetryVisible, value);
         }
 
-        // The inspector/storyboard panel auto-shows while editing a clip; otherwise it shows only
-        // if the user has PINNED it open. So editing always has its controls to hand, and arranging
-        // stays uncluttered. The transport's storyboard toggle is the pin.
+        // The inspector/storyboard panel shows whenever there is something to inspect: a selected
+        // clip, an active edit, or the user having PINNED it open. Selecting a clip used to force
+        // Edit mode, which was the only way to see a clip's properties — so the panel could key off
+        // edit state alone. Now selection stands on its own and the panel follows it.
         private bool _isStoryboardPinned;
         public bool IsStoryboardPinned
         {
@@ -105,7 +106,7 @@ namespace VideoDirector.ViewModels
             }
         }
 
-        public bool IsStoryboardVisible => _isStoryboardPinned || _isEditMode;
+        public bool IsStoryboardVisible => _isStoryboardPinned || _isEditMode || HasSelection;
 
         private bool _isControlsVisible = true;
         public bool IsControlsVisible
@@ -171,12 +172,7 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _selectedTimelineNode, value))
                 {
                     if (value != null) SelectedOverlay = null;
-                    OnPropertyChanged(nameof(HasSelection));
-                    OnPropertyChanged(nameof(SelectedClip));
-                    OnPropertyChanged(nameof(IsTrack1Selected));
-                    OnPropertyChanged(nameof(IsOverlaySelected));
-                    OnPropertyChanged(nameof(SelectedTrackLabel));
-                    OnPropertyChanged(nameof(ModeLabel));
+                    RaiseSelectionChanged();
                 }
             }
         }
@@ -190,14 +186,23 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _selectedOverlay, value))
                 {
                     if (value != null) SelectedTimelineNode = null;
-                    OnPropertyChanged(nameof(HasSelection));
-                    OnPropertyChanged(nameof(SelectedClip));
-                    OnPropertyChanged(nameof(IsTrack1Selected));
-                    OnPropertyChanged(nameof(IsOverlaySelected));
-                    OnPropertyChanged(nameof(SelectedTrackLabel));
-                    OnPropertyChanged(nameof(ModeLabel));
+                    RaiseSelectionChanged();
                 }
             }
+        }
+
+        // Everything that derives from "which clip is selected". IsStoryboardVisible is in here
+        // because the inspector now follows the selection, not the edit state.
+        private void RaiseSelectionChanged()
+        {
+            OnPropertyChanged(nameof(HasSelection));
+            OnPropertyChanged(nameof(SelectedClip));
+            OnPropertyChanged(nameof(IsTrack1Selected));
+            OnPropertyChanged(nameof(IsOverlaySelected));
+            OnPropertyChanged(nameof(SelectedTrackLabel));
+            OnPropertyChanged(nameof(ModeLabel));
+            OnPropertyChanged(nameof(IsStoryboardVisible));
+            OnPropertyChanged(nameof(IsDockVisible));
         }
 
         // True when either a Track 1 clip or an overlay is selected — the right panel shows

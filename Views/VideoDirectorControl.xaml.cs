@@ -398,7 +398,7 @@ namespace VideoDirector.Views
                 var paths = new List<string>();
                 foreach (var f in files) paths.Add(f.Path);
                 await ViewModel.AddFilesAsync(paths);
-                EditNewestSpineClip();
+                SelectNewestSpineClip();
             }
             else
             {
@@ -554,9 +554,9 @@ namespace VideoDirector.Views
             // pointer, which suppresses RightTapped — i.e. no context menu.
             if (!point.Properties.IsLeftButtonPressed) return;
 
-            // While editing a clip, the timeline is a "back to Arrange" target: a click here exits
-            // Edit and does nothing else (click again to scrub/select once back in Arrange).
-            if (ViewModel.IsEditMode) { ExitEditMode(); return; }
+            // A click on the timeline leaves Edit and then does its normal job in the SAME gesture.
+            // It used to only exit, so every edit cost a wasted click to get back to scrubbing.
+            if (ViewModel.IsEditMode) ExitEditMode();
 
             var p = point.Position;
             _timelinePressPoint = p;
@@ -966,25 +966,44 @@ namespace VideoDirector.Views
             return (null, false, 0);
         }
 
+        // Selection is JUST selection. It shows the clip in the inspector and marks it on the
+        // timeline and canvas; it does not change mode. Selecting used to call BeginEdit, which
+        // meant you could not look at a clip's properties without the screen swapping to that one
+        // clip full-frame. Edit is now entered deliberately — see BeginEditSelected.
         private void SelectClip(CinematicOperation clip, bool isSpine)
         {
             if (isSpine)
             {
                 ViewModel.SelectedTimelineNode = clip;
+                // While playing, picking a different spine clip jumps playback to it.
                 int idx = ViewModel.TimelineNodes.IndexOf(clip);
-                if (ViewModel.IsPlaying)
-                {
-                    if (_playbackEngine?.CurrentPlayingOperation != clip && idx >= 0)
-                        _ = _playbackEngine?.StartPlaybackAsync(idx);
-                    return;
-                }
+                if (ViewModel.IsPlaying && _playbackEngine?.CurrentPlayingOperation != clip && idx >= 0)
+                    _ = _playbackEngine?.StartPlaybackAsync(idx);
             }
             else ViewModel.SelectedOverlay = clip;
-
-            // One entry point for both tracks — selecting a clip (while not playing) edits it.
-            if (!ViewModel.IsPlaying)
-                _playbackEngine?.BeginEdit(ViewModel.SelectedClip, ViewModel.CurrentEditTarget);
         }
+
+        // The one way into Edit mode, whatever triggered it (double-click a timeline block,
+        // double-tap the canvas, Enter, or the inspector's Edit framing button).
+        private void BeginEditSelected()
+        {
+            if (ViewModel.IsPlaying || ViewModel.SelectedClip == null) return;
+            _playbackEngine?.BeginEdit(ViewModel.SelectedClip, ViewModel.CurrentEditTarget);
+        }
+
+        // Double-clicking a clip block on the timeline opens it for framing. The first click of the
+        // pair has already selected it via PointerPressed.
+        private void TimelineBar_DoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)
+        {
+            if (ViewModel.IsEditMode) return;
+            var hit = HitClip(e.GetPosition(TimelineBar));
+            if (hit.clip == null) return;
+            SelectClip(hit.clip, hit.isSpine);
+            BeginEditSelected();
+            e.Handled = true;
+        }
+
+        private void EditFraming_Click(object? sender, RoutedEventArgs e) => BeginEditSelected();
 
         // Overlay drag: horizontally = reposition in time, vertically = move to another track.
         private void MoveOverlayTo(Windows.Foundation.Point p)
@@ -1347,17 +1366,18 @@ namespace VideoDirector.Views
                 if (paths.Count > 0)
                 {
                     await ViewModel.AddFilesAsync(paths);
-                    EditNewestSpineClip();   // open the new clip so you can trim/frame it
+                    SelectNewestSpineClip();  // select the new clip so its properties are to hand
                 }
             }
         }
 
-        // After adding to Track 1, drop straight into Edit on the newest clip so it can be trimmed
-        // and framed immediately (adding a clip is usually the prelude to editing it).
-        private void EditNewestSpineClip()
+        // After adding to Track 1, select the newest clip so its properties are to hand. It does
+        // NOT drop into Edit: adding is an Arrange activity (the same reasoning AddOverlayAsync
+        // already applies), and the inspector is now available without leaving the composite.
+        private void SelectNewestSpineClip()
         {
             if (ViewModel.TimelineNodes.Count == 0) return;
-            if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback(); // adding a clip drops out of playback into Edit
+            if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback();
             SelectClip(ViewModel.TimelineNodes[^1], isSpine: true);
         }
 
@@ -1700,6 +1720,8 @@ namespace VideoDirector.Views
                 if (idx >= 0 && idx < ViewModel.TimelineNodes.Count)
                     SelectClip(ViewModel.TimelineNodes[idx], isSpine: true);
             }
+            // Selecting no longer enters Edit, so this double-tap has to ask for it explicitly.
+            BeginEditSelected();
         }
 
         private void ExitEditMode()
@@ -1718,9 +1740,9 @@ namespace VideoDirector.Views
                 }
             }
 
-            // Clear the selection so we don't immediately re-enter Edit, then return to Arrange.
-            ViewModel.SelectedTimelineNode = null;
-            ViewModel.SelectedOverlay = null;
+            // The selection deliberately SURVIVES leaving Edit: you stay on the clip you were just
+            // working on, with its properties still in the inspector. This used to clear the
+            // selection, because selecting re-entered Edit and would have trapped you in a loop.
             _playbackEngine?.ExitToArrange();
             // An edit session (trim/speed/framing changes) collapses into one undo step here.
             ViewModel.RecordIfChanged();
@@ -1731,6 +1753,15 @@ namespace VideoDirector.Views
                                                Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
         {
             if (ViewModel.IsEditMode) { ExitEditMode(); args.Handled = true; }
+        }
+
+        // Enter opens the selected clip for framing — the keyboard route into Edit.
+        private void EnterAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                              Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextInputFocused() || ViewModel.IsEditMode || !ViewModel.HasSelection) return;
+            args.Handled = true;
+            BeginEditSelected();
         }
 
         // Space = play/pause. Ignored while typing so it doesn't hijack text entry.
@@ -1917,7 +1948,7 @@ namespace VideoDirector.Views
 
                 // Open the newest clip for editing, same as a canvas drop (dropping into Edit even
                 // if we were mid-playback).
-                if (toSpine) EditNewestSpineClip();
+                if (toSpine) SelectNewestSpineClip();
                 else
                 {
                     var track = ViewModel.OverlayTracks[trackIndex];
