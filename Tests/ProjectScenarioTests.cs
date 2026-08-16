@@ -550,6 +550,64 @@ namespace VideoDirector.Tests
         }
 
         [Fact]
+        public void OlderProjectsGetTrackZeroBackAtFullFrame()
+        {
+            // Before v4, track 0 was always drawn full-frame and ignored placement, so every clip
+            // on it carries the corner-PiP DEFAULTS that were written out and never read. Honouring
+            // placement on track 0 made those dormant values suddenly real, shrinking every clip in
+            // an existing project into the bottom-right corner.
+            string older = @"{""SchemaVersion"":3,""Tracks"":[{""IsGapless"":true,""Clips"":[
+                {""FilePath"":""C:/clips/a.mp4"",""SourceDuration"":""00:01:00"",
+                 ""VideoStartTime"":""00:00:00"",""VideoEndTime"":""00:00:10"",""OpDuration"":""00:00:10"",
+                 ""PlacementWidth"":0.3,""PlacementHeight"":0.3,
+                 ""PlacementCenterX"":0.72,""PlacementCenterY"":0.72}]}]}";
+
+            var vm = new DirectorViewModel();
+            vm.LoadProjectJson(older);
+
+            var clip = vm.Tracks[0].Clips[0];
+            Assert.Equal(1.0, clip.PlacementWidth, 6);
+            Assert.Equal(1.0, clip.PlacementHeight, 6);
+            Assert.Equal(0.5, clip.PlacementCenterX, 6);
+            Assert.Equal(0.5, clip.PlacementCenterY, 6);
+        }
+
+        [Fact]
+        public void OlderProjectsKeepUpperTrackPlacement()
+        {
+            // Only track 0 is corrected. An upper track's placement was always real and must
+            // survive untouched.
+            string older = @"{""SchemaVersion"":3,""Tracks"":[
+                {""IsGapless"":true,""Clips"":[]},
+                {""Clips"":[{""FilePath"":""C:/clips/ov.mp4"",""SourceDuration"":""00:01:00"",
+                 ""VideoStartTime"":""00:00:00"",""VideoEndTime"":""00:00:04"",""OpDuration"":""00:00:04"",
+                 ""PlacementWidth"":0.3,""PlacementHeight"":0.3,
+                 ""PlacementCenterX"":0.72,""PlacementCenterY"":0.72}]}]}";
+
+            var vm = new DirectorViewModel();
+            vm.LoadProjectJson(older);
+
+            var clip = vm.Tracks[1].Clips[0];
+            Assert.Equal(0.3, clip.PlacementWidth, 6);
+            Assert.Equal(0.72, clip.PlacementCenterX, 6);
+        }
+
+        [Fact]
+        public void CurrentProjectsKeepDeliberateTrackZeroPlacement()
+        {
+            // Once a project is at the current version, a track-0 clip the user has deliberately
+            // placed must not be dragged back to full frame on every load.
+            var vm = new DirectorViewModel();
+            vm.Tracks[0].Clips.Add(Clip("a", 5));
+            vm.Tracks[0].Clips[0].PlaceAt(0.72, 0.72);
+
+            var reloaded = new DirectorViewModel();
+            reloaded.LoadProjectJson(vm.ToProjectJson());
+
+            Assert.Equal(0.72, reloaded.Tracks[0].Clips[0].PlacementCenterX, 6);
+        }
+
+        [Fact]
         public void ACorruptProjectLeavesTheCurrentOneAlone()
         {
             var vm = Project();

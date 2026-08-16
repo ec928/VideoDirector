@@ -73,8 +73,19 @@ absolute `PublishDir` — change that to a path of your own before publishing.
 
 ## 📋 Status
 
-Active development. The timeline, compositor, Ken Burns model, and mode system are implemented and in
-use; export is in progress. Expect rough edges.
+Active development. The timeline, compositor, framing model and mode system are implemented and in
+use. Expect rough edges.
+
+### ⚠ Known limitation: export is not yet WYSIWYG
+
+MP4 export bakes in your clips, their trims, placement, layering, opacity, per-track mute/hide and
+audio — but **not** Ken Burns motion, per-clip speed, or transitions, and picture-in-picture boxes
+are stretched to fit rather than cropped to fill. All of those work in the live preview.
+
+The underlying renderer (`Windows.Media.Editing.MediaComposition`) cannot express per-frame motion,
+so closing the gap means rendering every frame ourselves. That is planned but not scheduled. The
+export dialog lists exactly what will not be included before you render, so nothing is dropped
+silently.
 
 ## 💬 Feedback
 

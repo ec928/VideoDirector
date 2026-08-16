@@ -560,6 +560,8 @@ namespace VideoDirector.ViewModels
             //   1 — TimelineNodes (track 0) + OverlayTracks (tracks 1..3), as separate shapes
             //   2 — Tracks: one uniform list of TimelineTrack
             //   3 — framing marks normalised: Zoom + CenterX/CenterY replace Scale + pixel X/Y
+            //   4 — track 0 honours placement (before this it was always full-frame, so whatever
+            //       placement its clips carried was written but never read)
             // Bump this, and add a migration step in ApplyProjectData, whenever the shape changes.
             public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
@@ -572,7 +574,7 @@ namespace VideoDirector.ViewModels
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> OverlayClips { get; set; } = new();
         }
 
-        public const int CurrentSchemaVersion = 3;
+        public const int CurrentSchemaVersion = 4;
 
         public async Task SaveAsync(Windows.Storage.StorageFile file)
         {
@@ -639,6 +641,13 @@ namespace VideoDirector.ViewModels
                     clip.MidMark?.MigrateLegacyFraming();
                     clip.EndMark?.MigrateLegacyFraming();
                 }
+
+            // Before v4 track 0 was always drawn full-frame and ignored placement entirely — so
+            // every clip on it carries the corner-PiP DEFAULTS (30% at 72%,72%) that were written
+            // out but never read. Now that track 0 honours placement those dormant values would
+            // suddenly take effect, shrinking every clip in an existing project into the corner.
+            if (data.SchemaVersion < 4 && Tracks.Count > 0)
+                foreach (var clip in Tracks[0].Clips) clip.PlaceFullFrame();
 
             foreach (var track in Tracks)
             {

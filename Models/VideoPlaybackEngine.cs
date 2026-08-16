@@ -1296,6 +1296,7 @@ namespace VideoDirector.Models
                 activeTransform.TranslateX = mTx;
                 activeTransform.TranslateY = mTy;
                 _playerControl.ActiveTransform = activeTransform;
+                ApplyBaseBox(op, editMode: true);
                 RefreshEditView();
             });
         }
@@ -1677,26 +1678,38 @@ namespace VideoDirector.Models
                                        clip.PlacementCenterX, clip.PlacementCenterY);
             if (box.IsEmpty) return;   // aspect or viewport not known yet — draw nothing, don't guess
 
-            if (grid.Margin.Left != box.Left || grid.Margin.Top != box.Top)
+            // Snap to whole pixels. A box on fractional edges leaves the video surface not quite
+            // meeting its clip rectangle, and the resulting subpixel seam shows as a flickering
+            // hairline down one edge while the live surface is rendering.
+            double left = Math.Round(box.Left);
+            double top = Math.Round(box.Top);
+            double width = Math.Round(box.Width);
+            double height = Math.Round(box.Height);
+
+            if (grid.Margin.Left != left || grid.Margin.Top != top)
             {
-                grid.Margin = new Microsoft.UI.Xaml.Thickness(box.Left, box.Top, 0, 0);
+                grid.Margin = new Microsoft.UI.Xaml.Thickness(left, top, 0, 0);
             }
             // Only resize + reallocate the clip when the box dimensions actually change
             // (avoids per-frame allocation during playback).
-            if (grid.Width != box.Width || grid.Height != box.Height)
+            if (grid.Width != width || grid.Height != height)
             {
-                grid.Width = box.Width;
-                grid.Height = box.Height;
+                grid.Width = width;
+                grid.Height = height;
                 grid.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
                 {
-                    Rect = new Windows.Foundation.Rect(0, 0, box.Width, box.Height)
+                    Rect = new Windows.Foundation.Rect(0, 0, width, height)
                 };
             }
         }
 
         // Track 0's placement, applied to the box wrapping the A/B players. Track 0 was previously
         // full-frame by construction, with no box to position.
-        private void ApplyBaseBox(CinematicOperation clip)
+        //
+        // editMode fills the frame instead, so the clip is framed at full size — the framing
+        // rectangles are drawn across the whole frame, and a picture sitting in its corner PiP box
+        // would not line up with them.
+        private void ApplyBaseBox(CinematicOperation clip, bool editMode = false)
         {
             if (clip == null) return;
             double aspect = clip.SourceAspect;
@@ -1710,7 +1723,7 @@ namespace VideoDirector.Models
                     clip.SourceAspect = aspect;   // backfill so Arrange can shape it without video
                 }
             }
-            ApplyBoxTo(_playerControl.BaseBox, aspect, clip, editMode: false);
+            ApplyBoxTo(_playerControl.BaseBox, aspect, clip, editMode);
         }
 
         private void SeekAndPlayOverlay(MediaPlayer player, CinematicOperation overlay, TimeSpan currentStoryTime)
@@ -1972,7 +1985,7 @@ namespace VideoDirector.Models
             // Restore the Track 1 base (a Track 2 edit had hidden the main players).
             _playerA.Opacity = _isPlayerAActive ? 1 : 0;
             _playerB.Opacity = _isPlayerAActive ? 0 : 1;
-            EvaluateOverlays(_viewModel.CurrentStoryTime); // show the composite's active PiPs
+            EvaluateOverlays(_viewModel.CurrentStoryTime); // restores track 0's box and the PiPs
         }
 
         // Single entry point for editing ANY clip. Dispatches to the correct surface (spine clips
