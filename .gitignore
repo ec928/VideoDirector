@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Reference copies of the previous release, supplied for diffing. Not part of the build.
+Tests/0-Old Version Backup/
+Tests/0-Old Version Bin/

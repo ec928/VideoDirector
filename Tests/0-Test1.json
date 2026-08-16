@@ -1,0 +1,254 @@
+{
+  "TimelineNodes": [
+    {
+      "FilePath": "C:\\Users\\chan_\\Downloads\\Backrooms.2026.1080p.VOSTFR.HDSCR.x264-FS.mkv",
+      "FileName": "Backrooms.2026.1080p.VOSTFR.HDSCR.x264-FS.mkv",
+      "VideoStartTime": "00:44:50.1793922",
+      "VideoEndTime": "00:44:55.8530027",
+      "SourceDuration": "01:50:27.0300000",
+      "OpDuration": "00:00:05.6736105",
+      "PlaybackSpeed": 1,
+      "StartTime": "00:00:00",
+      "Opacity": 1,
+      "Volume": 1,
+      "SourceAspect": 0,
+      "PlacementWidth": 0.3,
+      "PlacementHeight": 0.3,
+      "PlacementCenterX": 0.72,
+      "PlacementCenterY": 0.72,
+      "StartMark": {
+        "Scale": 1,
+        "X": 0,
+        "Y": 0
+      },
+      "MidMark": null,
+      "EndMark": {
+        "Scale": 1,
+        "X": 0,
+        "Y": 0
+      },
+      "RecordedPath": [],
+      "CurveProfile": 0,
+      "IsExpanded": false,
+      "CurveProfileIndex": 0,
+      "TransitionDuration": "00:00:00",
+      "TransitionStyle": 0,
+      "TransitionStyleIndex": 0,
+      "TransitionIconGlyph": "\uE8C6",
+      "TransitionIconTooltip": "Transition Out: HardSnap"
+    },
+    {
+      "FilePath": "C:\\Users\\chan_\\Downloads\\Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+      "FileName": "Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+      "VideoStartTime": "01:00:32.9019249",
+      "VideoEndTime": "01:00:43.1026030",
+      "SourceDuration": "02:11:55.6470000",
+      "OpDuration": "00:00:10.2006781",
+      "PlaybackSpeed": 1,
+      "StartTime": "00:00:00",
+      "Opacity": 1,
+      "Volume": 0,
+      "SourceAspect": 0,
+      "PlacementWidth": 0.3,
+      "PlacementHeight": 0.3,
+      "PlacementCenterX": 0.72,
+      "PlacementCenterY": 0.72,
+      "StartMark": {
+        "Scale": 1,
+        "X": 0,
+        "Y": 0
+      },
+      "MidMark": null,
+      "EndMark": {
+        "Scale": 1,
+        "X": 0,
+        "Y": 0
+      },
+      "RecordedPath": [],
+      "CurveProfile": 0,
+      "IsExpanded": false,
+      "CurveProfileIndex": 0,
+      "TransitionDuration": "00:00:01",
+      "TransitionStyle": 1,
+      "TransitionStyleIndex": 1,
+      "TransitionIconGlyph": "\uE88E",
+      "TransitionIconTooltip": "Transition Out: Crossfade"
+    }
+  ],
+  "OverlayTracks": [
+    {
+      "Clips": [
+        {
+          "FilePath": "C:\\Users\\chan_\\Downloads\\Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "FileName": "Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "VideoStartTime": "01:00:11",
+          "VideoEndTime": "01:00:21",
+          "SourceDuration": "02:11:55.6470000",
+          "OpDuration": "00:00:10",
+          "PlaybackSpeed": 1,
+          "StartTime": "00:00:00",
+          "Opacity": 1,
+          "Volume": 0,
+          "SourceAspect": 2.3855721393034828,
+          "PlacementWidth": 0.22968143394206858,
+          "PlacementHeight": 0.7281796673251935,
+          "PlacementCenterX": 0.13588647102781837,
+          "PlacementCenterY": 0.5235746726999718,
+          "StartMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "MidMark": {
+            "Scale": 1.0000001,
+            "X": -91.19995,
+            "Y": -5.600006
+          },
+          "EndMark": {
+            "Scale": 1.3310002,
+            "X": -387.19995,
+            "Y": -137.6
+          },
+          "RecordedPath": [],
+          "CurveProfile": 0,
+          "IsExpanded": false,
+          "CurveProfileIndex": 0,
+          "TransitionDuration": "00:00:00",
+          "TransitionStyle": 0,
+          "TransitionStyleIndex": 0,
+          "TransitionIconGlyph": "\uE8C6",
+          "TransitionIconTooltip": "Transition Out: HardSnap"
+        },
+        {
+          "FilePath": "C:\\Users\\chan_\\Downloads\\Backrooms.2026.1080p.VOSTFR.HDSCR.x264-FS.mkv",
+          "FileName": "Backrooms.2026.1080p.VOSTFR.HDSCR.x264-FS.mkv",
+          "VideoStartTime": "00:40:36.1824002",
+          "VideoEndTime": "00:40:44.9291807",
+          "SourceDuration": "01:50:27.0300000",
+          "OpDuration": "00:00:08.7467805",
+          "PlaybackSpeed": 1,
+          "StartTime": "00:00:10",
+          "Opacity": 1,
+          "Volume": 0,
+          "SourceAspect": 2.1621621621621623,
+          "PlacementWidth": 0.3,
+          "PlacementHeight": 0.3,
+          "PlacementCenterX": 0.28,
+          "PlacementCenterY": 0.72,
+          "StartMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "MidMark": null,
+          "EndMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "RecordedPath": [],
+          "CurveProfile": 0,
+          "IsExpanded": false,
+          "CurveProfileIndex": 0,
+          "TransitionDuration": "00:00:00",
+          "TransitionStyle": 0,
+          "TransitionStyleIndex": 0,
+          "TransitionIconGlyph": "\uE8C6",
+          "TransitionIconTooltip": "Transition Out: HardSnap"
+        }
+      ],
+      "DefaultCenterX": 0.72,
+      "DefaultCenterY": 0.72,
+      "Name": "Track 2"
+    },
+    {
+      "Clips": [
+        {
+          "FilePath": "C:\\Users\\chan_\\Downloads\\The.Magic.Faraway.Tree.2026.1080p.WEB.DL.h264.CinemaCity.mp4",
+          "FileName": "The.Magic.Faraway.Tree.2026.1080p.WEB.DL.h264.CinemaCity.mp4",
+          "VideoStartTime": "00:31:09.0997327",
+          "VideoEndTime": "00:31:19.1616869",
+          "SourceDuration": "01:50:02.0160000",
+          "OpDuration": "00:00:10.0619542",
+          "PlaybackSpeed": 1,
+          "StartTime": "00:00:01.1358348",
+          "Opacity": 1,
+          "Volume": 0,
+          "SourceAspect": 2.4,
+          "PlacementWidth": 0.3,
+          "PlacementHeight": 0.3,
+          "PlacementCenterX": 0.28,
+          "PlacementCenterY": 0.72,
+          "StartMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "MidMark": null,
+          "EndMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "RecordedPath": [],
+          "CurveProfile": 0,
+          "IsExpanded": false,
+          "CurveProfileIndex": 0,
+          "TransitionDuration": "00:00:00",
+          "TransitionStyle": 0,
+          "TransitionStyleIndex": 0,
+          "TransitionIconGlyph": "\uE8C6",
+          "TransitionIconTooltip": "Transition Out: HardSnap"
+        }
+      ],
+      "DefaultCenterX": 0.28,
+      "DefaultCenterY": 0.72,
+      "Name": "Track 3"
+    },
+    {
+      "Clips": [
+        {
+          "FilePath": "C:\\Users\\chan_\\Downloads\\Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "FileName": "Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "VideoStartTime": "02:05:22.1004573",
+          "VideoEndTime": "02:05:33.8108023",
+          "SourceDuration": "02:11:55.6470000",
+          "OpDuration": "00:00:11.7103450",
+          "PlaybackSpeed": 1,
+          "StartTime": "00:00:00",
+          "Opacity": 1,
+          "Volume": 1,
+          "SourceAspect": 2.3855721393034828,
+          "PlacementWidth": 0.4738936167034425,
+          "PlacementHeight": 0.7020387693281777,
+          "PlacementCenterX": 0.6330531916482787,
+          "PlacementCenterY": 0.44549605029800515,
+          "StartMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "MidMark": null,
+          "EndMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "RecordedPath": [],
+          "CurveProfile": 0,
+          "IsExpanded": false,
+          "CurveProfileIndex": 0,
+          "TransitionDuration": "00:00:00",
+          "TransitionStyle": 0,
+          "TransitionStyleIndex": 0,
+          "TransitionIconGlyph": "\uE8C6",
+          "TransitionIconTooltip": "Transition Out: HardSnap"
+        }
+      ],
+      "DefaultCenterX": 0.72,
+      "DefaultCenterY": 0.28,
+      "Name": "Track 4"
+    }
+  ],
+  "OverlayClips": []
+}

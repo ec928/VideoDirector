@@ -13,6 +13,17 @@
     <EnableMsixTooling>false</EnableMsixTooling>
   </PropertyGroup>
 
+  <!-- Reference copies of the previous release, kept here to diff behaviour against. They are a
+       whole second copy of the app, so the default glob compiles them into the test assembly and
+       every type collides with the real one. They are data, not sources. -->
+  <ItemGroup>
+    <Compile Remove="0-Old Version Backup\**" />
+    <Compile Remove="0-Old Version Bin\**" />
+    <Page Remove="0-Old Version Backup\**" />
+    <None Remove="0-Old Version Backup\**" />
+    <ApplicationDefinition Remove="0-Old Version Backup\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />

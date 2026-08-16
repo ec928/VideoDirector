@@ -59,8 +59,6 @@ namespace VideoDirector.Models
         // the placement box can be sized to the video's shape (no black bars).
         private readonly double[] _overlayAspect = new double[MaxOverlayTracks];
         // Scale needed to push each slot's decoded padding outside its box. 1 = none needed.
-        private readonly double[] _overlayOverscan = new double[MaxOverlayTracks];
-        private double _baseOverscan = 1.0;
         private bool _isEditingOverlay = false;
         // Story time as of the start of the currently-playing clip; CurrentStoryTime is
         // derived from this plus the active player's real position every render frame.
@@ -74,7 +72,6 @@ namespace VideoDirector.Models
             _viewModel = viewModel;
             _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
-            for (int i = 0; i < MaxOverlayTracks; i++) _overlayOverscan[i] = 1.0;
 
             InitializePlayers();
             InitializeOverlayPlayers();
@@ -827,7 +824,7 @@ namespace VideoDirector.Models
                     }
                 }
                 var (sw, sh) = BaseSurfaceSize();
-                ApplyMarksAtProgress(op, spatialProgress, transform, sw, sh, _baseOverscan);
+                ApplyMarksAtProgress(op, spatialProgress, transform, sw, sh);
             }
 
             UpdateSpatial(_opA, _mediaPlayerA, _opAStartTime, _opADuration, _playerControl.TransformA);
@@ -926,14 +923,15 @@ namespace VideoDirector.Models
                     _playerControl.TelemetryClipTime.Text = $"Clip Time : {currentActivePlayer.PlaybackSession.Position:hh\\:mm\\:ss\\.ff} / {clipEndTime:hh\\:mm\\:ss\\.ff} [{currentFileName}]";
                     uint nw = currentActivePlayer.PlaybackSession.NaturalVideoWidth;
                     uint nh = currentActivePlayer.PlaybackSession.NaturalVideoHeight;
-                    // Shimmering-edge diagnosis (README known issues). The file's shape, the
-                    // decoder's padded shape, and the correction derived from the two — if the edge
-                    // shimmers while overscan reads 1.00, the padding theory is wrong.
+                    // Edge stability. "crops YES" means the box is off the surface's shape and the
+                    // clip geometry is cutting a live swapchain — the shimmering border. Must read NO.
                     double decodedAspect = nh > 0 ? (double)nw / nh : 0;
-                    double realAspect = activeOp?.SourceAspect ?? 0;
+                    double boxAspect = _playerControl.BaseBox.Height > 0
+                        ? _playerControl.BaseBox.Width / _playerControl.BaseBox.Height : 0;
+                    bool crops = SurfaceAspect.WouldCropSurface(boxAspect, decodedAspect);
                     _playerControl.TelemetryOperationInfo.Text =
-                        $"Edge dbg  : decoded {nw}x{nh} ({decodedAspect:F4})  file {realAspect:F4}  " +
-                        $"overscan {OverscanFor(realAspect, decodedAspect):F4}";
+                        $"Edge dbg  : decoded {nw}x{nh} ({decodedAspect:F4})  box {boxAspect:F4}  " +
+                        $"file {activeOp?.SourceAspect ?? 0:F4}  crops {(crops ? "YES" : "no")}";
 
                     if (activeOp != null && (_isEditingOverlay || activeOp.PlacementWidth < 1.0 || activeOp.PlacementHeight < 1.0))
                     {
@@ -1688,32 +1686,13 @@ namespace VideoDirector.Models
             double decoded = (double)vw / vh;
             var active = _activeOverlay[slot];
 
-            // Media Foundation reports the DECODED frame, padded out to macroblock multiples —
-            // 1918x804 comes back as 1920x816. SourceAspect is read from the file container and is
-            // the real shape, so it wins; the decoded figure only fills in when we have nothing.
-            // Shaping the box from the padded figure is what left a strip of codec padding along
-            // the edge, and padding pixels change frame to frame, which is the shimmer.
-            double real = active != null && active.SourceAspect > 0 ? active.SourceAspect : decoded;
-            _overlayAspect[slot] = real;
-            _overlayOverscan[slot] = OverscanFor(real, decoded);
+            // The box takes the DECODER's shape, so UniformToFill overflows by nothing and the
+            // grid's clip geometry never has to cut the live surface. See Models/SurfaceAspect —
+            // shaping this from the file's real aspect instead is what made the edge crawl.
+            _overlayAspect[slot] = SurfaceAspect.ForVideo(decoded, active?.SourceAspect ?? 0);
 
             // Backfill for clips from older projects saved before SourceAspect existed.
             if (active != null && active.SourceAspect <= 0) active.SourceAspect = decoded;
-        }
-
-        // How much to scale a decoded frame so its PADDING falls outside the box.
-        //
-        // The box is shaped to the real content, but the renderer stretches the whole decoded
-        // frame — padding included — to fill it. Scaling by the mismatch between the two shapes
-        // pushes that padding out past the clip. Exactly 1 when the decoder added none, which is
-        // why most videos never showed this and a few always did.
-        private static double OverscanFor(double realAspect, double decodedAspect)
-        {
-            if (realAspect <= 0 || decodedAspect <= 0) return 1.0;
-            double ratio = Math.Max(realAspect / decodedAspect, decodedAspect / realAspect);
-            // A sane ceiling: padding is a few pixels, so anything large means the two figures
-            // disagree for some other reason and cropping by it would be wrong.
-            return double.IsNaN(ratio) ? 1.0 : Math.Clamp(ratio, 1.0, 1.08);
         }
 
         // Positions, sizes and clips the placement box (the overlay grid) from the clip's
@@ -1744,13 +1723,14 @@ namespace VideoDirector.Models
                                        clip.PlacementCenterX, clip.PlacementCenterY);
             if (box.IsEmpty) return;   // aspect or viewport not known yet — draw nothing, don't guess
 
-            // Snap to whole pixels. A box on fractional edges leaves the video surface not quite
-            // meeting its clip rectangle, and the resulting subpixel seam shows as a flickering
-            // hairline down one edge while the live surface is rendering.
-            double left = Math.Round(box.Left);
-            double top = Math.Round(box.Top);
-            double width = Math.Round(box.Width);
-            double height = Math.Round(box.Height);
+            // NOT rounded. Snapping width and height independently moves the box off the surface's
+            // aspect by up to a pixel, which re-creates the very mismatch that makes the edge crawl
+            // (Models/SurfaceAspect). A fractional box that matches the surface exactly is stable;
+            // a whole-pixel box that does not is the bug.
+            double left = box.Left;
+            double top = box.Top;
+            double width = box.Width;
+            double height = box.Height;
 
             if (grid.Margin.Left != left || grid.Margin.Top != top)
             {
@@ -1784,14 +1764,11 @@ namespace VideoDirector.Models
                 ? (double)baseSession.NaturalVideoWidth / baseSession.NaturalVideoHeight
                 : 0;
 
-            // Same as the overlays: the file's shape wins over the decoder's padded one.
-            double aspect = clip.SourceAspect;
-            if (aspect <= 0 && decoded > 0)
-            {
-                aspect = decoded;
-                clip.SourceAspect = aspect;   // backfill so Arrange can shape it without video
-            }
-            _baseOverscan = OverscanFor(aspect, decoded);
+            // Same rule as the overlays: a live surface is shaped by the decoder.
+            double aspect = SurfaceAspect.ForVideo(decoded, clip.SourceAspect);
+            if (clip.SourceAspect <= 0 && decoded > 0)
+                clip.SourceAspect = decoded;   // backfill so Arrange can shape it without video
+
             ApplyBoxTo(_playerControl.BaseBox, aspect, clip, editMode);
         }
 
@@ -1867,7 +1844,6 @@ namespace VideoDirector.Models
 
             _activeOverlay[slot] = null;
             _overlayAspect[slot] = 0;
-            _overlayOverscan[slot] = 1.0;
         }
 
         private void ApplyOverlayTransform(int slot, CinematicOperation overlay, TimeSpan currentStoryTime)
@@ -1880,7 +1856,7 @@ namespace VideoDirector.Models
                 ? (currentStoryTime - overlay.StartTime).TotalMilliseconds / overlay.OpDuration.TotalMilliseconds
                 : 0;
             var (sw, sh) = OverlaySurfaceSize(slot);
-            ApplyMarksAtProgress(overlay, rawProgress, transform, sw, sh, _overlayOverscan[slot]);
+            ApplyMarksAtProgress(overlay, rawProgress, transform, sw, sh);
 
             // Placement box (where/how big on screen), clipped so framing can't spill out.
             ApplyOverlayBox(slot, overlay, false);
@@ -1899,7 +1875,7 @@ namespace VideoDirector.Models
         // scaled by its box fractions, because the mark never referred to pixels in the first place.
         private void ApplyMarksAtProgress(CinematicOperation op, double rawProgress,
                                           Microsoft.UI.Xaml.Media.CompositeTransform transform,
-                                          double surfaceW, double surfaceH, double overscan = 1.0)
+                                          double surfaceW, double surfaceH)
         {
             if (op == null || transform == null) return;
             double progress = Math.Clamp(rawProgress, 0, 1);
@@ -1908,15 +1884,6 @@ namespace VideoDirector.Models
                 op.StartMark, op.MidMark, op.EndMark, op.MidTime, op.CurveProfile, progress);
 
             var (scale, tx, ty) = Framing.ToTransform(zoom, cx, cy, surfaceW, surfaceH);
-
-            // Crop off the decoder's edge padding. Applied here rather than folded into the mark
-            // so the framing the user authored stays exactly what they authored.
-            if (overscan > 1.0)
-            {
-                scale *= overscan;
-                tx *= overscan;
-                ty *= overscan;
-            }
 
             // Delta-checked: assigning an unchanged transform property every frame dirties the
             // DirectComposition visual tree for nothing (see ARCHITECTURE.md section 4).
