@@ -18,7 +18,7 @@ Four **peer** tracks (`DirectorViewModel.Tracks`, all `TimelineTrack`). There is
 A clip's position is **always** its absolute `StartTime`. What differs between tracks is behaviour, expressed as flags:
 
 * **`IsGapless`** - clips butt up end-to-end in list order; adding, removing or reordering reflows the rest, and start times are *derived* from order by `TimelineTrack.Normalize()`. This is what Track 1 used to be structurally. Ships on for `Tracks[0]` and off for the rest, so default behaviour matches the old app, but it can be switched off there or on anywhere.
-* **`IsMuted` / `IsHidden` / `IsLocked`** - track-level overrides. Muted contributes no audio, hidden contributes no picture, locked rejects mutation but still selects and inspects. Muted and hidden are honoured by the live compositor; the exporter does not read them yet.
+* **`IsMuted` / `IsHidden` / `IsLocked`** - track-level overrides. Muted contributes no audio, hidden contributes no picture, locked rejects mutation but still selects and inspects. Both are honoured by the live compositor and by the exporter.
 
 On a non-gapless track, gaps are legal and `ResolveOverlaps()` keeps clips from colliding. Every track is **strict** - its clips never overlap, so at most one is active at any story time (§5.3). A time with no clip on a track renders as background.
 

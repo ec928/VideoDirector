@@ -59,8 +59,8 @@ Settled 2026-08-16. Recorded so they are not re-litigated in a later session.
 
 Decide when the owning phase starts, not before:
 
-- **Do Mute / Hide affect export, or preview only?** Currently **preview only** — C2b wires them
-  into the live compositor; the exporter does not read them yet. (Phase C3)
+- ~~**Do Mute / Hide affect export, or preview only?**~~ Resolved: **honoured in export**, as
+  recommended. Rendering something the user has explicitly hidden is worse than the alternative.
 - ~~**Does Lock block selection, or only mutation?**~~ Resolved in C3: **mutation only**. A locked
   track's clips still select and inspect; they cannot be dragged, removed, split, duplicated, or
   moved onto/off the track.
@@ -541,10 +541,11 @@ what the user changed.
 Real problems found during the audit that no phase above addresses. Listed so they are not lost.
 
 - **Preview ≠ export.** Per-clip speed, Ken Burns motion and transitions are all absent from the
-  export, and PiPs are stretched rather than crop-filled (`Models/VideoExporter.cs:17-20`). The
-  app's entire value is WYSIWYG composition and the last step does not honour it. Long-term that is
-  one compositor, not two; short-term the export dialog should state plainly which features will not
-  be baked — it currently says nothing.
+  export, and PiPs are stretched rather than crop-filled. The app's entire value is WYSIWYG
+  composition and the last step does not honour it.
+  *Partly addressed*: the export dialog now lists what will not be baked
+  (`VideoExporter.Limitations`), and mute/hide are honoured. The real fix is a renderer that can
+  express per-frame motion — see "The export fork" below.
 - **No project safety net.** No dirty-state indicator, no filename in the title bar, no
   unsaved-changes prompt on close, no autosave, no recent-projects list, no `.json` file
   association. Closing the window discards everything silently.

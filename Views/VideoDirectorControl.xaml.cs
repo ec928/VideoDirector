@@ -1748,10 +1748,32 @@ namespace VideoDirector.Views
             if (file == null) return;
 
             var bar = new Microsoft.UI.Xaml.Controls.ProgressBar { Minimum = 0, Maximum = 100, Value = 0, Width = 320 };
-            var status = new TextBlock { Text = "Rendering the composite (spine + overlays) — this can take a while for long clips." };
-            var panel = new StackPanel { Spacing = 12 };
+            var status = new TextBlock { Text = "Rendering all tracks — this can take a while for long clips.", TextWrapping = TextWrapping.Wrap };
+            var panel = new StackPanel { Spacing = 12, Width = 360 };
             panel.Children.Add(status);
             panel.Children.Add(bar);
+
+            // The export is not yet WYSIWYG, and silently dropping the user's work is worse than
+            // telling them. VideoExporter.Limitations is the single list; keep it truthful there.
+            if (Models.VideoExporter.Limitations.Length > 0)
+            {
+                var caveats = new StackPanel { Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
+                caveats.Children.Add(new TextBlock
+                {
+                    Text = "Not included in this render:",
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    FontSize = 12
+                });
+                foreach (var limit in Models.VideoExporter.Limitations)
+                    caveats.Children.Add(new TextBlock
+                    {
+                        Text = "• " + limit,
+                        FontSize = 12,
+                        TextWrapping = TextWrapping.Wrap,
+                        Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                    });
+                panel.Children.Add(caveats);
+            }
             var progressDialog = new ContentDialog
             {
                 Title = "Exporting video",

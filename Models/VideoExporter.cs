@@ -11,15 +11,27 @@ namespace VideoDirector.Models
 {
     // Renders the composite to a real .mp4 via Windows.Media.Editing.MediaComposition.
     //
-    // Baked in: the Track 1 spine (each clip trimmed to Clip Start / Clip End, images held for
-    // their Duration) plus overlay PiPs — one MediaOverlayLayer per overlay track, each PiP placed
-    // by its box (position/size) and opacity, delayed to its timeline position.
+    // ⚠ THE EXPORT IS NOT YET WYSIWYG. MediaComposition can place and trim clips but cannot
+    // express per-frame motion, so several things that work in the live preview are not baked in.
+    // Whatever is missing here MUST be listed in Limitations below, because the export dialog
+    // shows that list to the user before they render — silently dropping their work is worse than
+    // telling them. Keep the two in step.
     //
-    // NOT yet in the export (all working in the live preview): per-clip Speed (needs a retiming
-    // effect — the hardest), Ken Burns motion, and Transitions. Overlay PiPs are stretched into
-    // their box rather than crop-filled as in the preview; matching UniformToFill is a refinement.
+    // Baked in: every track's clips trimmed to their source window, images held for their
+    // duration, upper tracks as overlay layers placed by their box and opacity and delayed to
+    // their timeline position, per-track mute and hide.
     public class VideoExporter
     {
+        // What this renderer cannot currently reproduce from the preview. Shown to the user in the
+        // export dialog.
+        public static readonly string[] Limitations =
+        {
+            "Ken Burns motion (zoom and pan) is not applied — clips render at their Start framing.",
+            "Per-clip speed is not applied — every clip renders at 1x.",
+            "Transitions between clips are not applied — cuts are hard.",
+            "Picture-in-picture boxes are stretched to fit rather than cropped to fill."
+        };
+
         // The export renders at 1080p, so overlay positions are in this output pixel space.
         private const double OutputWidth = 1920;
         private const double OutputHeight = 1080;
@@ -39,7 +51,7 @@ namespace VideoDirector.Models
 
         // Create a trimmed MediaClip from a clip model — shared by spine and overlays. Returns null
         // if the source file is missing (caller skips it rather than failing the whole render).
-        private async Task<MediaClip> CreateClipAsync(CinematicOperation op)
+        private async Task<MediaClip> CreateClipAsync(CinematicOperation op, bool trackMuted = false)
         {
             StorageFile file;
             try { file = await StorageFile.GetFileFromPathAsync(op.FilePath); }
@@ -55,7 +67,7 @@ namespace VideoDirector.Models
             }
 
             var clip = await MediaClip.CreateFromFileAsync(file);
-            clip.Volume = op.Volume; // per-clip audio level (overlays default muted)
+            clip.Volume = trackMuted ? 0.0 : op.Volume; // per-clip level, silenced by a muted track
 
             // Trim to the clip's source window (Clip Start / Clip End). TrimTimeFromEnd is measured
             // back from the source's real end, so derive it from OriginalDuration.
@@ -82,25 +94,33 @@ namespace VideoDirector.Models
 
             // Track 0 is the base video track; every other track becomes an overlay layer, added
             // in track order so compositing matches the preview (ARCHITECTURE.md §5.4).
-            foreach (var op in tracks[0].Clips)
+            //
+            // A hidden track contributes nothing, and a muted one contributes no audio — the live
+            // compositor has honoured both since C2b, and an export that ignored them would render
+            // something the user had explicitly told the app not to show.
+            if (!tracks[0].IsHidden)
             {
-                if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) continue;
-                var clip = await CreateClipAsync(op);
-                if (clip != null) composition.Clips.Add(clip);
-                else skipped?.Add(System.IO.Path.GetFileName(op.FilePath));
+                foreach (var op in tracks[0].Clips)
+                {
+                    if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) continue;
+                    var clip = await CreateClipAsync(op, tracks[0].IsMuted);
+                    if (clip != null) composition.Clips.Add(clip);
+                    else skipped?.Add(System.IO.Path.GetFileName(op.FilePath));
+                }
             }
 
             {
                 for (int ti = 1; ti < tracks.Count; ti++)
                 {
                     var track = tracks[ti];
+                    if (track.IsHidden) continue;
                     if (track?.Clips == null || track.Clips.Count == 0) continue;
 
                     var layer = new MediaOverlayLayer();
                     foreach (var op in track.Clips)
                     {
                         if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) continue;
-                        var clip = await CreateClipAsync(op);
+                        var clip = await CreateClipAsync(op, track.IsMuted);
                         if (clip == null) { skipped?.Add(System.IO.Path.GetFileName(op.FilePath)); continue; }
 
                         double boxW = Math.Clamp(op.PlacementWidth, 0.01, 1.0) * OutputWidth;
@@ -113,7 +133,7 @@ namespace VideoDirector.Models
                             Position = new Rect(cx - boxW / 2, cy - boxH / 2, boxW, boxH),
                             Opacity = Math.Clamp(op.Opacity, 0, 1),
                             Delay = op.StartTime < TimeSpan.Zero ? TimeSpan.Zero : op.StartTime,
-                            AudioEnabled = op.Volume > 0 // muted overlays contribute no audio to the mix
+                            AudioEnabled = !track.IsMuted && op.Volume > 0 // muted track or clip adds no audio
                         };
                         layer.Overlays.Add(overlay);
                     }
