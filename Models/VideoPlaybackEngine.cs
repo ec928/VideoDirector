@@ -58,6 +58,9 @@ namespace VideoDirector.Models
         // Native aspect (w/h) of each track's overlay video, cached when the media opens, so
         // the placement box can be sized to the video's shape (no black bars).
         private readonly double[] _overlayAspect = new double[MaxOverlayTracks];
+        // Scale needed to push each slot's decoded padding outside its box. 1 = none needed.
+        private readonly double[] _overlayOverscan = new double[MaxOverlayTracks];
+        private double _baseOverscan = 1.0;
         private bool _isEditingOverlay = false;
         // Story time as of the start of the currently-playing clip; CurrentStoryTime is
         // derived from this plus the active player's real position every render frame.
@@ -70,6 +73,8 @@ namespace VideoDirector.Models
             _playerB = playerControl.PlayerB;
             _viewModel = viewModel;
             _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+
+            for (int i = 0; i < MaxOverlayTracks; i++) _overlayOverscan[i] = 1.0;
 
             InitializePlayers();
             InitializeOverlayPlayers();
@@ -821,7 +826,7 @@ namespace VideoDirector.Models
                     }
                 }
                 var (sw, sh) = BaseSurfaceSize();
-                ApplyMarksAtProgress(op, spatialProgress, transform, sw, sh);
+                ApplyMarksAtProgress(op, spatialProgress, transform, sw, sh, _baseOverscan);
             }
 
             UpdateSpatial(_opA, _mediaPlayerA, _opAStartTime, _opADuration, _playerControl.TransformA);
@@ -1669,12 +1674,36 @@ namespace VideoDirector.Models
             uint vw = player.PlaybackSession.NaturalVideoWidth;
             uint vh = player.PlaybackSession.NaturalVideoHeight;
             if (vw == 0 || vh == 0) return;
-            double aspect = (double)vw / vh;
-            _overlayAspect[slot] = aspect;
-            // Backfill the clip so Arrange can shape its box correctly without loading video
-            // (covers clips from older projects that were saved before SourceAspect existed).
+
+            double decoded = (double)vw / vh;
             var active = _activeOverlay[slot];
-            if (active != null && active.SourceAspect <= 0) active.SourceAspect = aspect;
+
+            // Media Foundation reports the DECODED frame, padded out to macroblock multiples —
+            // 1918x804 comes back as 1920x816. SourceAspect is read from the file container and is
+            // the real shape, so it wins; the decoded figure only fills in when we have nothing.
+            // Shaping the box from the padded figure is what left a strip of codec padding along
+            // the edge, and padding pixels change frame to frame, which is the shimmer.
+            double real = active != null && active.SourceAspect > 0 ? active.SourceAspect : decoded;
+            _overlayAspect[slot] = real;
+            _overlayOverscan[slot] = OverscanFor(real, decoded);
+
+            // Backfill for clips from older projects saved before SourceAspect existed.
+            if (active != null && active.SourceAspect <= 0) active.SourceAspect = decoded;
+        }
+
+        // How much to scale a decoded frame so its PADDING falls outside the box.
+        //
+        // The box is shaped to the real content, but the renderer stretches the whole decoded
+        // frame — padding included — to fill it. Scaling by the mismatch between the two shapes
+        // pushes that padding out past the clip. Exactly 1 when the decoder added none, which is
+        // why most videos never showed this and a few always did.
+        private static double OverscanFor(double realAspect, double decodedAspect)
+        {
+            if (realAspect <= 0 || decodedAspect <= 0) return 1.0;
+            double ratio = Math.Max(realAspect / decodedAspect, decodedAspect / realAspect);
+            // A sane ceiling: padding is a few pixels, so anything large means the two figures
+            // disagree for some other reason and cropping by it would be wrong.
+            return double.IsNaN(ratio) ? 1.0 : Math.Clamp(ratio, 1.0, 1.08);
         }
 
         // Positions, sizes and clips the placement box (the overlay grid) from the clip's
@@ -1739,17 +1768,20 @@ namespace VideoDirector.Models
         private void ApplyBaseBox(CinematicOperation clip, bool editMode = false)
         {
             if (clip == null) return;
+            var basePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
+            var baseSession = basePlayer?.PlaybackSession;
+            double decoded = baseSession != null && baseSession.NaturalVideoWidth > 0 && baseSession.NaturalVideoHeight > 0
+                ? (double)baseSession.NaturalVideoWidth / baseSession.NaturalVideoHeight
+                : 0;
+
+            // Same as the overlays: the file's shape wins over the decoder's padded one.
             double aspect = clip.SourceAspect;
-            if (aspect <= 0)
+            if (aspect <= 0 && decoded > 0)
             {
-                var player = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-                var session = player?.PlaybackSession;
-                if (session != null && session.NaturalVideoWidth > 0 && session.NaturalVideoHeight > 0)
-                {
-                    aspect = (double)session.NaturalVideoWidth / session.NaturalVideoHeight;
-                    clip.SourceAspect = aspect;   // backfill so Arrange can shape it without video
-                }
+                aspect = decoded;
+                clip.SourceAspect = aspect;   // backfill so Arrange can shape it without video
             }
+            _baseOverscan = OverscanFor(aspect, decoded);
             ApplyBoxTo(_playerControl.BaseBox, aspect, clip, editMode);
         }
 
@@ -1825,6 +1857,7 @@ namespace VideoDirector.Models
 
             _activeOverlay[slot] = null;
             _overlayAspect[slot] = 0;
+            _overlayOverscan[slot] = 1.0;
         }
 
         private void ApplyOverlayTransform(int slot, CinematicOperation overlay, TimeSpan currentStoryTime)
@@ -1837,7 +1870,7 @@ namespace VideoDirector.Models
                 ? (currentStoryTime - overlay.StartTime).TotalMilliseconds / overlay.OpDuration.TotalMilliseconds
                 : 0;
             var (sw, sh) = OverlaySurfaceSize(slot);
-            ApplyMarksAtProgress(overlay, rawProgress, transform, sw, sh);
+            ApplyMarksAtProgress(overlay, rawProgress, transform, sw, sh, _overlayOverscan[slot]);
 
             // Placement box (where/how big on screen), clipped so framing can't spill out.
             ApplyOverlayBox(slot, overlay, false);
@@ -1856,7 +1889,7 @@ namespace VideoDirector.Models
         // scaled by its box fractions, because the mark never referred to pixels in the first place.
         private void ApplyMarksAtProgress(CinematicOperation op, double rawProgress,
                                           Microsoft.UI.Xaml.Media.CompositeTransform transform,
-                                          double surfaceW, double surfaceH)
+                                          double surfaceW, double surfaceH, double overscan = 1.0)
         {
             if (op == null || transform == null) return;
             double progress = Math.Clamp(rawProgress, 0, 1);
@@ -1865,6 +1898,15 @@ namespace VideoDirector.Models
                 op.StartMark, op.MidMark, op.EndMark, op.MidTime, op.CurveProfile, progress);
 
             var (scale, tx, ty) = Framing.ToTransform(zoom, cx, cy, surfaceW, surfaceH);
+
+            // Crop off the decoder's edge padding. Applied here rather than folded into the mark
+            // so the framing the user authored stays exactly what they authored.
+            if (overscan > 1.0)
+            {
+                scale *= overscan;
+                tx *= overscan;
+                ty *= overscan;
+            }
 
             // Delta-checked: assigning an unchanged transform property every frame dirties the
             // DirectComposition visual tree for nothing (see ARCHITECTURE.md section 4).

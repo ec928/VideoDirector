@@ -10,6 +10,13 @@
     <RootNamespace>VideoDirector</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
+
+    <!-- Build output goes to bin\<Platform>\<Config>\ rather than the SDK default
+         bin\<Platform>\<Config>\<TargetFramework>\<RuntimeIdentifier>\. The default buries the
+         executable five levels deep for no benefit here: this project has exactly one TFM and one
+         RID per platform, so those two path segments only ever have one value. -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
     <PublishProfile>win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>

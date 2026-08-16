@@ -9,7 +9,7 @@
 # Exit code 0 = pass, 1 = fail. Prints one line per check.
 
 $ErrorActionPreference = 'Stop'
-$exe = Join-Path $PSScriptRoot '..\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\VideoDirector.exe'
+$exe = Join-Path $PSScriptRoot '..\bin\x64\Debug\VideoDirector.exe'
 $failures = 0
 $checks = 0
 
