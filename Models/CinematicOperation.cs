@@ -50,9 +50,8 @@ namespace VideoDirector.Models
         }
 
         [JsonIgnore]
-        public bool HasModifications => 
-            StartMark.Scale != 1.0f || StartMark.X != 0 || StartMark.Y != 0 ||
-            EndMark.Scale != 1.0f || EndMark.X != 0 || EndMark.Y != 0 ||
+        public bool HasModifications =>
+            !StartMark.IsIdentity || !EndMark.IsIdentity || MidMark != null ||
             PlaybackSpeed != 1.0 ||
             TransitionDuration > TimeSpan.Zero ||
             TransitionStyle != TransitionStyle.HardSnap ||
@@ -440,21 +439,15 @@ namespace VideoDirector.Models
 
         public void Reset()
         {
-            StartMark.Scale = 1.0f;
-            StartMark.X = 0;
-            StartMark.Y = 0;
-            
-            if (MidMark != null)
-            {
-                MidMark.Scale = 1.0f;
-                MidMark.X = 0;
-                MidMark.Y = 0;
-            }
+            StartMark.Zoom = 1.0;
+            StartMark.CenterX = 0.5;
+            StartMark.CenterY = 0.5;
+
             MidMark = null;
 
-            EndMark.Scale = 1.0f;
-            EndMark.X = 0;
-            EndMark.Y = 0;
+            EndMark.Zoom = 1.0;
+            EndMark.CenterX = 0.5;
+            EndMark.CenterY = 0.5;
 
             PlaybackSpeed = 1.0;
             TransitionDuration = TimeSpan.Zero;

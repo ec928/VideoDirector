@@ -558,6 +558,7 @@ namespace VideoDirector.ViewModels
             // default below — i.e. they read as v1, which is what they are.
             //   1 — TimelineNodes (track 0) + OverlayTracks (tracks 1..3), as separate shapes
             //   2 — Tracks: one uniform list of TimelineTrack
+            //   3 — framing marks normalised: Zoom + CenterX/CenterY replace Scale + pixel X/Y
             // Bump this, and add a migration step in ApplyProjectData, whenever the shape changes.
             public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
@@ -570,7 +571,7 @@ namespace VideoDirector.ViewModels
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> OverlayClips { get; set; } = new();
         }
 
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 3;
 
         public async Task SaveAsync(Windows.Storage.StorageFile file)
         {
@@ -623,6 +624,17 @@ namespace VideoDirector.ViewModels
                     foreach (var clip in data.OverlayClips) Tracks[1].Clips.Add(clip);
                 }
             }
+
+            // Marks written before v3 carried a scale and a PIXEL translation, captured against
+            // whatever size the window was at the time. Fold them into the normalised fields;
+            // MigrateLegacyFraming clears the legacy values so this can never apply twice.
+            foreach (var track in Tracks)
+                foreach (var clip in track.Clips)
+                {
+                    clip.StartMark?.MigrateLegacyFraming();
+                    clip.MidMark?.MigrateLegacyFraming();
+                    clip.EndMark?.MigrateLegacyFraming();
+                }
 
             foreach (var track in Tracks)
             {

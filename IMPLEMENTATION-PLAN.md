@@ -64,8 +64,9 @@ Decide when the owning phase starts, not before:
 - ~~**Does Lock block selection, or only mutation?**~~ Resolved in C3: **mutation only**. A locked
   track's clips still select and inspect; they cannot be dragged, removed, split, duplicated, or
   moved onto/off the track.
-- **Framing migration tolerance**: identity marks convert exactly; non-identity marks from existing
-  projects convert best-effort and may need a visual check. Confirm that is acceptable. (Phase D1)
+- ~~**Framing migration tolerance**~~ Shipped in D1 as planned: identity marks (the vast majority)
+  convert exactly; a framed mark keeps its zoom and pan direction but is approximate, because the
+  viewport it was authored against was never recorded. Such clips may want a visual check.
 - **Should clicking a spine clip during playback still jump playback to it?** Preserved as-is in B1
   to limit blast radius, but it made more sense when selecting a clip meant "work on this clip".
   Now that selection is just selection, it may be a non-sequitur.
@@ -375,7 +376,7 @@ is hit. Make the playhead grabbable beyond the ruler strip.
 
 ## Group D — Clip editing
 
-### D1 — Normalised framing coordinates ⬜
+### D1 — Normalised framing coordinates ✅ **Done**
 
 Must land before D2 — the rectangle geometry depends on it.
 

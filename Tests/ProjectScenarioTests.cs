@@ -415,6 +415,67 @@ namespace VideoDirector.Tests
         }
 
         [Fact]
+        public void LoadsPreNormalisationFramingMarks()
+        {
+            // v1/v2 marks stored Scale plus a PIXEL translation. They must convert on load, not
+            // arrive as an identity mark (silently throwing away the user's framing) or as a zoom
+            // of 0 (a clip that renders as nothing).
+            string legacy = @"{""SchemaVersion"":2,""Tracks"":[{""IsGapless"":true,""Clips"":[
+                {""FilePath"":""C:\\clips\\a.mp4"",""SourceDuration"":""00:01:00"",
+                 ""VideoStartTime"":""00:00:00"",""VideoEndTime"":""00:00:10"",""OpDuration"":""00:00:10"",
+                 ""StartMark"":{""Scale"":1.0,""X"":0.0,""Y"":0.0},
+                 ""EndMark"":{""Scale"":2.0,""X"":-200.0,""Y"":0.0}}]}]}";
+
+            var vm = new DirectorViewModel();
+            vm.LoadProjectJson(legacy);
+
+            var clip = vm.Tracks[0].Clips[0];
+            Assert.True(clip.StartMark.IsIdentity);          // an unframed mark converts exactly
+            Assert.Equal(2.0, clip.EndMark.Zoom, 6);         // zoom survives
+            Assert.True(clip.EndMark.CenterX > 0.5);         // and the pan still points the same way
+        }
+
+        [Fact]
+        public void MigratedFramingSurvivesTheNextSaveInNormalisedForm()
+        {
+            string legacy = @"{""SchemaVersion"":2,""Tracks"":[{""IsGapless"":true,""Clips"":[
+                {""FilePath"":""C:\\clips\\a.mp4"",""SourceDuration"":""00:01:00"",
+                 ""VideoStartTime"":""00:00:00"",""VideoEndTime"":""00:00:10"",""OpDuration"":""00:00:10"",
+                 ""EndMark"":{""Scale"":2.0,""X"":-200.0,""Y"":0.0}}]}]}";
+
+            var vm = new DirectorViewModel();
+            vm.LoadProjectJson(legacy);
+            double centerX = vm.Tracks[0].Clips[0].EndMark.CenterX;
+
+            // Round-tripping must not re-apply the conversion, or framing would drift a little
+            // further from the original every time the project was opened and saved.
+            var again = new DirectorViewModel();
+            again.LoadProjectJson(vm.ToProjectJson());
+
+            Assert.Equal(centerX, again.Tracks[0].Clips[0].EndMark.CenterX, 6);
+            Assert.Equal(2.0, again.Tracks[0].Clips[0].EndMark.Zoom, 6);
+        }
+
+        [Fact]
+        public void FramingSurvivesASaveAndReload()
+        {
+            var vm = Project();
+            vm.Tracks[0].Clips[0].StartMark = new SpatialMark(1.0, 0.5, 0.5);
+            vm.Tracks[0].Clips[0].MidMark = new SpatialMark(1.5, 0.3, 0.4);
+            vm.Tracks[0].Clips[0].EndMark = new SpatialMark(2.0, 0.8, 0.2);
+
+            var reloaded = new DirectorViewModel();
+            reloaded.LoadProjectJson(vm.ToProjectJson());
+
+            var clip = reloaded.Tracks[0].Clips[0];
+            Assert.Equal(1.5, clip.MidMark.Zoom, 6);
+            Assert.Equal(0.3, clip.MidMark.CenterX, 6);
+            Assert.Equal(2.0, clip.EndMark.Zoom, 6);
+            Assert.Equal(0.8, clip.EndMark.CenterX, 6);
+            Assert.Equal(0.2, clip.EndMark.CenterY, 6);
+        }
+
+        [Fact]
         public void ACorruptProjectLeavesTheCurrentOneAlone()
         {
             var vm = Project();

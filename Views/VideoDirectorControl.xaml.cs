@@ -889,8 +889,9 @@ namespace VideoDirector.Views
             VideoStartTime = clip.VideoStartTime,
             VideoEndTime = clip.VideoEndTime,
             CurveProfile = clip.CurveProfile,
-            StartMark = new SpatialMark(clip.StartMark.Scale, clip.StartMark.X, clip.StartMark.Y),
-            EndMark = new SpatialMark(clip.EndMark.Scale, clip.EndMark.X, clip.EndMark.Y),
+            StartMark = clip.StartMark.Clone(),
+            MidMark = clip.MidMark?.Clone(),
+            EndMark = clip.EndMark.Clone(),
             TransitionDuration = clip.TransitionDuration,
             TransitionStyle = clip.TransitionStyle,
             Opacity = clip.Opacity,
@@ -970,8 +971,8 @@ namespace VideoDirector.Views
                 VideoStartTime = TimeSpan.FromSeconds(frozen),
                 VideoEndTime = TimeSpan.FromSeconds(Math.Min(srcLen, frozen + 0.1)),
                 OpDuration = TimeSpan.FromSeconds(10),
-                StartMark = new SpatialMark(1.0f, 0, 0),
-                EndMark = new SpatialMark(1.25f, 0, 0), // default push-in
+                StartMark = new SpatialMark(1.0, 0.5, 0.5),
+                EndMark = new SpatialMark(1.25, 0.5, 0.5), // default push-in
                 Opacity = clip.Opacity,
                 PlacementWidth = clip.PlacementWidth,
                 PlacementHeight = clip.PlacementHeight,
@@ -1303,13 +1304,24 @@ namespace VideoDirector.Views
             TimelineScroller.ChangeView(Math.Clamp(target, 0, extent - viewport), null, null, disableAnimation: true);
         }
 
+        // Turn the framing currently on screen into a mark. The conversion needs the size of the
+        // surface the content is drawn on, which the engine owns — a mark is expressed in
+        // source-frame terms, so it must not inherit whatever pixel size the window happens to be.
+        private SpatialMark CaptureMark(Microsoft.UI.Xaml.Media.CompositeTransform transform)
+        {
+            var (w, h) = _playbackEngine?.EditSurfaceSizePublic() ?? (PlayerControl.ActualWidth, PlayerControl.ActualHeight);
+            var (zoom, cx, cy) = Framing.FromTransform(
+                transform.ScaleX, transform.TranslateX, transform.TranslateY, w, h);
+            return new SpatialMark(zoom, cx, cy);
+        }
+
         private void SetStart_Click(object? sender, RoutedEventArgs e)
         {
             var op = ViewModel.SelectedClip;
             var transform = PlayerControl.ActiveTransform;
             if (op != null && transform != null)
             {
-                op.StartMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
+                op.StartMark = CaptureMark(transform);
                 _playbackEngine?.UpdateWysiwygOverlay();
             }
         }
@@ -1320,7 +1332,7 @@ namespace VideoDirector.Views
             var transform = PlayerControl.ActiveTransform;
             if (op != null && transform != null)
             {
-                op.MidMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
+                op.MidMark = CaptureMark(transform);
                 _playbackEngine?.UpdateWysiwygOverlay();
             }
         }
@@ -1331,7 +1343,7 @@ namespace VideoDirector.Views
             var transform = PlayerControl.ActiveTransform;
             if (op != null && transform != null)
             {
-                op.EndMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
+                op.EndMark = CaptureMark(transform);
                 _playbackEngine?.UpdateWysiwygOverlay();
             }
         }

@@ -810,7 +810,8 @@ namespace VideoDirector.Models
                         spatialProgress = Math.Clamp(spatialElapsed.TotalMilliseconds / duration.TotalMilliseconds, 0.0, 1.0);
                     }
                 }
-                ApplyMarksAtProgress(op, spatialProgress, transform);
+                var (sw, sh) = BaseSurfaceSize();
+                ApplyMarksAtProgress(op, spatialProgress, transform, sw, sh);
             }
 
             UpdateSpatial(_opA, _mediaPlayerA, _opAStartTime, _opADuration, _playerControl.TransformA);
@@ -928,51 +929,25 @@ namespace VideoDirector.Models
                     _playerControl.TelemetryOperationInfo.Text = $"Zoom/Pan  : Z:{activeTransform.ScaleX:F2} X:{activeTransform.TranslateX:F0} Y:{activeTransform.TranslateY:F0}";
                 }
                 
-                if (activeOp != null && activeOp.StartMark != null && activeOp.EndMark != null && _playerControl.ActualWidth > 0) {
-                    double W = _playerControl.ActualWidth;
-                    double H = _playerControl.ActualHeight;
-                    
-                    double Sc = activeTransform != null ? activeTransform.ScaleX : 1.0;
-                    double txc = activeTransform != null ? activeTransform.TranslateX : 0.0;
-                    double tyc = activeTransform != null ? activeTransform.TranslateY : 0.0;
+                if (activeOp != null && activeOp.StartMark != null && activeOp.EndMark != null) {
+                    // Marks read out in their own terms now — zoom and where the camera points,
+                    // as fractions of the source frame. This used to reconstruct a pixel rectangle
+                    // for each mark relative to the live transform, which was a lot of arithmetic
+                    // to describe a value that is no longer stored in pixels.
+                    static string Describe(string label, SpatialMark m)
+                        => $"{label} : zoom {m.Zoom:F2}x  centre {m.CenterX:F3},{m.CenterY:F3}";
 
-                    // Start Mark Box
-                    double St_s = activeOp.StartMark.Scale;
-                    double txt_s = activeOp.StartMark.X;
-                    double tyt_s = activeOp.StartMark.Y;
-                    double startLeft = (-W / 2 - txt_s) * (Sc / St_s) + W / 2 + txc;
-                    double startTop = (-H / 2 - tyt_s) * (Sc / St_s) + H / 2 + tyc;
-                    double startWidth = W * (Sc / St_s);
-                    double startHeight = H * (Sc / St_s);
+                    _playerControl.TelemetryStartMarkInfo.Text = Describe("Start Mark", activeOp.StartMark);
+                    _playerControl.TelemetryEndMarkInfo.Text = Describe("End Mark  ", activeOp.EndMark);
+                    _playerControl.TelemetryStartMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                    _playerControl.TelemetryEndMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
 
-                    // End Mark Box
-                    double St_e = activeOp.EndMark.Scale;
-                    double txt_e = activeOp.EndMark.X;
-                    double tyt_e = activeOp.EndMark.Y;
-                    double endLeft = (-W / 2 - txt_e) * (Sc / St_e) + W / 2 + txc;
-                    double endTop = (-H / 2 - tyt_e) * (Sc / St_e) + H / 2 + tyc;
-                    double endWidth = W * (Sc / St_e);
-                    double endHeight = H * (Sc / St_e);
-
-                    _playerControl.TelemetryStartMarkInfo.Text = $"Start Box : L:{startLeft:F0} T:{startTop:F0} W:{startWidth:F0} H:{startHeight:F0} (Z:{activeOp.StartMark.Scale:F2})";
-                    
                     if (activeOp.MidMark != null) {
-                        double St_m = activeOp.MidMark.Scale;
-                        double txt_m = activeOp.MidMark.X;
-                        double tyt_m = activeOp.MidMark.Y;
-                        double midLeft = (-W / 2 - txt_m) * (Sc / St_m) + W / 2 + txc;
-                        double midTop = (-H / 2 - tyt_m) * (Sc / St_m) + H / 2 + tyc;
-                        double midWidth = W * (Sc / St_m);
-                        double midHeight = H * (Sc / St_m);
-                        _playerControl.TelemetryMidMarkInfo.Text   = $"MidBox   : L:{midLeft:F0} T:{midTop:F0} W:{midWidth:F0} H:{midHeight:F0} (Z:{activeOp.MidMark.Scale:F2})";
+                        _playerControl.TelemetryMidMarkInfo.Text = Describe("Mid Mark  ", activeOp.MidMark);
                         _playerControl.TelemetryMidMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
                     } else {
                         _playerControl.TelemetryMidMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     }
-
-                    _playerControl.TelemetryEndMarkInfo.Text   = $"End Box   : L:{endLeft:F0} T:{endTop:F0} W:{endWidth:F0} H:{endHeight:F0} (Z:{activeOp.EndMark.Scale:F2})";
-                    _playerControl.TelemetryStartMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
-                    _playerControl.TelemetryEndMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
                 }
                 else {
                     _playerControl.TelemetryStartMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
@@ -1008,56 +983,46 @@ namespace VideoDirector.Models
             double W = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
             double H = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
 
-            // If we're editing an overlay track, the crop box aspect ratio must match the PiP's aspect ratio.
-            double boxW = W;
-            double boxH = H;
-            if (_viewModel.SelectedTrackIndex > 0)
-            {
-                double pipAspect = (16.0 / 9.0) * (op.PlacementWidth / op.PlacementHeight);
-                double videoAspect = W / H;
+            // The surface the clip's content is drawn on, and where it sits in the viewport. The
+            // aspect used to be hardcoded to 16:9 and scaled by the PiP fractions, which was wrong
+            // for any output that is not 16:9; the real box size is now simply asked for.
+            var (surfaceW, surfaceH) = EditSurfaceSize();
+            if (surfaceW <= 0) surfaceW = W;
+            if (surfaceH <= 0) surfaceH = H;
+            double originX = (W - surfaceW) / 2;
+            double originY = (H - surfaceH) / 2;
 
-                // When Scale=1 (UniformToFill), the PiP crop box fits the video on one axis.
-                if (pipAspect > videoAspect)
-                {
-                    boxW = W;
-                    boxH = W / pipAspect;
-                }
-                else
-                {
-                    boxH = H;
-                    boxW = H * pipAspect;
-                }
-            }
+            // Live transform currently showing the content.
+            double sc = transform.ScaleX <= 0 ? 1 : transform.ScaleX;
+            double tx = transform.TranslateX;
+            double ty = transform.TranslateY;
 
-            void DrawRect(Microsoft.UI.Xaml.Shapes.Rectangle rect, SpatialMark targetMark, bool show)
+            // A mark's camera rectangle covers 1/zoom of the frame, centred on its centre point.
+            // Map it from surface space into the viewport through the live transform, so the rects
+            // sit over the picture you are actually looking at.
+            void DrawRect(Microsoft.UI.Xaml.Shapes.Rectangle rect, SpatialMark mark, bool show)
             {
-                if (!show || targetMark == null)
+                if (!show || mark == null)
                 {
                     rect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     return;
                 }
-
                 rect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
 
-                double Sc = transform.ScaleX;
-                double txc = transform.TranslateX;
-                double tyc = transform.TranslateY;
+                double zoom = mark.Zoom <= 0 ? 1 : mark.Zoom;
+                double rectW = surfaceW / zoom;
+                double rectH = surfaceH / zoom;
+                double surfaceLeft = mark.CenterX * surfaceW - rectW / 2;
+                double surfaceTop = mark.CenterY * surfaceH - rectH / 2;
 
-                double St = targetMark.Scale;
-                double txt = targetMark.X;
-                double tyt = targetMark.Y;
+                // surface point -> viewport, under the current scale about the surface centre.
+                double screenLeft = originX + surfaceW / 2 + sc * (surfaceLeft - surfaceW / 2) + tx;
+                double screenTop = originY + surfaceH / 2 + sc * (surfaceTop - surfaceH / 2) + ty;
 
-                if (St <= 0) St = 1;
-
-                double currentLeft = (-boxW / 2 - txt) * (Sc / St) + W / 2 + txc;
-                double currentTop = (-boxH / 2 - tyt) * (Sc / St) + H / 2 + tyc;
-                double currentWidth = boxW * (Sc / St);
-                double currentHeight = boxH * (Sc / St);
-
-                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(rect, currentLeft);
-                Microsoft.UI.Xaml.Controls.Canvas.SetTop(rect, currentTop);
-                rect.Width = Math.Max(0, currentWidth);
-                rect.Height = Math.Max(0, currentHeight);
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(rect, screenLeft);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(rect, screenTop);
+                rect.Width = Math.Max(0, sc * rectW);
+                rect.Height = Math.Max(0, sc * rectH);
             }
 
             DrawRect(_playerControl.WysiwygStartRect, op.StartMark, true);
@@ -1153,10 +1118,12 @@ namespace VideoDirector.Models
                     _viewModel.CurrentOperationDuration = activePlayer.PlaybackSession.NaturalDuration;
                     _viewModel.CurrentOperationTime = activePlayer.PlaybackSession.Position;
                 }
-                activeTransform.ScaleX = markToEdit.Scale;
-                activeTransform.ScaleY = markToEdit.Scale;
-                activeTransform.TranslateX = markToEdit.X;
-                activeTransform.TranslateY = markToEdit.Y;
+                var (mw, mh) = BaseSurfaceSize();
+                var (mScale, mTx, mTy) = Framing.ToTransform(markToEdit, mw, mh);
+                activeTransform.ScaleX = mScale;
+                activeTransform.ScaleY = mScale;
+                activeTransform.TranslateX = mTx;
+                activeTransform.TranslateY = mTy;
                 _playerControl.ActiveTransform = activeTransform;
                 UpdateWysiwygOverlay();
             });
@@ -1216,7 +1183,8 @@ namespace VideoDirector.Models
                 activePlayer.PlaybackSession.Position = op.VideoStartTime + offset;
 
             double progress = op.OpDuration.TotalMilliseconds > 0 ? offset.TotalMilliseconds / op.OpDuration.TotalMilliseconds : 0;
-            ApplyMarksAtProgress(op, progress, activeTransform);
+            var (seekW, seekH) = BaseSurfaceSize();
+            ApplyMarksAtProgress(op, progress, activeTransform, seekW, seekH);
             _playerControl.ActiveTransform = activeTransform;
 
             EvaluateOverlays(t);
@@ -1657,7 +1625,8 @@ namespace VideoDirector.Models
             double rawProgress = overlay.OpDuration.TotalMilliseconds > 0
                 ? (currentStoryTime - overlay.StartTime).TotalMilliseconds / overlay.OpDuration.TotalMilliseconds
                 : 0;
-            ApplyMarksAtProgress(overlay, rawProgress, transform, overlay.PlacementWidth, overlay.PlacementHeight);
+            var (sw, sh) = OverlaySurfaceSize(slot);
+            ApplyMarksAtProgress(overlay, rawProgress, transform, sw, sh);
 
             // Placement box (where/how big on screen), clipped so framing can't spill out.
             ApplyOverlayBox(slot, overlay, false);
@@ -1666,53 +1635,81 @@ namespace VideoDirector.Models
         // Applies a clip's Start/Mid/End marks to a transform at the given progress (0..1),
         // eased by the clip's CurveProfile. Shared by Track 1 (UpdateSpatial) and upper-track
         // overlay content so motion behaves identically on every track.
-        private void ApplyMarksAtProgress(CinematicOperation op, double rawProgress, Microsoft.UI.Xaml.Media.CompositeTransform transform, double panScaleX = 1.0, double panScaleY = 1.0)
+        // Applies a clip's Start/Mid/End marks to a transform at the given progress (0..1), eased
+        // by the clip's CurveProfile. Shared by every track, so motion behaves identically
+        // everywhere.
+        //
+        // Marks are interpolated in SOURCE-FRAME terms (zoom + centre) and converted to a pixel
+        // transform exactly once, against the surface the clip is actually drawn on. That is what
+        // removed the old panScaleX/panScaleY fudge: an overlay's translation no longer has to be
+        // scaled by its box fractions, because the mark never referred to pixels in the first place.
+        private void ApplyMarksAtProgress(CinematicOperation op, double rawProgress,
+                                          Microsoft.UI.Xaml.Media.CompositeTransform transform,
+                                          double surfaceW, double surfaceH)
         {
             if (op == null || transform == null) return;
             double progress = Math.Clamp(rawProgress, 0, 1);
 
-            double easedProgress = progress;
+            double eased = progress;
             if (op.CurveProfile == CurveProfile.Bezier)
-                easedProgress = progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2;
+                eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2;
             else if (op.CurveProfile == CurveProfile.DirectorsArc)
-                easedProgress = 1 - Math.Pow(1 - progress, 3);
+                eased = 1 - Math.Pow(1 - progress, 3);
 
-            double newScaleX, newTranslateX, newTranslateY;
+            double zoom, cx, cy;
             if (op.MidMark != null)
             {
-                if (easedProgress < 0.5)
-                {
-                    double p = easedProgress * 2;
-                    newScaleX = op.StartMark.Scale + (op.MidMark.Scale - op.StartMark.Scale) * p;
-                    newTranslateX = op.StartMark.X + (op.MidMark.X - op.StartMark.X) * p;
-                    newTranslateY = op.StartMark.Y + (op.MidMark.Y - op.StartMark.Y) * p;
-                }
-                else
-                {
-                    double p = (easedProgress - 0.5) * 2;
-                    newScaleX = op.MidMark.Scale + (op.EndMark.Scale - op.MidMark.Scale) * p;
-                    newTranslateX = op.MidMark.X + (op.EndMark.X - op.MidMark.X) * p;
-                    newTranslateY = op.MidMark.Y + (op.EndMark.Y - op.MidMark.Y) * p;
-                }
+                // Two segments: Start -> Mid over the first half, Mid -> End over the second.
+                var (from, to, p) = eased < 0.5
+                    ? (op.StartMark, op.MidMark, eased * 2)
+                    : (op.MidMark, op.EndMark, (eased - 0.5) * 2);
+                zoom = from.Zoom + (to.Zoom - from.Zoom) * p;
+                cx = from.CenterX + (to.CenterX - from.CenterX) * p;
+                cy = from.CenterY + (to.CenterY - from.CenterY) * p;
             }
             else
             {
-                newScaleX = op.StartMark.Scale + (op.EndMark.Scale - op.StartMark.Scale) * easedProgress;
-                newTranslateX = op.StartMark.X + (op.EndMark.X - op.StartMark.X) * easedProgress;
-                newTranslateY = op.StartMark.Y + (op.EndMark.Y - op.StartMark.Y) * easedProgress;
+                zoom = op.StartMark.Zoom + (op.EndMark.Zoom - op.StartMark.Zoom) * eased;
+                cx = op.StartMark.CenterX + (op.EndMark.CenterX - op.StartMark.CenterX) * eased;
+                cy = op.StartMark.CenterY + (op.EndMark.CenterY - op.StartMark.CenterY) * eased;
             }
 
-            newTranslateX *= panScaleX;
-            newTranslateY *= panScaleY;
+            var (scale, tx, ty) = Framing.ToTransform(zoom, cx, cy, surfaceW, surfaceH);
 
-            if (Math.Abs(transform.ScaleX - newScaleX) > 0.0001)
+            // Delta-checked: assigning an unchanged transform property every frame dirties the
+            // DirectComposition visual tree for nothing (see ARCHITECTURE.md section 4).
+            if (Math.Abs(transform.ScaleX - scale) > 0.0001)
             {
-                transform.ScaleX = newScaleX;
-                transform.ScaleY = newScaleX;
+                transform.ScaleX = scale;
+                transform.ScaleY = scale;
             }
-            if (Math.Abs(transform.TranslateX - newTranslateX) > 0.01) transform.TranslateX = newTranslateX;
-            if (Math.Abs(transform.TranslateY - newTranslateY) > 0.01) transform.TranslateY = newTranslateY;
+            if (Math.Abs(transform.TranslateX - tx) > 0.01) transform.TranslateX = tx;
+            if (Math.Abs(transform.TranslateY - ty) > 0.01) transform.TranslateY = ty;
         }
+
+        // The size of the surface a clip's content is drawn on — its placement box if one has been
+        // laid out, otherwise the viewport. Framing is expressed relative to this.
+        private (double w, double h) SurfaceSizeFor(Microsoft.UI.Xaml.Controls.Grid box)
+        {
+            double w = box != null && !double.IsNaN(box.Width) && box.Width > 0
+                ? box.Width : _playerControl.ActualWidth;
+            double h = box != null && !double.IsNaN(box.Height) && box.Height > 0
+                ? box.Height : _playerControl.ActualHeight;
+            return (w, h);
+        }
+
+        private (double w, double h) BaseSurfaceSize() => SurfaceSizeFor(_playerControl.BaseBox);
+
+        private (double w, double h) OverlaySurfaceSize(int slot)
+            => SurfaceSizeFor(_playerControl.OverlayVisuals[slot].Grid);
+
+        // Where the clip currently being edited is drawn, so captured framing means the same thing
+        // as the framing that was on screen.
+        private (double w, double h) EditSurfaceSize()
+            => _isEditingOverlay ? OverlaySurfaceSize(0) : BaseSurfaceSize();
+
+        // The view needs this when capturing a keyframe from the on-screen framing.
+        public (double w, double h) EditSurfaceSizePublic() => EditSurfaceSize();
 
         private void ApplyOverlayDriftCorrection(int slot, CinematicOperation overlay, TimeSpan currentStoryTime)
         {
@@ -1897,10 +1894,12 @@ namespace VideoDirector.Models
             _dispatcher.TryEnqueue(() =>
             {
                 if (_activeOverlay[0] != overlay) return;
-                transform.ScaleX = markToEdit.Scale;
-                transform.ScaleY = markToEdit.Scale;
-                transform.TranslateX = markToEdit.X;
-                transform.TranslateY = markToEdit.Y;
+                var (ow, oh) = OverlaySurfaceSize(0);
+                var (oScale, oTx, oTy) = Framing.ToTransform(markToEdit, ow, oh);
+                transform.ScaleX = oScale;
+                transform.ScaleY = oScale;
+                transform.TranslateX = oTx;
+                transform.TranslateY = oTy;
                 // Must cache into the SAME index the edit surface uses (0) — caching elsewhere
                 // leaves a stale aspect here, which sizes the box to the wrong shape and makes
                 // UniformToFill crop the clip (e.g. a portrait clip shown as a cropped landscape).
@@ -2003,7 +2002,8 @@ namespace VideoDirector.Models
                     if (_editClip.PlaybackSpeed > 0) _editPlayer.Play();
                 }
             }
-            ApplyMarksAtProgress(_editClip, Math.Clamp(progress, 0.0, 1.0), _playerControl.ActiveTransform);
+            var (editW, editH) = EditSurfaceSize();
+            ApplyMarksAtProgress(_editClip, Math.Clamp(progress, 0.0, 1.0), _playerControl.ActiveTransform, editW, editH);
 
             // Drive the per-clip scrubber off the real decode position so it tracks the preview.
             // (Assigning CurrentOperationTime — not …Seconds — only notifies the slider; it does
