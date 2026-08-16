@@ -18,13 +18,14 @@
                 <Grid.RenderTransform>
                     <CompositeTransform x:Name="TransformB" x:FieldModifier="public" />
                 </Grid.RenderTransform>
-                <MediaPlayerElement x:Name="PlayerB" x:FieldModifier="public" AreTransportControlsEnabled="False" Stretch="UniformToFill" Opacity="0" />
+                <!-- Margin="-1" — see the note on OverlayPlayer1 below. -->
+                <MediaPlayerElement x:Name="PlayerB" x:FieldModifier="public" AreTransportControlsEnabled="False" Stretch="UniformToFill" Opacity="0" Margin="-1" />
             </Grid>
             <Grid x:Name="GridA" x:FieldModifier="public" RenderTransformOrigin="0.5,0.5">
                 <Grid.RenderTransform>
                     <CompositeTransform x:Name="TransformA" x:FieldModifier="public" />
                 </Grid.RenderTransform>
-                <MediaPlayerElement x:Name="PlayerA" x:FieldModifier="public" AreTransportControlsEnabled="False" Stretch="UniformToFill" Opacity="1" />
+                <MediaPlayerElement x:Name="PlayerA" x:FieldModifier="public" AreTransportControlsEnabled="False" Stretch="UniformToFill" Opacity="1" Margin="-1" />
             </Grid>
         </Grid>
 
@@ -37,8 +38,17 @@
         <Grid x:Name="OverlayGrid1" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
+            <!-- Margin="-1" is the fix for the shimmering border. The picture is drawn one pixel
+                 proud of its box on every side, so the clip always cuts through interior texels.
+                 A picture that fills its box EXACTLY puts the texture edge on the clip boundary;
+                 the GPU then samples past the end of the surface, and because those texels are
+                 rewritten every frame the hairline changes every frame — which is why it only
+                 ever showed during playback. Equal placement fractions (0.3 x 0.3) make the box
+                 aspect match the video aspect exactly, which is what triggered it. Rationale and
+                 the evidence are in Models/SurfaceAspect.cs. -->
             <MediaPlayerElement x:Name="OverlayPlayer1" x:FieldModifier="public"
                                 AreTransportControlsEnabled="False" Stretch="UniformToFill"
+                                Margin="-1"
                                 RenderTransformOrigin="0.5,0.5">
                 <MediaPlayerElement.RenderTransform>
                     <CompositeTransform x:Name="OverlayTransform1" x:FieldModifier="public" />
@@ -62,6 +72,7 @@
               HorizontalAlignment="Left" VerticalAlignment="Top">
             <MediaPlayerElement x:Name="OverlayPlayer2" x:FieldModifier="public"
                                 AreTransportControlsEnabled="False" Stretch="UniformToFill"
+                                Margin="-1"
                                 RenderTransformOrigin="0.5,0.5">
                 <MediaPlayerElement.RenderTransform>
                     <CompositeTransform x:Name="OverlayTransform2" x:FieldModifier="public" />
@@ -79,6 +90,7 @@
               HorizontalAlignment="Left" VerticalAlignment="Top">
             <MediaPlayerElement x:Name="OverlayPlayer3" x:FieldModifier="public"
                                 AreTransportControlsEnabled="False" Stretch="UniformToFill"
+                                Margin="-1"
                                 RenderTransformOrigin="0.5,0.5">
                 <MediaPlayerElement.RenderTransform>
                     <CompositeTransform x:Name="OverlayTransform3" x:FieldModifier="public" />

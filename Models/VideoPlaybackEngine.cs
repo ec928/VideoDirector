@@ -923,15 +923,18 @@ namespace VideoDirector.Models
                     _playerControl.TelemetryClipTime.Text = $"Clip Time : {currentActivePlayer.PlaybackSession.Position:hh\\:mm\\:ss\\.ff} / {clipEndTime:hh\\:mm\\:ss\\.ff} [{currentFileName}]";
                     uint nw = currentActivePlayer.PlaybackSession.NaturalVideoWidth;
                     uint nh = currentActivePlayer.PlaybackSession.NaturalVideoHeight;
-                    // Edge stability. "crops YES" means the box is off the surface's shape and the
-                    // clip geometry is cutting a live swapchain — the shimmering border. Must read NO.
+                    // Edge stability. "over" is how far the picture overhangs its box on each axis;
+                    // both figures must stay above zero, or the clip cuts at the texture edge and
+                    // that edge shimmers during playback. "flush" flags the box aspect matching the
+                    // video aspect exactly — the case the inset exists to survive.
                     double decodedAspect = nh > 0 ? (double)nw / nh : 0;
-                    double boxAspect = _playerControl.BaseBox.Height > 0
-                        ? _playerControl.BaseBox.Width / _playerControl.BaseBox.Height : 0;
-                    bool crops = SurfaceAspect.WouldCropSurface(boxAspect, decodedAspect);
+                    double boxW = _playerControl.BaseBox.Width, boxH = _playerControl.BaseBox.Height;
+                    double boxAspect = boxH > 0 ? boxW / boxH : 0;
+                    var (overX, overY) = SurfaceAspect.Overhang(boxW, boxH, decodedAspect);
                     _playerControl.TelemetryOperationInfo.Text =
                         $"Edge dbg  : decoded {nw}x{nh} ({decodedAspect:F4})  box {boxAspect:F4}  " +
-                        $"file {activeOp?.SourceAspect ?? 0:F4}  crops {(crops ? "YES" : "no")}";
+                        $"over {overX:F2}x{overY:F2}  " +
+                        $"flush {(SurfaceAspect.EdgeIsFlushWithBox(boxAspect, decodedAspect) ? "YES" : "no")}";
 
                     if (activeOp != null && (_isEditingOverlay || activeOp.PlacementWidth < 1.0 || activeOp.PlacementHeight < 1.0))
                     {
