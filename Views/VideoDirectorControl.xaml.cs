@@ -17,7 +17,6 @@ namespace VideoDirector.Views
         public DirectorViewModel ViewModel { get; } = new DirectorViewModel();
         private VideoPlaybackEngine _playbackEngine;
         private DispatcherTimer _inactivityTimer;
-        private double _preRecordSpeed = 1.0;
 
         // Proportional timeline bar (§7E/F): px-per-second scale + the playhead line & handle.
         private double _timelinePxPerSec;
@@ -74,7 +73,7 @@ namespace VideoDirector.Views
         private void InactivityTimer_Tick(object? sender, object e)
         {
             _inactivityTimer.Stop();
-            if (!ViewModel.IsRecordingMotion && !_isPointerOverPill)
+            if (!_isPointerOverPill)
             {
                 ViewModel.IsControlsVisible = false;
             }
@@ -1258,51 +1257,6 @@ namespace VideoDirector.Views
             }
             // Note: entering Edit on selection is owned by SelectClip -> BeginEdit (one entry point
             // for both tracks), so there's no per-track edit trigger here anymore.
-            else if (e.PropertyName == nameof(DirectorViewModel.IsRecordingMotion))
-            {
-                if (RecordButton.IsChecked != ViewModel.IsRecordingMotion)
-                {
-                    RecordButton.IsChecked = ViewModel.IsRecordingMotion;
-                }
-
-                if (RecordIcon != null)
-                {
-                    RecordIcon.Symbol = ViewModel.IsRecordingMotion ? Symbol.Stop : Symbol.Video;
-                }
-
-                if (ViewModel.IsRecordingMotion)
-                {
-                    var op = ViewModel.SelectedClip ?? _playbackEngine?.CurrentPlayingOperation;
-                    if (op != null)
-                    {
-                        _preRecordSpeed = ViewModel.PlaybackSpeed;
-                        ViewModel.PlaybackSpeed = 0.5;
-                        _playbackEngine?.StartRecordingMotion(op);
-                    }
-                    else
-                    {
-                        ViewModel.IsRecordingMotion = false; // Cannot record without a selected or playing node
-                    }
-                }
-                else
-                {
-                    var op = ViewModel.SelectedClip ?? _playbackEngine?.CurrentPlayingOperation;
-                    if (op != null)
-                    {
-                        _playbackEngine?.StopRecordingMotion(op);
-                    }
-                    ViewModel.PlaybackSpeed = _preRecordSpeed;
-                }
-            }
-        }
-
-
-        private void RecordButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (RecordButton.IsChecked.HasValue)
-            {
-                ViewModel.IsRecordingMotion = RecordButton.IsChecked.Value;
-            }
         }
 
         private void Grid_DragOver(object? sender, DragEventArgs e)

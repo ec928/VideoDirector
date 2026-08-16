@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -462,27 +461,19 @@ namespace VideoDirector.Models
             TransitionStyle = TransitionStyle.HardSnap;
             CurveProfile = CurveProfile.Linear;
             VideoStartTime = TimeSpan.Zero;
-            
+
             // Revert duration to match the full clip duration
             if (_videoEndTime > TimeSpan.Zero)
             {
                 OpDuration = _videoEndTime;
             }
-            
-            RecordedPath.Clear();
+
             OnPropertyChanged(nameof(HasModifications));
         }
 
         private void Mark_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
             OnPropertyChanged(nameof(HasModifications));
-        }
-
-        private List<TransformKeyframe> _recordedPath = new();
-        public List<TransformKeyframe> RecordedPath
-        {
-            get => _recordedPath;
-            set => SetProperty(ref _recordedPath, value);
         }
 
         private CurveProfile _curveProfile = CurveProfile.Linear;

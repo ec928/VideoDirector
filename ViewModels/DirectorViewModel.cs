@@ -87,13 +87,6 @@ namespace VideoDirector.ViewModels
             private set => SetProperty(ref _isTelemetryVisible, value);
         }
 
-        private bool _isRecordingMotion;
-        public bool IsRecordingMotion
-        {
-            get => _isRecordingMotion;
-            set => SetProperty(ref _isRecordingMotion, value);
-        }
-
         // The inspector/storyboard panel auto-shows while editing a clip; otherwise it shows only
         // if the user has PINNED it open. So editing always has its controls to hand, and arranging
         // stays uncluttered. The transport's storyboard toggle is the pin.
@@ -566,10 +559,19 @@ namespace VideoDirector.ViewModels
         // flat list, still read so older project files migrate into track 0.
         private class ProjectData
         {
+            // Project schema version, so later structural changes can migrate rather than break.
+            // Files written before this field existed simply omit it, and keep the initializer
+            // default below — i.e. they read as v1, which is what they are.
+            //   1 — TimelineNodes + OverlayTracks (current)
+            // Bump this, and add a migration step in LoadAsync, whenever the persisted shape changes.
+            public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> TimelineNodes { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<OverlayTrack> OverlayTracks { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> OverlayClips { get; set; } = new();
         }
+
+        public const int CurrentSchemaVersion = 1;
 
         public async Task SaveAsync(Windows.Storage.StorageFile file)
         {

@@ -112,7 +112,7 @@ namespace VideoDirector.Models
                 {
                     // If paused when the timeline sequence changes, stop the stale playback loop.
                     // Clicking Play later will start a clean loop from the current playhead position.
-                    StopPlayback(cancelRecording: false);
+                    StopPlayback();
                     _isPaused = false;
                     _viewModel.IsPlaying = false;
                 }
@@ -229,12 +229,7 @@ namespace VideoDirector.Models
             _isPaused = true;
             _pauseStartTime = DateTime.Now;
             _viewModel.IsPlaying = false;
-            
-            if (_viewModel.IsRecordingMotion)
-            {
-                _dispatcher.TryEnqueue(() => _viewModel.IsRecordingMotion = false);
-            }
-            
+
             var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
             activePlayer.Pause();
             if (_inTransition || _isPreparingTransition)
@@ -340,7 +335,7 @@ namespace VideoDirector.Models
                 if (_playbackCts == myCts)
                 {
                     bool wasCancelled = myCts.IsCancellationRequested;
-                    StopPlayback(false);
+                    StopPlayback();
 
                     if (!wasCancelled)
                     {
@@ -353,26 +348,21 @@ namespace VideoDirector.Models
             }
         }
 
-        public void StopPlayback(bool cancelRecording = true)
+        public void StopPlayback()
         {
             _playbackCts?.Cancel();
             _isAnimating = false;
             _isPreparingTransition = false;
             CompositionTarget.Rendering -= CompositionTarget_Rendering;
-            CompositionTarget.Rendering -= RecordMotion_Rendering;
-            
+
             _mediaPlayerA?.Pause();
             _mediaPlayerB?.Pause();
             HideAllOverlays();
-            
+
             if (_viewModel != null)
             {
                 _viewModel.IsPlaying = false;
                 _isPaused = false;
-                if (cancelRecording && _viewModel.IsRecordingMotion)
-                {
-                    _dispatcher.TryEnqueue(() => _viewModel.IsRecordingMotion = false);
-                }
             }
 
             // Stopping while arranging (not on the way into Edit, which sets _mode first) should
@@ -1233,144 +1223,6 @@ namespace VideoDirector.Models
             _playerControl.ActiveTransform = activeTransform;
 
             EvaluateOverlays(t);
-        }
-
-        private DateTime _recordStartTime;
-
-        public async void StartRecordingMotion(CinematicOperation op)
-        {
-            if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) return;
-            
-            _playbackCts?.Cancel();
-            _playbackCts = null;
-            _isAnimating = false;
-            CompositionTarget.Rendering -= CompositionTarget_Rendering;
-            CompositionTarget.Rendering -= RecordMotion_Rendering;
-            
-            _mediaPlayerB?.Pause();
-            
-            op.RecordedPath.Clear();
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var activeElement = _isPlayerAActive ? _playerA : _playerB;
-            var activeTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
-
-            if (activePlayer.Source == null || !string.Equals((activePlayer.Source as MediaSource)?.Uri?.LocalPath, op.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                var tcs = new TaskCompletionSource<bool>();
-                Windows.Foundation.TypedEventHandler<MediaPlayer, object> handler = (s, e) => tcs.TrySetResult(true);
-                activePlayer.MediaOpened += handler;
-                activePlayer.Source = MediaSource.CreateFromUri(new Uri(op.FilePath));
-                await Task.WhenAny(tcs.Task, Task.Delay(1500));
-                activePlayer.MediaOpened -= handler;
-            }
-
-            _dispatcher.TryEnqueue(() =>
-            {
-                var standbyElement = _isPlayerAActive ? _playerB : _playerA;
-                activeElement.Opacity = 1;
-                standbyElement.Opacity = 0;
-                _playerControl.ActiveTransform = activeTransform;
-            });
-
-            activePlayer.PlaybackSession.Position = op.VideoStartTime;
-            activePlayer.PlaybackSession.PlaybackRate = _viewModel.PlaybackSpeed;
-            if (_viewModel.PlaybackSpeed == 0.0)
-            {
-                activePlayer.Pause();
-            }
-            else
-            {
-                activePlayer.Play();
-                _dispatcher.TryEnqueue(() => _viewModel.IsPlaying = true);
-            }
-            
-            _isAnimating = true;
-            _opA = op;
-            _recordStartTime = DateTime.Now;
-            
-            // CRITICAL: Initialize ActiveTransform so input handlers and the recording loop can function
-            _playerControl.ActiveTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
-
-            CompositionTarget.Rendering += RecordMotion_Rendering;
-        }
-
-        public void StopRecordingMotion(CinematicOperation op)
-        {
-            if (op == null) return;
-            _isAnimating = false;
-            CompositionTarget.Rendering -= RecordMotion_Rendering;
-            
-            DistillRecordedPath(op);
-
-            EnterEditMode(op, EditTarget.Start);
-        }
-
-        private void RecordMotion_Rendering(object? sender, object e)
-        {
-            if (_opA == null || _playerControl.ActiveTransform == null) return;
-            
-            // CRITICAL: Use the correct active player, not a hardcoded _mediaPlayerA
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            
-            var activeTransform = _playerControl.ActiveTransform;
-            var mark = new SpatialMark((float)activeTransform.ScaleX, (float)activeTransform.TranslateX, (float)activeTransform.TranslateY);
-            
-            var realTimeElapsed = DateTime.Now - _recordStartTime;
-            var speed = _viewModel.PlaybackSpeed;
-            if (speed == 0) speed = 1.0; // Prevent freeze if playback speed is 0
-            
-            var time = TimeSpan.FromSeconds(realTimeElapsed.TotalSeconds * speed);
-            if (time < TimeSpan.Zero) time = TimeSpan.Zero;
-            _opA.RecordedPath.Add(new TransformKeyframe(time, mark));
-            
-            _viewModel.CurrentOperationTime = _opA.VideoStartTime + time;
-            if (activePlayer.PlaybackSession != null)
-            {
-                activePlayer.PlaybackSession.Position = _viewModel.CurrentOperationTime;
-                _viewModel.CurrentOperationDuration = activePlayer.PlaybackSession.NaturalDuration;
-            }
-
-            // Update UI
-            _dispatcher.TryEnqueue(() => 
-            {
-                UpdateTelemetryOverlay(false);
-                UpdateWysiwygOverlay();
-            });
-
-            // Automatically stop recording when we reach the end of the operation's duration
-            if (time >= _opA.OpDuration)
-            {
-                _dispatcher.TryEnqueue(() => 
-                {
-                    if (_viewModel.IsRecordingMotion)
-                    {
-                        _viewModel.IsRecordingMotion = false;
-                    }
-                });
-            }
-        }
-
-        private void DistillRecordedPath(CinematicOperation op)
-        {
-            if (op.RecordedPath.Count == 0)
-            {
-                _dispatcher.TryEnqueue(() => { _playerControl.TelemetryOperationInfo.Text = "Distill: RecordedPath is empty!"; });
-                return;
-            }
-            // Distillation Algorithm (Step 2)
-            // Convert raw gesture capture into smooth start/end cinematic keyframes
-            var first = op.RecordedPath.First();
-            var last = op.RecordedPath.Last();
-            var mid = op.RecordedPath[op.RecordedPath.Count / 2];
-            
-            _dispatcher.TryEnqueue(() => { _playerControl.TelemetryOperationInfo.Text = $"Distill: frames={op.RecordedPath.Count}, firstS={first.Transform.Scale:F2}, lastS={last.Transform.Scale:F2}"; });
-
-            op.StartMark = new SpatialMark(first.Transform.Scale, first.Transform.X, first.Transform.Y);
-            op.MidMark = new SpatialMark(mid.Transform.Scale, mid.Transform.X, mid.Transform.Y);
-            op.EndMark = new SpatialMark(last.Transform.Scale, last.Transform.X, last.Transform.Y);
-            op.CurveProfile = CurveProfile.DirectorsArc; // Automatic smoothing curve
-
-            UpdateWysiwygOverlay();
         }
 
         // ==================== Overlay Playback ====================

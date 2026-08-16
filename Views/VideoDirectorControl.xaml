@@ -54,20 +54,6 @@
 
 
 
-        <!-- Foreground Layer: Floating Edit Badge -->
-        <Border x:Name="EditModeBadge" Background="#D9E81123" CornerRadius="8" Padding="16,8" 
-                Visibility="{x:Bind ViewModel.IsRecordingMotion, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}" 
-                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0" IsHitTestVisible="False"
-                BorderBrush="#33FFFFFF" BorderThickness="1">
-            <StackPanel Orientation="Vertical" Spacing="4">
-                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-                    <SymbolIcon Symbol="Video" Foreground="White" />
-                    <TextBlock x:Name="EditModeText" Text="Live Recording: Move Camera" Foreground="White" FontSize="16" FontWeight="SemiBold" />
-                </StackPanel>
-                <TextBlock Text="Zoom with scroll wheel. Pan by dragging. Set speed to &gt;0x to capture." Foreground="White" Opacity="0.8" HorizontalAlignment="Center" FontSize="12"/>
-            </StackPanel>
-        </Border>
-
         <!-- Foreground Layer: Right Side Panel (Properties). Top margin clears the Global Command
              Zone strip above it so Save/Load/Clear stay reachable while this panel is open. -->
         <Border HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="380"
@@ -122,12 +108,6 @@
                                             <Button Content="Start" Width="60" FontWeight="SemiBold" Click="SetStart_Click" ToolTipService.ToolTip="Set Start Keyframe" Foreground="Cyan" />
                                             <Button Content="Mid" Width="60" FontWeight="SemiBold" Click="SetMid_Click" RightTapped="ClearMid_RightTapped" ToolTipService.ToolTip="Set Mid Keyframe (right-click to clear)" Foreground="DeepSkyBlue" />
                                             <Button Content="End" Width="60" FontWeight="SemiBold" Click="SetEnd_Click" ToolTipService.ToolTip="Set End Keyframe" Foreground="RoyalBlue" />
-                                            <ToggleButton x:Name="RecordButton" Click="RecordButton_Click" ToolTipService.ToolTip="Record Motion (Track 1)" Height="32" Padding="8,4" CornerRadius="4" IsEnabled="{Binding IsTrack1Selected}">
-                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                    <SymbolIcon x:Name="RecordIcon" Symbol="Video" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                                    <TextBlock Text="Record" Foreground="{ThemeResource SystemFillColorCriticalBrush}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                                </StackPanel>
-                                            </ToggleButton>
                                         </StackPanel>
                                     </StackPanel>
                                 </Expander>
