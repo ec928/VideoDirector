@@ -775,11 +775,11 @@ namespace VideoDirector.Models
                     if (transProgress < 0.5)
                     {
                         _fadeOutElement.Opacity = 1.0 - (transProgress * 2.0);
-                        _fadeInElement.Opacity = 0.0;
+                        SetOpacity(_fadeInElement, 0.0);
                     }
                     else
                     {
-                        _fadeOutElement.Opacity = 0.0;
+                        SetOpacity(_fadeOutElement, 0.0);
                         _fadeInElement.Opacity = (transProgress - 0.5) * 2.0;
                     }
                 }
@@ -787,12 +787,12 @@ namespace VideoDirector.Models
                 {
                     double smoothProgress = transProgress * transProgress * (3.0 - 2.0 * transProgress);
                     _fadeOutElement.Opacity = 1.0 - smoothProgress;
-                    _fadeInElement.Opacity = 1.0; // Keep bottom opaque
+                    SetOpacity(_fadeInElement, 1.0); // held constant — guard the redundant write
                 }
                 else
                 {
                     _fadeOutElement.Opacity = 1.0 - transProgress; // Fade out top clip
-                    _fadeInElement.Opacity = 1.0; // Keep bottom clip fully opaque
+                    SetOpacity(_fadeInElement, 1.0); // held constant — guard the redundant write
                 }
 
                 // Audio Crossfade
@@ -1480,13 +1480,13 @@ namespace VideoDirector.Models
             if (clip == null)
             {
                 // Nothing on the base track here: show the black backdrop.
-                _playerA.Opacity = 0;
-                _playerB.Opacity = 0;
+                SetOpacity(_playerA, 0);
+                SetOpacity(_playerB, 0);
                 return;
             }
 
             var active = _isPlayerAActive ? _playerA : _playerB;
-            if (active.Opacity <= 0 && !_inTransition && !_isPreparingTransition) active.Opacity = 1;
+            if (active.Opacity <= 0 && !_inTransition && !_isPreparingTransition) SetOpacity(active, 1);
             ApplyBaseBox(clip);
         }
 
@@ -1503,6 +1503,33 @@ namespace VideoDirector.Models
         // with handles that you can move — otherwise pause leaves you unable to arrange anything.
         private bool IsActivelyPlaying => _isAnimating && !_isPaused;
 
+        // ---- Redundant-write guards (ARCHITECTURE.md §4, §5.6) -------------------------------
+        //
+        // Everything in the render path runs at 60fps. Assigning a XAML property that has not
+        // changed still dirties the DirectComposition visual tree, and doing that to the grid
+        // wrapping a LIVE video surface produces edge artifacts — a flickering hairline down the
+        // side of a PiP. The recorded fix guarded ApplyOverlayBox and ApplyMarksAtProgress;
+        // SetOverlayRender was writing four properties per track per frame and was never guarded.
+        //
+        // Write through these, not directly, for anything touched per frame.
+
+        private static void SetVisibility(Microsoft.UI.Xaml.UIElement element,
+                                          Microsoft.UI.Xaml.Visibility value)
+        {
+            if (element != null && element.Visibility != value) element.Visibility = value;
+        }
+
+        private static void SetOpacity(Microsoft.UI.Xaml.UIElement element, double value)
+        {
+            if (element != null && Math.Abs(element.Opacity - value) > 0.001) element.Opacity = value;
+        }
+
+        private static void SetImageSource(Microsoft.UI.Xaml.Controls.Image image,
+                                           Microsoft.UI.Xaml.Media.ImageSource source)
+        {
+            if (image != null && !ReferenceEquals(image.Source, source)) image.Source = source;
+        }
+
         // Idempotent: safe to call every frame. This is the ONLY place the still/video choice is
         // made — the seven failed attempts all inferred it as a side effect somewhere else.
         private void SetOverlayRender(int track, OverlayRender mode, CinematicOperation clip)
@@ -1513,34 +1540,34 @@ namespace VideoDirector.Models
             {
                 case OverlayRender.Hidden:
                     DetachOverlayVideo(track);
-                    v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-                    v.Still.Source = null;
-                    if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-                    v.Grid.Opacity = 0;
+                    SetVisibility(v.Still, Microsoft.UI.Xaml.Visibility.Collapsed);
+                    SetImageSource(v.Still, null);
+                    SetVisibility(v.Frame, Microsoft.UI.Xaml.Visibility.Collapsed);
+                    SetOpacity(v.Grid, 0);
                     break;
 
                 case OverlayRender.Still:
                     DetachOverlayVideo(track);              // the invariant
-                    v.Still.Source = clip?.Thumbnail;
-                    v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                    SetImageSource(v.Still, clip?.Thumbnail);
+                    SetVisibility(v.Still, Microsoft.UI.Xaml.Visibility.Visible);
                     // A frame marks every arrangeable PiP. No drawn handles: reshape grab-zones
                     // are geometric edge/corner bands on the InputLayer, so handles were decoration.
                     // The SELECTED clip's frame shows at full strength and the rest recede — now
                     // that selection is possible while arranging, the chrome can reflect it.
                     if (v.Frame != null)
                     {
-                        v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                        SetVisibility(v.Frame, Microsoft.UI.Xaml.Visibility.Visible);
                         bool selected = clip != null && ReferenceEquals(clip, _viewModel.SelectedClip);
-                        v.Frame.Opacity = selected ? 1.0 : 0.55;
+                        SetOpacity(v.Frame, selected ? 1.0 : 0.55);
                     }
-                    v.Grid.Opacity = clip?.Opacity ?? 1.0;
+                    SetOpacity(v.Grid, clip?.Opacity ?? 1.0);
                     break;
 
                 case OverlayRender.Video:
-                    v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-                    if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    SetVisibility(v.Still, Microsoft.UI.Xaml.Visibility.Collapsed);
+                    SetVisibility(v.Frame, Microsoft.UI.Xaml.Visibility.Collapsed);
                     AttachOverlayVideo(track);
-                    v.Grid.Opacity = clip?.Opacity ?? 1.0;
+                    SetOpacity(v.Grid, clip?.Opacity ?? 1.0);
                     break;
             }
         }
@@ -1552,7 +1579,7 @@ namespace VideoDirector.Models
             var video = _playerControl.OverlayVisuals[track].Video;
             if (video == null) return;
             if (video.MediaPlayer != null) video.SetMediaPlayer(null);
-            video.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            SetVisibility(video, Microsoft.UI.Xaml.Visibility.Collapsed);
         }
 
         private void AttachOverlayVideo(int track)
@@ -1560,7 +1587,7 @@ namespace VideoDirector.Models
             var video = _playerControl.OverlayVisuals[track].Video;
             if (video == null) return;
             if (video.MediaPlayer == null) video.SetMediaPlayer(_overlayPlayer[track]);
-            video.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            SetVisibility(video, Microsoft.UI.Xaml.Visibility.Visible);
         }
 
         // Re-render the Arrange composite from the model (e.g. after a clip is added, removed, or
