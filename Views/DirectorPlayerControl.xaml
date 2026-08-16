@@ -8,8 +8,12 @@
     Background="Black">
 
     <Grid>
-        <!-- The A-B Roll Media Players -->
-        <Grid>
+        <!-- Track 0's placement box. Track 0 used to be implicitly full-frame with no box at all,
+             which is why it alone could not be moved or resized in the composite. This grid IS its
+             box — the engine sets size/position/clip on it from the clip's placement fields, the
+             same way it does for every other track. Left/Top aligned so Margin positions it. -->
+        <Grid x:Name="BaseBox" x:FieldModifier="public"
+              HorizontalAlignment="Left" VerticalAlignment="Top">
             <Grid x:Name="GridB" x:FieldModifier="public" RenderTransformOrigin="0.5,0.5">
                 <Grid.RenderTransform>
                     <CompositeTransform x:Name="TransformB" x:FieldModifier="public" />

@@ -86,11 +86,12 @@
                            Visibility="Collapsed" VerticalAlignment="Center" Margin="16,10,0,10"/>
               </StackPanel>
 
-                <!-- Hint shown when nothing is selected (clip lists now live in the bottom dock). -->
+                <!-- Hint shown when the panel is PINNED open but nothing is selected. Without the pin
+                     the panel hides itself entirely, so this is the pinned-and-empty state. -->
                 <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" Padding="24"
                             Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
                     <FontIcon Glyph="&#xE7C9;" FontSize="40" Foreground="{ThemeResource TextFillColorDisabledBrush}"/>
-                    <TextBlock Text="Select a clip in the timeline below to edit it." TextWrapping="Wrap" TextAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorDisabledBrush}" />
+                    <TextBlock Text="No clip selected. Click a clip in the timeline to see its properties here." TextWrapping="Wrap" TextAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorDisabledBrush}" />
                 </StackPanel>
 
                 <!-- Unified Inspector: one layout for every track, bound to SelectedClip. Rows key
@@ -298,7 +299,7 @@
                 </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
                     <!-- Mode Indicator directly on the Playbar. In Edit Mode, this acts as a subtle pulsing interactive button to exit back to Arrange! -->
-                    <Button x:Name="ModeBadgeButton" Click="ModeBadge_Click"
+                    <Button x:Name="ModeBadgeButton" AutomationProperties.Name="Editor mode" Click="ModeBadge_Click"
                             Background="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToBackgroundConverter}}"
                             BorderBrush="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToForegroundConverter}}"
                             BorderThickness="1" CornerRadius="14" Padding="12,4" VerticalAlignment="Center" MinWidth="80"
@@ -329,13 +330,13 @@
 
                     <!-- Transport Column -->
                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <Button x:Name="PrevButton" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Prev_Click" ToolTipService.ToolTip="Previous">
+                        <Button x:Name="PrevButton" AutomationProperties.Name="Previous clip" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Prev_Click" ToolTipService.ToolTip="Previous">
                             <SymbolIcon Symbol="Previous" />
                         </Button>
-                        <Button x:Name="PlayPauseButton" Width="48" Height="48" Background="Transparent" BorderThickness="0" CornerRadius="24" Click="PlayPause_Click" ToolTipService.ToolTip="Play/Pause">
+                        <Button x:Name="PlayPauseButton" AutomationProperties.Name="Play or pause" Width="48" Height="48" Background="Transparent" BorderThickness="0" CornerRadius="24" Click="PlayPause_Click" ToolTipService.ToolTip="Play/Pause">
                             <SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
                         </Button>
-                        <Button x:Name="NextButton" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Next_Click" ToolTipService.ToolTip="Next">
+                        <Button x:Name="NextButton" AutomationProperties.Name="Next clip" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Next_Click" ToolTipService.ToolTip="Next">
                             <SymbolIcon Symbol="Next" />
                         </Button>
                     </StackPanel>
@@ -388,7 +389,7 @@
                             <SymbolIcon Symbol="Redo" />
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
-                        <ToggleButton x:Name="MagnetButton" IsChecked="True" Click="MagnetButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Snapping: snap clips to edges and the playhead (N)">
+                        <ToggleButton x:Name="MagnetButton" AutomationProperties.Name="Snapping" IsChecked="True" Click="MagnetButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Snapping: snap clips to edges and the playhead (N)">
                             <FontIcon Glyph="&#xE81E;" FontSize="13" />
                         </ToggleButton>
                     </StackPanel>
@@ -401,13 +402,13 @@
                         <TextBlock x:Name="ZoomReadout" Text="100%" FontSize="10" MinWidth="34" TextAlignment="Right"
                                    VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    ToolTipService.ToolTip="Timeline zoom (100% = whole project fits the window)" />
-                        <Button x:Name="ZoomOutTimelineButton" Click="ZoomOutTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom out timeline (Ctrl+NumPad-, or Ctrl+scroll on the timeline)">
+                        <Button x:Name="ZoomOutTimelineButton" AutomationProperties.Name="Zoom out timeline" Click="ZoomOutTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom out timeline (Ctrl+NumPad-, or Ctrl+scroll on the timeline)">
                             <FontIcon Glyph="&#xE71F;" FontSize="13" />
                         </Button>
-                        <Button x:Name="ZoomInTimelineButton" Click="ZoomInTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom in timeline (Ctrl+NumPad+, or Ctrl+scroll on the timeline)">
+                        <Button x:Name="ZoomInTimelineButton" AutomationProperties.Name="Zoom in timeline" Click="ZoomInTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom in timeline (Ctrl+NumPad+, or Ctrl+scroll on the timeline)">
                             <FontIcon Glyph="&#xE71E;" FontSize="13" />
                         </Button>
-                        <Button x:Name="FitTimelineButton" Click="FitTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Fit whole project in the timeline (Ctrl+0)">
+                        <Button x:Name="FitTimelineButton" AutomationProperties.Name="Fit timeline" Click="FitTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Fit whole project in the timeline (Ctrl+0)">
                             <FontIcon Glyph="&#xE9A6;" FontSize="13" />
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />

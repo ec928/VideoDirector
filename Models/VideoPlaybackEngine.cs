@@ -151,6 +151,16 @@ namespace VideoDirector.Models
             }
         }
 
+        // Effective audio level for a clip: its own volume, silenced if its track is muted.
+        // Track-level mute is applied HERE rather than at each player assignment, so there is one
+        // place it can be got wrong.
+        private double VolumeOf(CinematicOperation clip)
+        {
+            if (clip == null) return 0;
+            var track = _viewModel.TrackOf(clip);
+            return track != null && track.IsMuted ? 0.0 : clip.Volume;
+        }
+
         public void SeekActiveOperation(TimeSpan position)
         {
             // In Edit mode the subject is the edit player — the main player for a spine clip, the
@@ -277,7 +287,7 @@ namespace VideoDirector.Models
                 {
                     if (_activeOverlay[i] == null || _overlayPlayer[i]?.PlaybackSession == null) continue;
                     _overlayPlayer[i].PlaybackSession.PlaybackRate = _viewModel.PlaybackSpeed;
-                    _overlayPlayer[i].Volume = _activeOverlay[i].Volume;
+                    _overlayPlayer[i].Volume = VolumeOf(_activeOverlay[i]);
                     _overlayPlayer[i].Play();
                 }
             }
@@ -487,7 +497,7 @@ namespace VideoDirector.Models
                     
                     double combinedSpeed = _viewModel.PlaybackSpeed * op.PlaybackSpeed;
                     activePlayer.PlaybackSession.PlaybackRate = combinedSpeed;
-                    activePlayer.Volume = op.Volume;
+                    activePlayer.Volume = VolumeOf(op);
                     
                     if (!_isPaused && combinedSpeed > 0) activePlayer.Play();
                     else if (combinedSpeed == 0) activePlayer.Pause();
@@ -660,7 +670,7 @@ namespace VideoDirector.Models
                     fadingInElement.Opacity = 1.0;
                 });
                 
-                fadingInPlayer.Volume = nextOp?.Volume ?? 1.0;
+                fadingInPlayer.Volume = VolumeOf(nextOp);
 
                 _ = Task.Delay(150).ContinueWith(_ =>
                 {
@@ -679,8 +689,8 @@ namespace VideoDirector.Models
 
             _fadeOutElement = fadingOutElement;
             _fadeInElement = fadingInElement;
-            _fadeOutVolume = op.Volume;
-            _fadeInVolume = nextOp?.Volume ?? 1.0;
+            _fadeOutVolume = VolumeOf(op);
+            _fadeInVolume = VolumeOf(nextOp);
             _isPreparingTransition = false;
             _inTransition = true;
             _transitionStyle = op.TransitionStyle;
@@ -702,7 +712,7 @@ namespace VideoDirector.Models
             _dispatcher.TryEnqueue(() =>
             {
                 fadingInElement.Opacity = 1.0;
-                fadingInPlayer.Volume = nextOp?.Volume ?? 1.0;
+                fadingInPlayer.Volume = VolumeOf(nextOp);
                 fadingOutElement.Opacity = 0.0;
             });
             _inTransition = false;
@@ -1243,11 +1253,21 @@ namespace VideoDirector.Models
             // instead of one — and could stomp the edit view that was just set up.
             if (_mode != EditorMode.Arrange) return;
 
+            // Track 0 renders through the A/B players, but its BOX and its gaps are handled here
+            // so it obeys the same rules as everything else.
+            ApplyBaseTrack(currentStoryTime);
+
             var tracks = _viewModel.OverlayTracks;
 
             for (int i = 0; i < MaxOverlayTracks; i++)
             {
-                var desired = i < tracks.Count ? ResolveActiveClip(tracks[i], currentStoryTime) : null;
+                // Track index i here is overlay slot i, i.e. Tracks[i + 1].
+                var track = i < tracks.Count ? tracks[i] : null;
+                // A hidden track contributes nothing to the picture. Honoured here rather than at
+                // each render site so there is exactly one place it can be got wrong.
+                var desired = track == null || track.IsHidden
+                    ? null
+                    : ResolveActiveClip(track, currentStoryTime);
 
                 // ---- ARRANGE: a pure-model, video-free path (§7A). Showing a still must NOT go
                 // through the video-activation pipeline. It used to, which is why a still only
@@ -1302,6 +1322,32 @@ namespace VideoDirector.Models
                 }
                 else SetOverlayRender(i, OverlayRender.Hidden, null);
             }
+        }
+
+        // Track 0's per-frame upkeep: its placement box, and the background state when it has no
+        // clip at this time.
+        //
+        // The background state is new and load-bearing. Track 0 was gapless by construction, so
+        // the base players always had something on them and "nothing here" was unrepresentable.
+        // Now that gaps are legal on any track, a time with no clip must render as black rather
+        // than leaving the previous frame stranded on screen.
+        private void ApplyBaseTrack(TimeSpan currentStoryTime)
+        {
+            if (_viewModel.Tracks.Count == 0) return;
+            var track = _viewModel.Tracks[0];
+            var clip = track.IsHidden ? null : track.ClipAt(currentStoryTime);
+
+            if (clip == null)
+            {
+                // Nothing on the base track here: show the black backdrop.
+                _playerA.Opacity = 0;
+                _playerB.Opacity = 0;
+                return;
+            }
+
+            var active = _isPlayerAActive ? _playerA : _playerB;
+            if (active.Opacity <= 0 && !_inTransition && !_isPreparingTransition) active.Opacity = 1;
+            ApplyBaseBox(clip);
         }
 
         // ---- §7A: how an upper-track clip is rendered. Exactly one of these, set explicitly. ----
@@ -1470,49 +1516,62 @@ namespace VideoDirector.Models
         // playback it is the corner PiP. The grid clips its content so zoomed-in framing can't
         // spill outside the box.
         private void ApplyOverlayBox(int slot, CinematicOperation overlay, bool editMode)
+            => ApplyBoxTo(_playerControl.OverlayVisuals[slot].Grid, _overlayAspect[slot], overlay, editMode);
+
+        // Lay a placement box onto a grid. Shared by every track — track 0's box is the BaseBox
+        // wrapper around the A/B players, upper tracks' boxes are their overlay grids.
+        //
+        // NOTE (§7A): GEOMETRY ONLY. Deciding still-vs-video used to live here and silently never
+        // fired; the render mode is set explicitly by SetOverlayRender at each state transition,
+        // never as a side effect of laying out a box.
+        private void ApplyBoxTo(Microsoft.UI.Xaml.Controls.Grid grid, double aspect,
+                                CinematicOperation clip, bool editMode)
         {
-            var grid = _playerControl.OverlayVisuals[slot].Grid;
-            double aspect = _overlayAspect[slot];
-            double vpW = _playerControl.ActualWidth;
-            double vpH = _playerControl.ActualHeight;
-            if (aspect <= 0 || vpW <= 0 || vpH <= 0) return;
+            if (grid == null || clip == null) return;
 
-            // Video fit to viewport (contained), preserving aspect — the "scale 1" reference.
-            double fitW, fitH;
-            if (aspect >= vpW / vpH) { fitW = vpW; fitH = vpW / aspect; }
-            else { fitH = vpH; fitW = vpH * aspect; }
+            // Edit mode: the box fills the video fit, so content is framed at full size. Arrange:
+            // independent width/height so the box can be reshaped; the video crop-fills it.
+            var box = editMode
+                ? PlacementBox.FullFrame(aspect, _playerControl.ActualWidth, _playerControl.ActualHeight)
+                : PlacementBox.Compute(aspect, _playerControl.ActualWidth, _playerControl.ActualHeight,
+                                       clip.PlacementWidth, clip.PlacementHeight,
+                                       clip.PlacementCenterX, clip.PlacementCenterY);
+            if (box.IsEmpty) return;   // aspect or viewport not known yet — draw nothing, don't guess
 
-            // Edit mode: box fills the video fit (framing at full size). Arrange: independent
-            // width/height so the PiP can be reshaped; the video crop-fills (UniformToFill).
-            double sw = editMode ? 1.0 : overlay.PlacementWidth;
-            double sh = editMode ? 1.0 : overlay.PlacementHeight;
-            double cx = editMode ? 0.5 : overlay.PlacementCenterX;
-            double cy = editMode ? 0.5 : overlay.PlacementCenterY;
-
-            double boxW = fitW * sw;
-            double boxH = fitH * sh;
-            double left = cx * vpW - boxW / 2;
-            double top = cy * vpH - boxH / 2;
-
-            // NOTE (§7A): this method does GEOMETRY ONLY. Deciding still-vs-video used to live here
-            // and silently never fired — the render mode is now set explicitly by SetOverlayRender
-            // at each state transition, never as a side effect of laying out a box.
-
-            if (grid.Margin.Left != left || grid.Margin.Top != top)
+            if (grid.Margin.Left != box.Left || grid.Margin.Top != box.Top)
             {
-                grid.Margin = new Microsoft.UI.Xaml.Thickness(left, top, 0, 0);
+                grid.Margin = new Microsoft.UI.Xaml.Thickness(box.Left, box.Top, 0, 0);
             }
             // Only resize + reallocate the clip when the box dimensions actually change
             // (avoids per-frame allocation during playback).
-            if (grid.Width != boxW || grid.Height != boxH)
+            if (grid.Width != box.Width || grid.Height != box.Height)
             {
-                grid.Width = boxW;
-                grid.Height = boxH;
+                grid.Width = box.Width;
+                grid.Height = box.Height;
                 grid.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
                 {
-                    Rect = new Windows.Foundation.Rect(0, 0, boxW, boxH)
+                    Rect = new Windows.Foundation.Rect(0, 0, box.Width, box.Height)
                 };
             }
+        }
+
+        // Track 0's placement, applied to the box wrapping the A/B players. Track 0 was previously
+        // full-frame by construction, with no box to position.
+        private void ApplyBaseBox(CinematicOperation clip)
+        {
+            if (clip == null) return;
+            double aspect = clip.SourceAspect;
+            if (aspect <= 0)
+            {
+                var player = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
+                var session = player?.PlaybackSession;
+                if (session != null && session.NaturalVideoWidth > 0 && session.NaturalVideoHeight > 0)
+                {
+                    aspect = (double)session.NaturalVideoWidth / session.NaturalVideoHeight;
+                    clip.SourceAspect = aspect;   // backfill so Arrange can shape it without video
+                }
+            }
+            ApplyBoxTo(_playerControl.BaseBox, aspect, clip, editMode: false);
         }
 
         private void SeekAndPlayOverlay(MediaPlayer player, CinematicOperation overlay, TimeSpan currentStoryTime)
@@ -1543,7 +1602,7 @@ namespace VideoDirector.Models
             else if (_isAnimating && !_isPaused)
             {
                 player.PlaybackSession.PlaybackRate = combinedSpeed;
-                player.Volume = overlay.Volume; // overlays default muted; per-clip volume opts in
+                player.Volume = VolumeOf(overlay); // overlays default muted; per-clip volume opts in
                 player.Play();
             }
             else
@@ -1698,7 +1757,7 @@ namespace VideoDirector.Models
                 {
                     player.PlaybackSession.PlaybackRate = combinedSpeed;
                 }
-                if (player.Volume != overlay.Volume) player.Volume = overlay.Volume;
+                if (player.Volume != VolumeOf(overlay)) player.Volume = VolumeOf(overlay);
                 if (player.PlaybackSession.PlaybackState != Windows.Media.Playback.MediaPlaybackState.Playing)
                 {
                     player.Play();
@@ -1897,7 +1956,7 @@ namespace VideoDirector.Models
             // marks still animate over OpDuration below. (Was hardcoded to 1.0 + Play, so a
             // speed-0 clip wrongly ran at full speed.)
             double clipSpeed = _editClip.PlaybackSpeed;
-            _editPlayer.Volume = _editClip.Volume;
+            _editPlayer.Volume = VolumeOf(_editClip);
             if (clipSpeed > 0)
             {
                 _editPlayer.PlaybackSession.PlaybackRate = clipSpeed;
@@ -1925,7 +1984,7 @@ namespace VideoDirector.Models
             if (_editClip == null || _playerControl.ActiveTransform == null) return;
             // Apply Volume live so the audio slider works while the preview is playing (overlays
             // start muted, so a one-time apply at play meant raising it did nothing until restart).
-            if (_editPlayer != null) _editPlayer.Volume = _editClip.Volume;
+            if (_editPlayer != null) _editPlayer.Volume = VolumeOf(_editClip);
             double dur = _editClip.OpDuration.TotalSeconds;
             if (dur <= 0) dur = 1;
             double progress = (DateTime.Now - _editPreviewStart).TotalSeconds / dur;

@@ -302,16 +302,14 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _currentEditTarget, value))
                 {
                     OnPropertyChanged(nameof(CurrentEditTargetIndex));
-                    // When the edit target changes, jump to it on whatever clip is selected — spine
-                    // or overlay (SelectedClip), not only Track 1.
+                    // Changing the edit target jumps to it on whatever clip is selected, on any
+                    // track. Dispatched when there is a UI thread; direct otherwise.
                     if (SelectedClip != null)
                     {
-                        var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-                        dispatcher.TryEnqueue(() =>
-                        {
-                            var evt = EditTargetChanged;
-                            evt?.Invoke(this, SelectedClip);
-                        });
+                        void Raise() => EditTargetChanged?.Invoke(this, SelectedClip);
+                        var dispatcher = TryGetDispatcher();
+                        if (dispatcher != null) dispatcher.TryEnqueue(Raise);
+                        else Raise();
                     }
                 }
             }
@@ -576,11 +574,10 @@ namespace VideoDirector.ViewModels
 
         public async Task SaveAsync(Windows.Storage.StorageFile file)
         {
-            var data = new ProjectData { Tracks = Tracks };
-            var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
             using var stream = await file.OpenStreamForWriteAsync();
             stream.SetLength(0); // Clear existing content
-            await System.Text.Json.JsonSerializer.SerializeAsync(stream, data, options);
+            using var writer = new System.IO.StreamWriter(stream);
+            await writer.WriteAsync(ToProjectJson());
         }
 
         // Fill the fixed track set from deserialized data, migrating whichever shape it is in.
@@ -638,33 +635,48 @@ namespace VideoDirector.ViewModels
 
         public async Task LoadAsync(Windows.Storage.StorageFile file)
         {
-            var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+            var dispatcher = TryGetDispatcher();
             using var stream = await file.OpenStreamForReadAsync();
-            
-            var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-
-            // Read the raw JSON to determine format (old array vs new wrapper)
             using var reader = new System.IO.StreamReader(stream);
-            var json = await reader.ReadToEndAsync();
-            var trimmed = json.TrimStart();
+            LoadProjectJson(await reader.ReadToEndAsync(), dispatcher);
+        }
+
+        // Parse and apply a project document. Public and file-free so the migration paths can be
+        // tested directly — silent data loss on load is exactly the kind of bug that survives a
+        // build-and-launch check.
+        public void LoadProjectJson(string json, Microsoft.UI.Dispatching.DispatcherQueue dispatcher = null)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return;
+            dispatcher ??= TryGetDispatcher();
+            var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
 
             ProjectData data;
-            if (trimmed.StartsWith("["))
+            try
             {
-                // v0: a bare array of clips, which was track 0 and nothing else.
-                var nodes = System.Text.Json.JsonSerializer.Deserialize<
-                    System.Collections.ObjectModel.ObservableCollection<CinematicOperation>>(json, options);
-                data = new ProjectData { TimelineNodes = nodes ?? new(), Tracks = new() };
+                if (json.TrimStart().StartsWith("["))
+                {
+                    // v0: a bare array of clips, which was track 0 and nothing else.
+                    var nodes = System.Text.Json.JsonSerializer.Deserialize<
+                        System.Collections.ObjectModel.ObservableCollection<CinematicOperation>>(json, options);
+                    data = new ProjectData { TimelineNodes = nodes ?? new(), Tracks = new() };
+                }
+                else
+                {
+                    data = System.Text.Json.JsonSerializer.Deserialize<ProjectData>(json, options);
+                }
             }
-            else
-            {
-                data = System.Text.Json.JsonSerializer.Deserialize<ProjectData>(json, options);
-            }
+            catch { return; }   // a corrupt file leaves the current project untouched
 
             if (data == null) return;
             ApplyProjectData(data, dispatcher);
             ResetHistory(); // the loaded project is the new baseline, not an undo step
         }
+
+        // Serialize the current project — the exact document SaveAsync writes.
+        public string ToProjectJson()
+            => System.Text.Json.JsonSerializer.Serialize(
+                new ProjectData { Tracks = Tracks },
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
 
         private async Task LoadThumbnailAsync(CinematicOperation node, Microsoft.UI.Dispatching.DispatcherQueue dispatcher)
         {
@@ -771,6 +783,15 @@ namespace VideoDirector.ViewModels
             OnPropertyChanged(nameof(CanRedo));
         }
 
+        // The dispatcher is only needed to marshal thumbnail loads onto the UI thread, and
+        // LoadThumbnailAsync already skips that work when there isn't one. Asking for it
+        // unconditionally made undo/restore throw outside a UI thread for no reason.
+        private static Microsoft.UI.Dispatching.DispatcherQueue TryGetDispatcher()
+        {
+            try { return Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread(); }
+            catch { return null; }
+        }
+
         private void RestoreSnapshot(string json)
         {
             ProjectData data;
@@ -780,7 +801,7 @@ namespace VideoDirector.ViewModels
 
             SelectedClip = null;
 
-            ApplyProjectData(data, Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread());
+            ApplyProjectData(data, TryGetDispatcher());
         }
     }
 }
