@@ -568,44 +568,46 @@ Real problems found during the audit that no phase above addresses. Listed so th
 
 ---
 
-## 4b. The export fork (phase E)
+## 4b. Export (phase E) — PARKED
 
-The export does not match the preview: no Ken Burns, no per-clip speed, no transitions, and PiPs
-stretched rather than crop-filled. `Windows.Media.Editing.MediaComposition` can place and trim
-clips but cannot express per-frame motion, has no clip rate control and no transition support, so
-the gap is not closable on that renderer.
+**Status: parked after E1, deliberately.** Export is not a priority for this project, and "good
+enough" is the stated bar. What follows is the reasoning, so nobody re-opens it by accident.
 
-**Decision (2026-08-16): a frame-server renderer using Win2D**, which is already referenced by the
-project. Rejected alternatives: staying on MediaComposition with a custom `IBasicVideoEffect`
-(gets motion and crop-fill, but speed and transitions remain impossible), and shelling out to
-ffmpeg (least code, but an ~80MB bundled binary and a licensing decision for a distributed app).
+### Where export stands
 
-The reason the frame-server path is worth its cost is that it reuses the same pure components the
-preview uses — `Framing`, `MotionPath`, `PlacementBox`, `RetimeSolver`, `CompositeSampler` — so
-preview and export agree **by construction** rather than by maintaining two implementations. That
-is the actual defect: they drifted because each carried its own idea of what to draw.
+Baked in: every track's clips trimmed to their source window, images held for their duration, upper
+tracks as overlay layers placed by their box and opacity, per-track mute and hide, and **audio** —
+which `MediaComposition` handles for free.
 
-### E1 — CompositeSampler ✅ **Done**
-The definition of what the composite looks like at story time *t*: which clip each track shows,
-where to read its source (honouring speed and stills), its framing at that instant, its placement,
-opacity and volume. Pure, WinUI-free, 17 tests. Anything that decides *what* is on screen belongs
-here; a renderer decides only *how* to draw it.
+Not baked in, and listed to the user in the export dialog (`VideoExporter.Limitations`): Ken Burns
+motion, per-clip speed, transitions, and crop-to-fill on PiP boxes.
 
-### E2 — Win2D frame rendering ⬜
-Draw one sampled frame onto a `CanvasRenderTarget`: base layer, then each upper track composited
-in order, each cropped to its placement box with its framing transform applied.
+### Why it stopped here
 
-### E3 — Source frames and encoding ⬜
-Pull frames from the source media at arbitrary positions (`MediaPlayer` frame-server mode), and
-encode the rendered sequence (`MediaStreamSource` + `MediaTranscoder`).
+`MediaComposition` can place and trim clips but cannot express per-frame motion, has no clip rate
+control and no transition support, so the gap is not closable on that renderer. Closing it properly
+means a frame-server renderer — rendering each output frame ourselves with Win2D and encoding the
+sequence.
 
-### E4 — Audio ⬜
-The frame server handles picture only. Audio needs mixing across tracks, honouring per-clip volume,
-track mute, and per-clip speed. Likely the largest remaining unknown.
+That was briefly the plan, and it was the wrong call once export was known to be low priority:
 
-### E5 — Retire the limitations list ⬜
-`VideoExporter.Limitations` shrinks to empty as each of the above lands, and the export dialog
-stops warning about them.
+- The **audio** step is the expensive unknown. A frame server handles picture only, so audio would
+  have to be mixed across tracks by hand, honouring per-clip volume, track mute and per-clip speed.
+  Today that works with no code at all.
+- A partial frame server is **strictly worse than what exists**: an export with motion but no audio
+  is less useful than one with audio but no motion.
+- The cheaper middle option — a custom `IBasicVideoEffect` on each clip — would get motion and
+  crop-fill while leaving speed and transitions impossible. It also needs an activatable WinRT
+  class, which is awkward in an unpackaged desktop app. Worth revisiting only if motion in the
+  export becomes important.
+
+### If it is ever picked up again
+
+`CompositeSampler` (E1, done) is the groundwork and stands on its own: it is the single definition
+of what the composite looks like at story time *t*, reusing `MotionPath`, the clip's speed and its
+still handling. Any renderer — frame server, effect, or something else — consumes it, which is what
+would make preview and export agree by construction rather than by maintaining two implementations.
+It is already correct and tested; only the renderer is missing.
 
 ---
 
