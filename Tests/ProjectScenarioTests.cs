@@ -134,6 +134,71 @@ namespace VideoDirector.Tests
             Assert.False(vm.IsSelectedTransitionApplicable);
         }
 
+        // ---- Locking (C3) --------------------------------------------------------------------
+
+        [Fact]
+        public void ALockedTrackStillReportsItsClips()
+        {
+            // Lock guards mutation, not visibility — a locked clip must still be findable and
+            // inspectable.
+            var vm = Project();
+            vm.Tracks[0].IsLocked = true;
+            var clip = vm.Tracks[0].Clips[0];
+
+            Assert.Equal(0, vm.TrackIndexOf(clip));
+            vm.SelectedClip = clip;
+            Assert.True(vm.HasSelection);
+            Assert.Same(clip, vm.SelectedClip);
+        }
+
+        // ---- Drop placement (C4) -------------------------------------------------------------
+        // The preview a drag draws is ClampToFreeSlot's answer, so what it resolves to IS what a
+        // drop commits. These pin that resolution.
+
+        [Fact]
+        public void ADroppedClipNeverLandsOnTopOfASibling()
+        {
+            var track = new TimelineTrack();
+            track.Clips.Add(Clip("a", 10));                       // occupies [0,10]
+            var moving = Clip("b", 4);
+
+            // Every requested position resolves to somewhere that does not overlap.
+            for (double want = -5; want <= 20; want += 0.5)
+            {
+                double at = track.ClampToFreeSlot(moving, want, 4);
+                bool overlaps = at < 10 && at + 4 > 0;
+                Assert.False(overlaps, $"asking for {want} resolved to {at}, which overlaps [0,10]");
+            }
+        }
+
+        [Fact]
+        public void DraggingAClipWithinItsOwnTrackCanStayPut()
+        {
+            var track = new TimelineTrack();
+            var a = Clip("a", 5);
+            a.StartTimeSeconds = 20;
+            track.Clips.Add(a);
+
+            // The clip being moved must not block itself, or a drag could never end where it began.
+            Assert.Equal(20, track.ClampToFreeSlot(a, 20, 5), 6);
+        }
+
+        [Fact]
+        public void MovingAClipToAGaplessTrackTakesItsPositionFromOrder()
+        {
+            var vm = new DirectorViewModel();
+            vm.Tracks[0].Clips.Add(Clip("a", 10));
+            var moving = Clip("b", 4);
+            moving.StartTimeSeconds = 500;                        // nonsense from its old track
+            vm.Tracks[2].Clips.Add(moving);
+
+            vm.Tracks[2].Clips.Remove(moving);
+            vm.Tracks[0].Clips.Insert(1, moving);
+            vm.Tracks[0].Normalize();
+
+            Assert.Equal(10, moving.StartTimeSeconds, 6);          // right after the first clip
+        }
+
         // ---- Track flags (C3) ----------------------------------------------------------------
 
         [Fact]

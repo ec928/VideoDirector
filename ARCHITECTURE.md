@@ -97,8 +97,7 @@ This chronological ledger records all established solutions and performance opti
 4. **Z-Order Is Track Index**: Compositing order is determined solely by track number — Track 4 over Track 3 over Track 2 over Track 1. There is no per-clip z-override and none should be added. In the preview this is enforced by XAML declaration order in `DirectorPlayerControl.xaml`; when the spine becomes a generic visual (C2), the surface array must stay declared bottom-to-top.
 5. **Modal Separation of Concern**: Editing handles, trim bars, and PiP bounding boxes must never leak into screening (PLAYBACK mode) or macro-structuring (ARRANGE mode).
 6. **GPU Surface Preservation**: Never directly manipulate live `MediaPlayerElement` XAML properties per-frame in ways that corrupt DirectX swapchains; use dedicated transforms and delta-checked placement boxes. Corollary (§7A): never reshape a live video surface — Arrange shows a still proxy instead.
-7. **Model Mutation Happens On Drop, Not During Drag** ⚠: a gesture must not change the model until it completes, and Esc must cancel it cleanly.
-   *Aspirational, not yet true*: cross-track drags currently mutate collections mid-gesture. Plan phase C4 makes this real. New drag code must comply.
+7. **Model Mutation Happens On Drop, Not During Drag**: a gesture must not change the model until it completes, and Esc must cancel it cleanly. A drag computes where the clip *would* land, redraws to show it, and commits exactly once on release (`CommitDrag`). Losing pointer capture cancels rather than half-applying.
 8. **Commit Integrity**: Every architectural step must end in a green build and a clean git commit. Small, incremental steps ensure we are never more than one revert away from safety.
 
 ---

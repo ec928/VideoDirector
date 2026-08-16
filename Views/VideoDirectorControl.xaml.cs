@@ -30,7 +30,9 @@ namespace VideoDirector.Views
         private bool _timelineScrubbing;
         private bool _timelineMovingClip;
         private CinematicOperation _dragClip;
-        private int _dragTrackIndex = -1;
+        private int _dragTrackIndex = -1;         // track the drag started on
+        private int _dragTargetTrackIndex = -1;   // track it would land on (preview only)
+        private double _dragTargetStartSec = double.NaN;  // NaN = position comes from clip order
         private double _dragGrabOffsetSec;
         private double _dragCursorX;      // live cursor x, for the spine ghost
         private int _dragInsertIndex;     // where the ghost would drop
@@ -203,46 +205,55 @@ namespace VideoDirector.Views
             // on track 0 — they are a property of a clip, not of a privileged track.
             var transColor = Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x64, 0x74, 0x8B);
             var ghostColor = Microsoft.UI.ColorHelper.FromArgb(0xCC, 0x93, 0xC5, 0xFD);
-            bool ghosting = _timelineMovingClip && DragIsGapless && _dragClip != null;
+
+            // A drag in progress is drawn as a PREVIEW: the clip is omitted from wherever it
+            // currently lives, the destination lane opens a gap (if gapless) or leaves its
+            // resolved slot free, and the clip itself is drawn as a ghost. Nothing here is
+            // committed to the model — see CommitDrag.
+            bool dragging = _timelineMovingClip && _dragClip != null && _dragTargetTrackIndex >= 0;
 
             for (int ti = 0; ti < TrackCount; ti++)
             {
                 var track = ViewModel.Tracks[ti];
                 double rowY = RowYForTrack(ti);
                 var color = TrackPalette.For(ti);
+                bool isTarget = dragging && ti == _dragTargetTrackIndex;
+                bool gaplessTarget = isTarget && track.IsGapless;
 
-                // A gapless track being dragged within has no continuous position to write, so the
-                // other clips reflow with a gap at the insertion point and the grabbed clip is
-                // drawn as a free ghost under the cursor. Order only changes on release.
-                if (ghosting && ti == _dragTrackIndex)
-                {
-                    double dragW = _dragClip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                    double gx = 0;
-                    int drawn = 0;
-                    foreach (var clip in track.Clips)
-                    {
-                        if (clip == _dragClip) continue;
-                        if (drawn == _dragInsertIndex) gx += dragW;   // open the drop gap
-                        double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                        AddTimelineBlock(gx, rowY, cw, BlockH, color, clip);
-                        double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
-                        if (tw > 0.5) AddTimelineBlock(gx + cw, rowY, tw, BlockH, transColor);
-                        gx += cw + tw;
-                        drawn++;
-                    }
-                    double ghostX = _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec;
-                    AddTimelineBlock(ghostX, rowY, dragW, BlockH, ghostColor, _dragClip);
-                    continue;
-                }
+                double gapWidth = gaplessTarget ? _dragClip.OpDuration.TotalSeconds * _timelinePxPerSec : 0;
+                double flowX = 0;
+                int drawn = 0;
 
                 foreach (var clip in track.Clips)
                 {
-                    double x = clip.StartTimeSeconds * _timelinePxPerSec;
+                    if (dragging && ReferenceEquals(clip, _dragClip)) continue;   // it is the ghost
+
                     double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                    AddTimelineBlock(x, rowY, cw, BlockH, color, clip);
                     double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
+                    double x;
+
+                    if (gaplessTarget)
+                    {
+                        if (drawn == _dragInsertIndex) flowX += gapWidth;   // open the drop gap
+                        x = flowX;
+                        flowX += cw + tw;
+                        drawn++;
+                    }
+                    else
+                    {
+                        x = clip.StartTimeSeconds * _timelinePxPerSec;
+                    }
+
+                    AddTimelineBlock(x, rowY, cw, BlockH, color, clip);
                     if (tw > 0.5) AddTimelineBlock(x + cw, rowY, tw, BlockH, transColor);
                 }
+            }
+
+            if (dragging)
+            {
+                AddTimelineBlock(GhostX(), RowYForTrack(_dragTargetTrackIndex),
+                    _dragClip.OpDuration.TotalSeconds * _timelinePxPerSec, BlockH,
+                    ghostColor, _dragClip);
             }
 
             // Playhead: a bright red line the full height with a downward triangle handle in the ruler.
@@ -618,7 +629,10 @@ namespace VideoDirector.Views
             _dragClip = null;
             TimelineBar.CapturePointer(e.Pointer);
 
-            if (p.Y < RulerH) { _timelineScrubbing = true; ScrubToX(p.X); return; }
+            // The ruler scrubs — and so does Ctrl+drag anywhere, because a 14px strip is a small
+            // target to have to hit whenever you want to move the playhead.
+            bool forceScrub = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control);
+            if (forceScrub || IsRulerY(p.Y)) { _timelineScrubbing = true; ScrubToX(p.X); return; }
 
             var hit = HitClip(p);
             if (hit.clip != null)
@@ -649,56 +663,108 @@ namespace VideoDirector.Views
             if (!_timelineMovingClip && Math.Abs(p.X - _timelinePressPoint.X) < 4) return;
             _timelineMovingClip = true;
 
-            // Live transfer between tracks. One path for every pair of tracks now — it used to be
-            // two hardcoded branches, spine-to-overlay and overlay-to-spine, with no way to
-            // express any other move.
-            int hoverTrack = TrackIndexAtY(p.Y);
-            if (hoverTrack >= 0 && hoverTrack != _dragTrackIndex)
+            // PREVIEW ONLY (ARCHITECTURE.md §5.7). A drag computes where the clip WOULD land and
+            // redraws; it does not touch the model until the pointer is released. This used to
+            // remove the clip from one track's collection and insert it into another's on every
+            // pointer move, so a vertical wobble permanently reshuffled the project and there was
+            // no way to back out.
+            int previousTarget = _dragTargetTrackIndex;
+            int previousInsert = _dragInsertIndex;
+            double previousStart = _dragTargetStartSec;
+
+            var from = ViewModel.Tracks[_dragTrackIndex];
+            int hover = TrackIndexAtY(p.Y);
+            var to = ViewModel.Tracks[hover];
+
+            // A locked destination, or emptying a gapless source of its last clip, is not a legal
+            // drop — so the preview stays on the source track rather than lying about the outcome.
+            bool canLeaveSource = from.Clips.Count > 1 || !from.IsGapless;
+            if (to.IsLocked || (hover != _dragTrackIndex && !canLeaveSource)) hover = _dragTrackIndex;
+
+            _dragTargetTrackIndex = hover;
+            _dragCursorX = p.X;
+
+            if (ViewModel.Tracks[hover].IsGapless)
             {
-                var from = ViewModel.Tracks[_dragTrackIndex];
-                var to = ViewModel.Tracks[hoverTrack];
-                // Never empty a gapless track's last clip out from under the drag, and never move
-                // onto or off a locked track.
-                if ((from.Clips.Count > 1 || !from.IsGapless) && !from.IsLocked && !to.IsLocked)
-                {
-                    from.Clips.Remove(_dragClip);
-                    if (to.IsGapless)
-                    {
-                        int insertIdx = Math.Clamp(InsertIndexAt(to, p.X), 0, to.Clips.Count);
-                        to.Clips.Insert(insertIdx, _dragClip);
-                    }
-                    else
-                    {
-                        _dragClip.StartTime = TimeSpan.FromSeconds(
-                            Math.Max(0, (p.X / _timelinePxPerSec) - _dragGrabOffsetSec));
-                        to.Clips.Add(_dragClip);
-                    }
-                    from.Normalize();
-                    to.Normalize();
-                    _dragTrackIndex = hoverTrack;
-                }
+                _dragInsertIndex = Math.Clamp(InsertIndexAt(ViewModel.Tracks[hover], p.X),
+                                              0, ViewModel.Tracks[hover].Clips.Count);
+                _dragTargetStartSec = double.NaN;   // position comes from order, not from x
+            }
+            else
+            {
+                double dur = _dragClip.OpDuration.TotalSeconds;
+                double extent = TimelineGeometry.ExtentSeconds(ViewModel.ContentEnd.TotalSeconds);
+                double want = Math.Clamp((p.X / _timelinePxPerSec) - _dragGrabOffsetSec,
+                                         0, Math.Max(0, extent - dur));
+                want = ApplyClipSnapping(want, dur, _dragClip);
+                _dragTargetStartSec = ViewModel.Tracks[hover].ClampToFreeSlot(_dragClip, want, dur);
             }
 
-            if (DragIsGapless)
+            // Only redraw when the preview actually changed; otherwise nudge the ghost, which is
+            // far cheaper than rebuilding every Canvas child at pointer rate.
+            bool changed = previousTarget != _dragTargetTrackIndex
+                           || previousInsert != _dragInsertIndex
+                           || !NearlyEqual(previousStart, _dragTargetStartSec);
+            if (changed) BuildTimelineBar();
+            else MoveGhostTo(GhostX());
+        }
+
+        private static bool NearlyEqual(double a, double b)
+            => (double.IsNaN(a) && double.IsNaN(b)) || Math.Abs(a - b) < 1e-6;
+
+        // Where the dragged clip's ghost is drawn. On a gapless target it free-follows the cursor
+        // while the drop gap opens beneath it; on a free target it sits at the resolved start time.
+        private double GhostX()
+            => double.IsNaN(_dragTargetStartSec)
+                ? _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec
+                : _dragTargetStartSec * _timelinePxPerSec;
+
+        private void MoveGhostTo(double x)
+        {
+            if (_dragClip == null || !_clipBlockElements.TryGetValue(_dragClip, out var elements)) return;
+            foreach (var el in elements) Canvas.SetLeft(el, el is StackPanel ? x + 6 : x);
+        }
+
+        // Apply the previewed move, exactly once. Everything up to here has been drawing.
+        private void CommitDrag()
+        {
+            if (_dragClip == null || _dragTargetTrackIndex < 0) return;
+            var from = ViewModel.Tracks[_dragTrackIndex];
+            var to = ViewModel.Tracks[_dragTargetTrackIndex];
+            if (from.IsLocked || to.IsLocked) return;
+
+            if (!ReferenceEquals(from, to)) from.Clips.Remove(_dragClip);
+            else to.Clips.Remove(_dragClip);
+
+            if (to.IsGapless)
             {
-                // Ghost follows the cursor; the order itself is committed on release.
-                _dragCursorX = p.X;
-                int newIndex = ComputeSpineInsertIndex(p.X);
-                if (newIndex != _dragInsertIndex)
-                {
-                    _dragInsertIndex = newIndex;
-                    BuildTimelineBar();
-                }
-                else if (_clipBlockElements.TryGetValue(_dragClip, out var ghostElements))
-                {
-                    double ghostX = _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec;
-                    foreach (var el in ghostElements)
-                    {
-                        Canvas.SetLeft(el, el is StackPanel ? ghostX + 6 : ghostX);
-                    }
-                }
+                to.Clips.Insert(Math.Clamp(_dragInsertIndex, 0, to.Clips.Count), _dragClip);
             }
-            else MoveOverlayTo(p);   // x = time, y = which track
+            else
+            {
+                if (!double.IsNaN(_dragTargetStartSec))
+                    _dragClip.StartTime = TimeSpan.FromSeconds(_dragTargetStartSec);
+                to.Clips.Add(_dragClip);
+            }
+
+            from.Normalize();
+            to.Normalize();
+        }
+
+        // Abandon a drag without touching the model. The preview was never applied, so this is
+        // just clearing state and redrawing.
+        private void CancelDrag()
+        {
+            if (_dragClip == null && !_timelinePressed) return;
+            bool wasDragging = _timelineMovingClip;
+            _timelinePressed = false;
+            _timelineScrubbing = false;
+            _timelineMovingClip = false;
+            _dragClip = null;
+            _dragTrackIndex = -1;
+            _dragTargetTrackIndex = -1;
+            _dragTargetStartSec = double.NaN;
+            if (wasDragging) BuildTimelineBar();
         }
 
         // Where a dragged clip would drop into a gapless track: how many OTHER clips have their
@@ -720,6 +786,10 @@ namespace VideoDirector.Views
 
         private int ComputeSpineInsertIndex(double cursorX) => InsertIndexAt(ViewModel.Tracks[0], cursorX);
 
+        // Losing capture (alt-tab, a system gesture) abandons the drag rather than leaving the
+        // preview stranded on screen with no way to finish it.
+        private void TimelineBar_PointerCaptureLost(object? sender, PointerRoutedEventArgs e) => CancelDrag();
+
         private void TimelineBar_PointerReleased(object? sender, PointerRoutedEventArgs e)
         {
             // This fires for the RIGHT button too. If we never started a left-press, do nothing —
@@ -731,33 +801,21 @@ namespace VideoDirector.Views
             TimelineBar.ReleasePointerCapture(e.Pointer);
             bool wasMoving = _timelineMovingClip;
 
-            if (_dragClip != null)
-            {
-                var dropTrack = TrackOf(_dragClip);
-                if (wasMoving && DragIsGapless && dropTrack != null)
-                {
-                    // Commit the reorder exactly once, at the ghost's drop position. Reads the
-                    // clip's OWN track rather than assuming track 0 — any track can be gapless.
-                    int cur = dropTrack.Clips.IndexOf(_dragClip);
-                    int target = Math.Clamp(_dragInsertIndex, 0, dropTrack.Clips.Count - 1);
-                    if (cur >= 0 && target != cur) dropTrack.Clips.Move(cur, target);
-                    dropTrack.Normalize();
-                }
-                else
-                {
-                    dropTrack?.Normalize();
-                    _playbackEngine?.RefreshComposite();
-                }
-            }
+            if (wasMoving && _dragClip != null) CommitDrag();
+
             _timelinePressed = false;
             _timelineScrubbing = false;
             _timelineMovingClip = false;
             _dragClip = null;
             _dragTrackIndex = -1;
+            _dragTargetTrackIndex = -1;
+            _dragTargetStartSec = double.NaN;
+
             if (wasMoving)
             {
-                BuildTimelineBar();          // clear the drag ghost
-                ViewModel.RecordIfChanged(); // record the move/reorder as one undo step
+                BuildTimelineBar();              // redraw from the committed model, not the preview
+                _playbackEngine?.RefreshComposite();
+                ViewModel.RecordIfChanged();     // the whole move is one undo step
             }
         }
 
@@ -772,6 +830,32 @@ namespace VideoDirector.Views
             // the flyout, which is a candidate for "right-click does nothing".
             var hit = HitClip(_lastHoverPoint);
             _contextClip = hit.clip;
+            _contextTrackIndex = hit.clip != null ? hit.trackIndex : TrackIndexAtY(_lastHoverPoint.Y);
+
+            // Clip actions are disabled on bare lane space and on locked tracks. They used to stay
+            // enabled with no clip resolved, so every one of them silently did nothing — a menu
+            // that looks live and isn't is worse than no menu.
+            bool locked = _contextTrackIndex >= 0 && _contextTrackIndex < ViewModel.Tracks.Count
+                          && ViewModel.Tracks[_contextTrackIndex].IsLocked;
+            bool canEditClip = _contextClip != null && !locked;
+            foreach (var item in new[] { TimelineSplitItem, TimelineSnapshotItem,
+                                         TimelineDuplicateItem, TimelineRemoveItem })
+                if (item != null) item.IsEnabled = canEditClip;
+
+            if (TimelineAddHereItem != null)
+            {
+                TimelineAddHereItem.IsEnabled = !locked;
+                TimelineAddHereItem.Text = _contextTrackIndex >= 0
+                    ? $"Add clips to Track {_contextTrackIndex + 1}…"
+                    : "Add clips…";
+            }
+        }
+
+        private int _contextTrackIndex = -1;
+
+        private void TimelineAddHere_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextTrackIndex >= 0) LoadIntoTrack(_contextTrackIndex);
         }
 
         private void TimelineSplit_Click(object? sender, RoutedEventArgs e)
@@ -1041,55 +1125,6 @@ namespace VideoDirector.Views
         }
 
         private void EditFraming_Click(object? sender, RoutedEventArgs e) => BeginEditSelected();
-
-        // Overlay drag: horizontally = reposition in time, vertically = move to another track.
-        private void MoveOverlayTo(Windows.Foundation.Point p)
-        {
-            if (_dragClip == null || _timelinePxPerSec <= 0) return;
-
-            // Vertical: which track lane is the cursor over? (Spine transfer is handled by the
-            // caller before we get here, so a spine-lane hover just clamps to the nearest overlay.)
-            int targetIndex = Math.Clamp(TrackIndexAtY(p.Y), 0, ViewModel.Tracks.Count - 1);
-            var target = ViewModel.Tracks[targetIndex];
-            var current = TrackOf(_dragClip);
-            bool trackChanged = current != null && !ReferenceEquals(current, target);
-            if (trackChanged)
-            {
-                current.Clips.Remove(_dragClip);
-                target.Clips.Add(_dragClip);
-            }
-
-            // Horizontal: set the start time, clamped so it can't overlap siblings on this track
-            // (tracks are strict — an overlap would silently hide one clip at playback).
-            // The upper bound is the drawn extent, NOT the project length: clamping to the project
-            // length meant a clip could never be placed past the current end, so no track but the
-            // spine could ever make the project longer.
-            double extent = TimelineGeometry.ExtentSeconds(ViewModel.ContentEnd.TotalSeconds);
-            double dur = _dragClip.OpDuration.TotalSeconds;
-            double newStart = (p.X / _timelinePxPerSec) - _dragGrabOffsetSec;
-            newStart = Math.Clamp(newStart, 0, Math.Max(0, extent - dur));
-            newStart = ApplyClipSnapping(newStart, dur, _dragClip);
-            _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
-
-            if (trackChanged)
-            {
-                target.ResolveOverlaps();
-                BuildTimelineBar();
-                _playbackEngine?.RefreshComposite();
-            }
-            else if (_clipBlockElements.TryGetValue(_dragClip, out var elements))
-            {
-                double newX = newStart * _timelinePxPerSec;
-                double rowY = RowYForTrack(targetIndex);
-                foreach (var el in elements)
-                {
-                    Canvas.SetLeft(el, el is StackPanel ? newX + 6 : newX);
-                    Canvas.SetTop(el, rowY);
-                }
-            }
-            // History is recorded once on drop (PointerReleased), not per move-tick.
-        }
-
 
         private void UpdatePlayhead()
         {
@@ -1793,6 +1828,13 @@ namespace VideoDirector.Views
         private void EscapeAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
                                                Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
         {
+            // A drag in flight takes priority: Esc abandons it and leaves the project untouched.
+            if (_timelinePressed || _dragClip != null)
+            {
+                CancelDrag();
+                args.Handled = true;
+                return;
+            }
             if (ViewModel.IsEditMode) { ExitEditMode(); args.Handled = true; }
         }
 
@@ -1938,13 +1980,65 @@ namespace VideoDirector.Views
 
         private void OverlaySection_DragOver(object? sender, DragEventArgs e)
         {
-            if (e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+            if (!e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+                return;
+
+            double y = e.GetPosition(TimelineBar).Y;
+            int track = TrackIndexAtY(y);
+            bool locked = track >= 0 && track < ViewModel.Tracks.Count && ViewModel.Tracks[track].IsLocked;
+
+            e.AcceptedOperation = locked
+                ? Windows.ApplicationModel.DataTransfer.DataPackageOperation.None
+                : Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = locked
+                ? TrackNameAt(y) + " is locked"
+                : "Add to " + TrackNameAt(y);
+
+            // Light up the destination lane. The caption alone told you where the drop would land
+            // only if you happened to read it; the lane itself is where you are looking.
+            ShowDropHighlight(locked ? -1 : track);
+            e.Handled = true;
+        }
+
+        private void OverlaySection_DragLeave(object? sender, DragEventArgs e) => ShowDropHighlight(-1);
+
+        private Microsoft.UI.Xaml.Shapes.Rectangle _dropHighlight;
+
+        private void ShowDropHighlight(int trackIndex)
+        {
+            if (TimelineBar == null) return;
+
+            if (trackIndex < 0 || trackIndex >= TrackCount)
             {
-                e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
-                // Name the row being hovered, so it's obvious where the drop will land.
-                e.DragUIOverride.Caption = "Add to " + TrackNameAt(e.GetPosition(TimelineBar).Y);
-                e.Handled = true;
+                if (_dropHighlight != null)
+                {
+                    TimelineBar.Children.Remove(_dropHighlight);
+                    _dropHighlight = null;
+                }
+                return;
             }
+
+            var color = TrackPalette.For(trackIndex);
+            if (_dropHighlight == null)
+            {
+                _dropHighlight = new Microsoft.UI.Xaml.Shapes.Rectangle
+                {
+                    Height = RowPitch, RadiusX = 3, RadiusY = 3,
+                    IsHitTestVisible = false, StrokeThickness = 1
+                };
+                TimelineBar.Children.Add(_dropHighlight);
+            }
+            else if (!TimelineBar.Children.Contains(_dropHighlight))
+            {
+                TimelineBar.Children.Add(_dropHighlight);
+            }
+
+            _dropHighlight.Width = Math.Max(0, TimelineBar.Width);
+            _dropHighlight.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(TrackPalette.At(color, 0x44));
+            _dropHighlight.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+            Canvas.SetLeft(_dropHighlight, 0);
+            Canvas.SetTop(_dropHighlight, RowYForTrack(trackIndex) - 1);
+            Canvas.SetZIndex(_dropHighlight, 50);
         }
 
         // Human-readable name of the track a given y falls in, for the drag caption.
@@ -1976,7 +2070,9 @@ namespace VideoDirector.Views
                     if (item is Windows.Storage.StorageFile file && IsSupportedMedia(file.FileType))
                         paths.Add(item.Path);
 
+                ShowDropHighlight(-1);
                 if (paths.Count == 0) return;
+                if (ViewModel.Tracks[trackIndex].IsLocked) return;
                 await ViewModel.AddClipsToTrackAsync(paths, trackIndex, startTime);
                 SelectNewestClipOn(trackIndex);
             }

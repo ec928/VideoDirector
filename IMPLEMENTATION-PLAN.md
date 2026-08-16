@@ -345,7 +345,7 @@ placement, from its own header.
 
 ---
 
-### C4 — Drag & drop correctness ⬜
+### C4 — Drag & drop correctness ✅ **Done**
 
 Needs A3. Independent of C2.
 
