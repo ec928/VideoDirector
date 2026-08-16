@@ -95,6 +95,14 @@ namespace VideoDirector.Views
             HookTrackClips();
             BuildTimelineBar();
             UpdateZoomReadout();
+            UpdateWindowTitle();
+        }
+
+        // The title bar is where "you have unsaved work" belongs; there was nowhere else showing
+        // which project is open or whether it had been saved.
+        private void UpdateWindowTitle()
+        {
+            if (MainWindow.Instance != null) MainWindow.Instance.Title = ViewModel.WindowTitle;
         }
 
         // Each track owns its own clip collection, so the timeline watches them all. The track
@@ -1400,6 +1408,11 @@ namespace VideoDirector.Views
 
         private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
+            if (e.PropertyName == nameof(DirectorViewModel.WindowTitle))
+            {
+                UpdateWindowTitle();
+                return;
+            }
             if (e.PropertyName == nameof(DirectorViewModel.CurrentStoryTime))
             {
                 UpdatePlayhead();
@@ -1665,7 +1678,34 @@ namespace VideoDirector.Views
             appWindow.ResizeClient(new Windows.Graphics.SizeInt32(winWidthPhysical, winHeightPhysical));
         }
 
-        private async void Save_Click(object? sender, RoutedEventArgs e)
+        // Save to the project's existing file if it has one, otherwise ask where to put it.
+        // Every save used to open a picker, so keeping a project up to date meant confirming a
+        // filename every single time.
+        private async void Save_Click(object? sender, RoutedEventArgs e) => await SaveProjectAsync();
+
+        private async void SaveAs_Click(object? sender, RoutedEventArgs e) => await SaveProjectAsync(forcePrompt: true);
+
+        // Returns false if the user backed out, so callers that need the save to have happened
+        // (the close prompt) can tell the difference between "saved" and "cancelled".
+        private async Task<bool> SaveProjectAsync(bool forcePrompt = false)
+        {
+            if (!forcePrompt && ViewModel.HasProjectPath)
+            {
+                try
+                {
+                    var existing = await StorageFile.GetFileFromPathAsync(ViewModel.CurrentProjectPath);
+                    await ViewModel.SaveAsync(existing);
+                    return true;
+                }
+                catch
+                {
+                    // The file has been moved or deleted since it was opened — fall through and ask.
+                }
+            }
+            return await SaveWithPickerAsync();
+        }
+
+        private async Task<bool> SaveWithPickerAsync()
         {
             var savePicker = new FileSavePicker();
             var window = MainWindow.Instance;
@@ -1677,14 +1717,39 @@ namespace VideoDirector.Views
             savePicker.SuggestedFileName = "NewSequence";
 
             StorageFile file = await savePicker.PickSaveFileAsync();
-            if (file != null)
+            if (file == null) return false;
+            await ViewModel.SaveAsync(file);
+            return true;
+        }
+
+        // ---- Unsaved work ---------------------------------------------------------------------
+
+        // Ask before throwing away unsaved changes. Returns false to abandon whatever the caller
+        // was about to do. Closing the window used to discard everything silently.
+        public async Task<bool> ConfirmDiscardChangesAsync(string action)
+        {
+            if (!ViewModel.IsDirty) return true;
+
+            var dialog = new ContentDialog
             {
-                await ViewModel.SaveAsync(file);
-            }
+                Title = "Save changes?",
+                Content = $"{ViewModel.ProjectName} has unsaved changes.",
+                PrimaryButtonText = "Save",
+                SecondaryButtonText = $"{action} without saving",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary) return await SaveProjectAsync();
+            return result == ContentDialogResult.Secondary;   // discard; Close means cancel
         }
 
         private async void Load_Click(object? sender, RoutedEventArgs e)
         {
+            if (!await ConfirmDiscardChangesAsync("Open")) return;
+
             var openPicker = new FileOpenPicker();
             var window = MainWindow.Instance;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
@@ -1698,6 +1763,7 @@ namespace VideoDirector.Views
             if (file != null)
             {
                 await ViewModel.LoadAsync(file);
+                UpdateWindowTitle();
                 if (ViewModel.IsAutoPlayEnabled && ViewModel.TimelineNodes.Count > 0)
                 {
                     _ = _playbackEngine?.StartPlaybackAsync(0);
@@ -1707,6 +1773,8 @@ namespace VideoDirector.Views
 
         private async void Clear_Click(object? sender, RoutedEventArgs e)
         {
+            if (!await ConfirmDiscardChangesAsync("Clear")) return;
+
             bool hasContent = false;
             foreach (var t in ViewModel.Tracks)
                 if (t.Clips.Count > 0) { hasContent = true; break; }
@@ -1726,6 +1794,7 @@ namespace VideoDirector.Views
             }
 
             ViewModel.Clear();
+            UpdateWindowTitle();
         }
 
         private async void Export_Click(object? sender, RoutedEventArgs e)
@@ -2014,6 +2083,22 @@ namespace VideoDirector.Views
         // in which case Space/Delete/Ctrl+Z must reach the field, not trigger a shortcut.
         private bool IsTextInputFocused()
             => FocusManager.GetFocusedElement(this.XamlRoot) is TextBox;
+
+        private void SaveAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                             Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextInputFocused()) return;
+            args.Handled = true;
+            _ = SaveProjectAsync();
+        }
+
+        private void OpenAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+                                             Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextInputFocused()) return;
+            args.Handled = true;
+            Load_Click(this, null);
+        }
 
         private void UndoAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
                                              Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)

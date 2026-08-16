@@ -362,6 +362,80 @@ namespace VideoDirector.Tests
             Assert.Single(vm.Tracks[2].Clips);
         }
 
+        // ---- Unsaved work ----------------------------------------------------------------------
+        // Closing the window used to discard everything silently. Dirtiness reuses the same
+        // snapshot the undo history takes, so there is only one definition of "changed".
+
+        [Fact]
+        public void ANewProjectHasNothingToLose()
+        {
+            var vm = new DirectorViewModel();
+            Assert.False(vm.IsDirty);
+            Assert.False(vm.HasProjectPath);
+        }
+
+        [Fact]
+        public void AddingAClipMakesTheProjectDirty()
+        {
+            var vm = new DirectorViewModel();
+            vm.Tracks[0].Clips.Add(Clip("a", 5));
+            vm.RecordIfChanged();
+            Assert.True(vm.IsDirty);
+        }
+
+        [Fact]
+        public void SavingClearsTheDirtyFlag()
+        {
+            var vm = Project();
+            Assert.True(vm.IsDirty);
+
+            vm.MarkSaved(@"C:\projects\demo.json");
+
+            Assert.False(vm.IsDirty);
+            Assert.True(vm.HasProjectPath);
+            Assert.Equal("demo", vm.ProjectName);
+        }
+
+        [Fact]
+        public void EditingAfterASaveMakesItDirtyAgain()
+        {
+            var vm = Project();
+            vm.MarkSaved(@"C:\projects\demo.json");
+
+            vm.Tracks[0].Clips.Add(Clip("late", 3));
+            vm.RecordIfChanged();
+
+            Assert.True(vm.IsDirty);
+        }
+
+        [Fact]
+        public void UndoingBackToTheSavedStateIsNotDirty()
+        {
+            // Dirtiness compares against what is on disk, not "has anything happened", so undoing
+            // a change back to the saved state correctly reports clean.
+            var vm = Project();
+            vm.MarkSaved(@"C:\projects\demo.json");
+
+            vm.Tracks[0].Clips.Add(Clip("late", 3));
+            vm.RecordIfChanged();
+            Assert.True(vm.IsDirty);
+
+            vm.Undo();
+            Assert.False(vm.IsDirty);
+        }
+
+        [Fact]
+        public void TheTitleShowsTheProjectAndWhetherItIsSaved()
+        {
+            var vm = Project();
+            Assert.StartsWith("•", vm.WindowTitle);          // unsaved marker
+            Assert.Contains("Untitled project", vm.WindowTitle);
+
+            vm.MarkSaved(@"C:\projects\holiday.json");
+            Assert.DoesNotContain("•", vm.WindowTitle);
+            Assert.Contains("holiday", vm.WindowTitle);
+        }
+
         // ---- Migration -----------------------------------------------------------------------
 
         [Fact]

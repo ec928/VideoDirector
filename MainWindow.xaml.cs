@@ -53,11 +53,36 @@ namespace VideoDirector
 
             ConfigureWindow();
 
+            // Closing used to discard unsaved work silently. AppWindow.Closing can be cancelled,
+            // which Window.Closed cannot, so the prompt lives there.
+            _appWindow.Closing += AppWindow_Closing;
+
             this.Closed += (s, e) =>
             {
                 Instance = null!;
                 SaveAllSettings();
             };
+        }
+
+        // Set once the user has confirmed, so the second close attempt goes straight through.
+        private bool _closeConfirmed;
+
+        private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
+        {
+            if (_closeConfirmed) return;
+
+            var editor = DirectorControl;
+            if (editor == null || !editor.ViewModel.IsDirty) return;
+
+            // Cancel this close and re-issue it once the user has decided. The dialog is async and
+            // the Closing event cannot wait for it.
+            args.Cancel = true;
+
+            bool proceed = await editor.ConfirmDiscardChangesAsync("Close");
+            if (!proceed) return;
+
+            _closeConfirmed = true;
+            this.Close();
         }
 
         private void RootGrid_PointerMoved(object? sender, PointerRoutedEventArgs e)

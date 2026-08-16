@@ -546,9 +546,10 @@ Real problems found during the audit that no phase above addresses. Listed so th
   *Partly addressed*: the export dialog now lists what will not be baked
   (`VideoExporter.Limitations`), and mute/hide are honoured. The real fix is a renderer that can
   express per-frame motion — see "The export fork" below.
-- **No project safety net.** No dirty-state indicator, no filename in the title bar, no
-  unsaved-changes prompt on close, no autosave, no recent-projects list, no `.json` file
-  association. Closing the window discards everything silently.
+- ~~**No project safety net.**~~ *Mostly addressed*: dirty state, the project name and an unsaved
+  marker in the title bar, a save/discard/cancel prompt before closing, opening or clearing, Save
+  vs Save As with the project's own path, and Ctrl+S / Ctrl+O. Still missing: **autosave and crash
+  recovery**, a recent-projects list, and a `.json` file association.
 - **Silent failure on load.** `catch { }` in `AddFilesAsync`, `AddOverlayAsync` and both thumbnail
   loaders (`ViewModels/DirectorViewModel.cs:425` and nearby). A missing or unreadable file becomes a
   black 10-second clip with no message; you only find out at export.

@@ -63,6 +63,7 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
   * Drags **preview and commit on drop** (§5.7); Esc cancels. External file drags highlight the destination lane. Right-click gives a lane-scoped menu whose clip actions disable when no clip is under the cursor.
   * Magnetic snapping (8px threshold), and Ctrl+drag scrubs from anywhere.
 * **Inspector Panel & Telemetry HUD (Right Panel)**: Dedicated property editor displaying human-readable formatted timecodes (`00:00:00.00`), speed, transitions, the Start/Mid/End keyframe pickers, the Mid keyframe's position within the clip, and motion pacing. PiP coordinates and real-time operational readouts are cleanly consolidated into a compact Telemetry HUD for maximum workflow clarity.
+* **Project state**: the title bar carries the project name and a `•` when there is unsaved work. Closing, opening or clearing with unsaved changes prompts to save, discard or cancel — `AppWindow.Closing` is used rather than `Window.Closed` because only the former can be cancelled. Save writes to the project's own path once it has one; Save As is in the toolbar overflow.
 * **Transport Pill (Bottom-Center Floating)**: Hosts core transport controls: Play/Pause, Previous/Next frame, range/trim sliders, global playback speed, loop toggle, and inspector docking controls.
 
 ---

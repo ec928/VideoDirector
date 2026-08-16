@@ -328,6 +328,7 @@ namespace VideoDirector.ViewModels
             EnsureTracks();        // the full fixed set, before anything can reference Tracks[0]
             TimelineNodes.CollectionChanged += TimelineNodes_CollectionChanged;
             ResetHistory();        // baseline = the empty project, so the first edit is undoable
+            MarkSaved(string.Empty); // an empty project has nothing to lose
         }
 
         // The track count is fixed at TrackCount, and the instances are created exactly once:
@@ -575,10 +576,13 @@ namespace VideoDirector.ViewModels
 
         public async Task SaveAsync(Windows.Storage.StorageFile file)
         {
-            using var stream = await file.OpenStreamForWriteAsync();
-            stream.SetLength(0); // Clear existing content
-            using var writer = new System.IO.StreamWriter(stream);
-            await writer.WriteAsync(ToProjectJson());
+            using (var stream = await file.OpenStreamForWriteAsync())
+            {
+                stream.SetLength(0); // Clear existing content
+                using var writer = new System.IO.StreamWriter(stream);
+                await writer.WriteAsync(ToProjectJson());
+            }
+            MarkSaved(file.Path);
         }
 
         // Fill the fixed track set from deserialized data, migrating whichever shape it is in.
@@ -651,6 +655,7 @@ namespace VideoDirector.ViewModels
             using var stream = await file.OpenStreamForReadAsync();
             using var reader = new System.IO.StreamReader(stream);
             LoadProjectJson(await reader.ReadToEndAsync(), dispatcher);
+            MarkSaved(file.Path);
         }
 
         // Parse and apply a project document. Public and file-free so the migration paths can be
@@ -729,6 +734,55 @@ namespace VideoDirector.ViewModels
         private const int MaxHistory = 50;
         private static readonly System.Text.Json.JsonSerializerOptions _snapshotOptions = new();
 
+        // ---- Unsaved work ---------------------------------------------------------------------
+        // Closing the window used to discard everything silently: no dirty state, no prompt, and
+        // Save re-prompted for a filename every single time. Dirtiness reuses the same snapshot
+        // the undo history already takes, so there is no second definition of "changed".
+
+        private string _savedSnapshot = string.Empty;
+        private string _currentProjectPath = string.Empty;
+
+        // Where this project lives, once it has been saved or loaded. Empty for a new one.
+        public string CurrentProjectPath
+        {
+            get => _currentProjectPath;
+            private set
+            {
+                if (SetProperty(ref _currentProjectPath, value ?? string.Empty))
+                {
+                    OnPropertyChanged(nameof(ProjectName));
+                    OnPropertyChanged(nameof(HasProjectPath));
+                    OnPropertyChanged(nameof(WindowTitle));
+                }
+            }
+        }
+
+        public bool HasProjectPath => !string.IsNullOrEmpty(_currentProjectPath);
+
+        public string ProjectName => HasProjectPath
+            ? System.IO.Path.GetFileNameWithoutExtension(_currentProjectPath)
+            : "Untitled project";
+
+        public bool IsDirty => CaptureSnapshot() != _savedSnapshot;
+
+        // Shown in the title bar. The bullet is the standard "you have unsaved work" marker.
+        public string WindowTitle => (IsDirty ? "• " : "") + ProjectName + " — VideoDirector";
+
+        // Call whenever the project may have changed, so the title reflects reality.
+        public void RefreshDirtyState()
+        {
+            OnPropertyChanged(nameof(IsDirty));
+            OnPropertyChanged(nameof(WindowTitle));
+        }
+
+        // The project is now what is on disk: after a save, a load, or a new project.
+        public void MarkSaved(string path)
+        {
+            _savedSnapshot = CaptureSnapshot();
+            CurrentProjectPath = path;
+            RefreshDirtyState();
+        }
+
         public bool CanUndo => _undo.Count > 0;
         public bool CanRedo => _redo.Count > 0;
 
@@ -751,7 +805,7 @@ namespace VideoDirector.ViewModels
         public void RecordIfChanged()
         {
             var current = CaptureSnapshot();
-            if (current == _settled) return;
+            if (current == _settled) { RefreshDirtyState(); return; }
 
             if (_settled.Length > 0)
             {
@@ -767,6 +821,7 @@ namespace VideoDirector.ViewModels
             }
             _settled = current;
             RaiseHistoryChanged();
+            RefreshDirtyState();
         }
 
         public void Undo()
@@ -793,6 +848,7 @@ namespace VideoDirector.ViewModels
         {
             OnPropertyChanged(nameof(CanUndo));
             OnPropertyChanged(nameof(CanRedo));
+            RefreshDirtyState();
         }
 
         // The dispatcher is only needed to marshal thumbnail loads onto the UI thread, and

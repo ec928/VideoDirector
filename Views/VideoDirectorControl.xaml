@@ -42,6 +42,8 @@
         <KeyboardAccelerator Key="Add" Modifiers="Control" Invoked="ZoomInAccelerator_Invoked" />
         <KeyboardAccelerator Key="Subtract" Modifiers="Control" Invoked="ZoomOutAccelerator_Invoked" />
         <KeyboardAccelerator Key="Number0" Modifiers="Control" Invoked="FitTimelineAccelerator_Invoked" />
+        <KeyboardAccelerator Key="S" Modifiers="Control" Invoked="SaveAccelerator_Invoked" />
+        <KeyboardAccelerator Key="O" Modifiers="Control" Invoked="OpenAccelerator_Invoked" />
         <KeyboardAccelerator Key="Z" Modifiers="Control" Invoked="UndoAccelerator_Invoked" />
         <KeyboardAccelerator Key="Y" Modifiers="Control" Invoked="RedoAccelerator_Invoked" />
         <KeyboardAccelerator Key="Z" Modifiers="Control,Shift" Invoked="RedoAccelerator_Invoked" />
@@ -522,10 +524,10 @@
                             <FontIcon Glyph="&#xE9A6;" FontSize="13" />
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
-                        <Button Click="Save_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Save project">
+                        <Button Click="Save_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" AutomationProperties.Name="Save project" ToolTipService.ToolTip="Save project (Ctrl+S)">
                             <SymbolIcon Symbol="Save" />
                         </Button>
-                        <Button Click="Load_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Load project">
+                        <Button Click="Load_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" AutomationProperties.Name="Open project" ToolTipService.ToolTip="Open project (Ctrl+O)">
                             <SymbolIcon Symbol="OpenFile" />
                         </Button>
                         <!-- Infrequent / destructive project actions. Clear used to sit inline two
@@ -534,6 +536,10 @@
                             <SymbolIcon Symbol="More" />
                             <Button.Flyout>
                                 <MenuFlyout>
+                                    <MenuFlyoutItem Text="Save as…" Click="SaveAs_Click">
+                                        <MenuFlyoutItem.Icon><SymbolIcon Symbol="Save" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutSeparator />
                                     <MenuFlyoutItem Text="Resize window to video aspect" Click="FitWindow_Click"
                                                     ToolTipService.ToolTip="Auto-size the application window to match the video's shape">
                                         <MenuFlyoutItem.Icon><SymbolIcon Symbol="FullScreen" /></MenuFlyoutItem.Icon>
