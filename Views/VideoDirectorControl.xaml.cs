@@ -1264,6 +1264,7 @@ namespace VideoDirector.Views
                 op.StartMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
                 _playbackEngine?.UpdateWysiwygOverlay();
                 ViewModel.CurrentOperationTimeSeconds = op.VideoStartTime.TotalSeconds;
+                _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.Start);
             }
         }
 
@@ -1276,6 +1277,7 @@ namespace VideoDirector.Views
                 op.MidMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
                 _playbackEngine?.UpdateWysiwygOverlay();
                 ViewModel.CurrentOperationTimeSeconds = op.VideoStartTime.TotalSeconds + (op.OpDuration.TotalSeconds / 2.0);
+                _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.Mid);
             }
         }
 
@@ -1287,7 +1289,13 @@ namespace VideoDirector.Views
             {
                 op.EndMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
                 _playbackEngine?.UpdateWysiwygOverlay();
-                ViewModel.CurrentOperationTimeSeconds = op.VideoEndTime.TotalSeconds;
+                
+                double endTarget = op.VideoEndTime.TotalSeconds;
+                if (endTarget > 0.1) endTarget -= 0.1;
+                ViewModel.CurrentOperationTimeSeconds = endTarget;
+
+                // Force the decoder to update the paused frame by switching edit targets
+                _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.End);
             }
         }
 

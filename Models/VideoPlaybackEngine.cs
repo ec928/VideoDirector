@@ -444,13 +444,21 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
             UpdateTelemetryOverlay(true);
 
-            double W = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
-            double H = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
+            double vpW = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
+            double vpH = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
 
-            // Every clip (Track 1 or overlay) frames its content into a placement box.
-            // A placement of 1.0x1.0 means it fills the 16:9 workspace.
-            double pipAspect = (16.0 / 9.0) * (op.PlacementWidth / op.PlacementHeight);
+            // In Edit mode, the clip being edited is always isolated into slot 0.
+            double aspect = _overlayAspect[0];
+            if (aspect <= 0) aspect = 16.0 / 9.0;
+
+            // Compute the true physical bounds of the video on the screen in Edit mode (scale 1.0)
+            double W, H;
+            if (aspect >= vpW / vpH) { W = vpW; H = vpW / aspect; }
+            else { H = vpH; W = vpH * aspect; }
+
+            // The crop box aspect ratio depends on the video's intrinsic aspect ratio
             double videoAspect = W / H;
+            double pipAspect = videoAspect * (op.PlacementWidth / op.PlacementHeight);
 
             double boxW = W;
             double boxH = H;
@@ -487,8 +495,9 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
 
                 if (St <= 0) St = 1;
 
-                double currentLeft = (-boxW / 2 - txt) * (Sc / St) + W / 2 + txc;
-                double currentTop = (-boxH / 2 - tyt) * (Sc / St) + H / 2 + tyc;
+                // W/2 and H/2 place it relative to the video bounds. Add the centering offset (vpW - W)/2 to map to canvas.
+                double currentLeft = (-boxW / 2 - txt) * (Sc / St) + W / 2 + txc + (vpW - W) / 2;
+                double currentTop = (-boxH / 2 - tyt) * (Sc / St) + H / 2 + tyc + (vpH - H) / 2;
                 double currentWidth = boxW * (Sc / St);
                 double currentHeight = boxH * (Sc / St);
 
@@ -1304,6 +1313,11 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             else if (target == EditTarget.End)
             {
                 seekPos = overlay.VideoEndTime;
+                if (seekPos.TotalMilliseconds > 100)
+                {
+                    seekPos -= TimeSpan.FromMilliseconds(100);
+                    if (seekPos < overlay.VideoStartTime) seekPos = overlay.VideoStartTime;
+                }
                 markToEdit = overlay.EndMark;
             }
             else
@@ -1314,6 +1328,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
 
             if (player.PlaybackSession != null) player.PlaybackSession.Position = seekPos;
             player.Pause();
+            player.StepForwardOneFrame();
 
             _dispatcher.TryEnqueue(() =>
             {
@@ -1433,6 +1448,9 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 _lastTelemetryUpdate = DateTime.Now;
                 UpdateTelemetryOverlay(true);
             }
+
+            // Ensure the WYSIWYG zoom rectangles stay perfectly synced with the video as it animates.
+            UpdateWysiwygOverlay();
         }
 
         // ---- Arrange mode: drag / wheel the PiP under the cursor (the hit slot) ----
@@ -1583,7 +1601,18 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 var midTime = op.VideoStartTime + TimeSpan.FromSeconds((op.VideoEndTime - op.VideoStartTime).TotalSeconds / 2);
                 SeekActiveOperation(midTime);
             }
-            else if (markType == "End") SeekActiveOperation(op.VideoEndTime);
+            else if (markType == "End")
+            {
+                var endSeek = op.VideoEndTime;
+                // Unconditionally back off slightly from the end trim point to guarantee we hit a visible frame.
+                // If it's the end of the file, this avoids EOS. If it's a trim, it shows the last included frame.
+                if (endSeek.TotalMilliseconds > 100)
+                {
+                    endSeek -= TimeSpan.FromMilliseconds(100);
+                    if (endSeek < op.VideoStartTime) endSeek = op.VideoStartTime;
+                }
+                SeekActiveOperation(endSeek);
+            }
 
             // Poke the decoder so the paused frame updates immediately
             _overlayPlayer[0]?.StepForwardOneFrame();
@@ -1606,10 +1635,18 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             var transform = _playerControl.ActiveTransform;
             if (transform == null) return;
 
-            double W = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
-            double H = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
-            double pipAspect = (16.0 / 9.0) * (op.PlacementWidth / op.PlacementHeight);
+            double vpW = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
+            double vpH = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
+
+            double aspect = _overlayAspect[0];
+            if (aspect <= 0) aspect = 16.0 / 9.0;
+
+            double W, H;
+            if (aspect >= vpW / vpH) { W = vpW; H = vpW / aspect; }
+            else { H = vpH; W = vpH * aspect; }
+
             double videoAspect = W / H;
+            double pipAspect = videoAspect * (op.PlacementWidth / op.PlacementHeight);
 
             double boxW = W;
             double boxH = H;
