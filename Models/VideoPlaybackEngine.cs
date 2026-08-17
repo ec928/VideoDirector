@@ -44,6 +44,7 @@ namespace VideoDirector.Models
             InitializeOverlayPlayers();
 
             _viewModel.PlaybackSpeedChanged += ViewModel_PlaybackSpeedChanged;
+            _viewModel.OperationSeekRequested += ViewModel_OperationSeekRequested;
             
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
             _viewModel.Tracks.CollectionChanged += (s, e) => OnTimelineSequenceChanged();
@@ -55,6 +56,11 @@ namespace VideoDirector.Models
 
             // Start in Arrange (the default mode) — PiP input active.
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
+        }
+
+        private void ViewModel_OperationSeekRequested(object? sender, TimeSpan e)
+        {
+            SeekActiveOperation(e);
         }
 
         private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

@@ -1023,7 +1023,10 @@ namespace VideoDirector.Views
 
             // One entry point for both tracks — selecting a clip (while not playing) edits it.
             if (!ViewModel.IsPlaying)
+            {
+                ViewModel.CurrentStoryTime = clip.StartTime;
                 _playbackEngine?.BeginEdit(ViewModel.SelectedClip, ViewModel.CurrentEditTarget);
+            }
         }
 
         // Overlay drag: horizontally = reposition in time, vertically = move to another track.
@@ -1200,6 +1203,7 @@ namespace VideoDirector.Views
             {
                 op.StartMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
                 _playbackEngine?.UpdateWysiwygOverlay();
+                ViewModel.CurrentOperationTimeSeconds = op.VideoStartTime.TotalSeconds;
             }
         }
 
@@ -1211,6 +1215,7 @@ namespace VideoDirector.Views
             {
                 op.MidMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
                 _playbackEngine?.UpdateWysiwygOverlay();
+                ViewModel.CurrentOperationTimeSeconds = op.VideoStartTime.TotalSeconds + (op.OpDuration.TotalSeconds / 2.0);
             }
         }
 
@@ -1222,6 +1227,7 @@ namespace VideoDirector.Views
             {
                 op.EndMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
                 _playbackEngine?.UpdateWysiwygOverlay();
+                ViewModel.CurrentOperationTimeSeconds = op.VideoEndTime.TotalSeconds;
             }
         }
 

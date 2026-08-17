@@ -12,7 +12,12 @@ This document serves as a hardcoded memory record to prevent the AI agent from f
 
 ## Recent Fixes Applied
 
-### 1. Audio Stutter during Ken Burns Zoom on Track 1 (Resolved)
+### 1. Edit Mode Video Scrubber Disconnected (Resolved)
+- **Files Modified:** `Models/VideoPlaybackEngine.cs`
+- **Issue:** Clicking the "Start", "Mid", or "End" buttons successfully set the keyframes and moved the timeline scrubber on the UI, but the video player didn't seek to show the corresponding frame. In fact, manually dragging the timeline scrubber in Edit mode didn't seek the video player either. 
+- **Fix Applied:** During a previous refactor of the track engine, the subscription to `_viewModel.OperationSeekRequested` was accidentally deleted from `VideoPlaybackEngine.cs`. Restored the `ViewModel_OperationSeekRequested` event handler so that updating the scrubber time in the ViewModel properly translates into a physical seek on the active `MediaPlayer`.
+
+### 2. Audio Stutter during Ken Burns Zoom on Track 1 (Resolved)
 - **Files Modified:** `Models/VideoPlaybackEngine.cs`
 - **Issue:** Audio stuttered noticeably on Track 1 when a clip used Ken Burns zoom. The heavy UI thread overhead of animating the video frame caused the internal `CurrentStoryTime` master clock to run slightly ahead of or behind the actual hardware video decoder. This triggered the engine's drift correction system, which forced the `MediaPlayer` to seek repeatedly to catch up with the UI clock. 
 - **Fix Applied:** Modified `PlaybackTimer_Tick` so that when Track 1 is actively playing a video, `CurrentStoryTime` is driven directly by the `MediaPlayer.PlaybackSession.Position` rather than the UI tick interval. Track 1 now acts as the master hardware clock, meaning it never drifts from itself, completely eliminating the stutter-inducing seeks.
