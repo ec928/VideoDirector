@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,82 +14,47 @@ namespace VideoDirector.Models
     public class VideoPlaybackEngine
     {
         private readonly Views.DirectorPlayerControl _playerControl;
-        private readonly MediaPlayerElement _playerA;
-        private readonly MediaPlayerElement _playerB;
-        private readonly DirectorViewModel _viewModel;
-        private readonly DispatcherQueue _dispatcher;
-
-        private MediaPlayer _mediaPlayerA;
-        private MediaPlayer _mediaPlayerB;
-
-        private bool _isPlayerAActive = true;
-        private CancellationTokenSource _playbackCts;
-        private bool _isPaused = false;
-        private DateTime _pauseStartTime;
-        private TaskCompletionSource<bool> _skipTcs;
-
-        // Animation state
-        private bool _isAnimating = false;
-        private bool _isPreparingTransition = false;
-        private CinematicOperation _opA;
-        private CinematicOperation _opB;
-        private DateTime _opAStartTime;
-        private DateTime _opBStartTime;
-        private TimeSpan _opADuration;
-        private TimeSpan _opBDuration;
-        private bool _inTransition = false;
-        private DateTime _transitionStartTime;
-        
-        // Target state for rendering loop
-        private TimeSpan _renderDuration;
-        private MediaPlayerElement _fadeOutElement;
-        private MediaPlayerElement _fadeInElement;
-        private double _fadeOutVolume = 1.0; // per-clip volumes captured for the crossfade audio ramp
-        private double _fadeInVolume = 1.0;
-
-        public CinematicOperation? CurrentPlayingOperation { get; private set; }
-
-        // Overlay state — one entry per upper track, indexed 0..MaxOverlayTracks-1. Track i owns
-        // player[i] and the pre-declared render surface OverlayVisuals[i] (§7B): no per-track code
-        // paths, so adding a track is data, not new branches.
-        private const int MaxOverlayTracks = DirectorViewModel.MaxOverlayTracks;
+        private Microsoft.UI.Xaml.DispatcherTimer _playbackTimer;
+        private DateTime _lastTickTime;
         private readonly MediaPlayer[] _overlayPlayer = new MediaPlayer[MaxOverlayTracks];
         private readonly CinematicOperation[] _activeOverlay = new CinematicOperation[MaxOverlayTracks];
-        // Native aspect (w/h) of each track's overlay video, cached when the media opens, so
-        // the placement box can be sized to the video's shape (no black bars).
         private readonly double[] _overlayAspect = new double[MaxOverlayTracks];
         private bool _isEditingOverlay = false;
-        // Story time as of the start of the currently-playing clip; CurrentStoryTime is
-        // derived from this plus the active player's real position every render frame.
         private TimeSpan _storyTimeAtClipStart = TimeSpan.Zero;
+        private CinematicOperation _editClip;
+
+
+        private readonly DirectorViewModel _viewModel;
+        private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
+        private bool _isPaused = false;
+        private bool _isAnimating = false;
+        public enum EditorMode { Arrange, Edit }
+        private EditorMode _mode = EditorMode.Arrange;
+        private int _pendingMediaOpens = 0;
+        public CinematicOperation? CurrentPlayingOperation { get; private set; }
+        private const int MaxOverlayTracks = DirectorViewModel.MaxTracks;
 
         public VideoPlaybackEngine(Views.DirectorPlayerControl playerControl, DirectorViewModel viewModel)
         {
             _playerControl = playerControl;
-            _playerA = playerControl.PlayerA;
-            _playerB = playerControl.PlayerB;
             _viewModel = viewModel;
             _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
-            InitializePlayers();
+            
             InitializeOverlayPlayers();
 
             _viewModel.PlaybackSpeedChanged += ViewModel_PlaybackSpeedChanged;
-            _viewModel.OperationSeekRequested += ViewModel_OperationSeekRequested;
+            
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-            _viewModel.TimelineNodes.CollectionChanged += (s, e) => OnTimelineSequenceChanged();
+            _viewModel.Tracks.CollectionChanged += (s, e) => OnTimelineSequenceChanged();
 
             // Arrange mode: drag/wheel the PiP under the cursor.
             _playerControl.OverlayBoxDragged += OnOverlayBoxDragged;
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
+            _playerControl.OverlayBoxPointerPressed += OnOverlayBoxPointerPressed;
 
             // Start in Arrange (the default mode) — PiP input active.
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
-        }
-
-        private void ViewModel_OperationSeekRequested(object? sender, TimeSpan e)
-        {
-            SeekActiveOperation(e);
         }
 
         private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -106,7 +71,7 @@ namespace VideoDirector.Models
 
         private void OnTimelineSequenceChanged()
         {
-            if (_playbackCts != null && !_playbackCts.IsCancellationRequested)
+            
             {
                 if (_isPaused)
                 {
@@ -123,136 +88,71 @@ namespace VideoDirector.Models
                     int startIdx = _viewModel.GetTimelineIndexForStoryTime(at);
                     var offset = at - _viewModel.GetSpineClipStart(startIdx);
                     if (offset < TimeSpan.Zero) offset = TimeSpan.Zero;
-                    if (startIdx >= 0 && startIdx < _viewModel.TimelineNodes.Count
-                        && offset > _viewModel.TimelineNodes[startIdx].OpDuration) offset = TimeSpan.Zero;
+                    if (startIdx >= 0 && startIdx < _viewModel.Tracks.Count
+                        && offset > _viewModel.TotalStoryTime) offset = TimeSpan.Zero;
 
                     _ = StartPlaybackAsync(startIdx, offset);
                 }
             }
         }
-
-        private void ViewModel_PlaybackSpeedChanged(object? sender, double speed)
+private void ViewModel_PlaybackSpeedChanged(object? sender, double speed)
         {
-            double speedA = _opA != null ? speed * _opA.PlaybackSpeed : speed;
-            double speedB = _opB != null ? speed * _opB.PlaybackSpeed : speed;
+            if (_playbackTimer != null) _playbackTimer.Interval = TimeSpan.FromMilliseconds(16);
+            if (_isPaused) return;
 
-            _mediaPlayerA.PlaybackSession.PlaybackRate = speedA;
-            _mediaPlayerB.PlaybackSession.PlaybackRate = speedB;
-            
-            if (speed == 0.0)
+            for (int i = 0; i < MaxOverlayTracks; i++)
             {
-                _mediaPlayerA.Pause();
-                _mediaPlayerB.Pause();
-            }
-            else if (_isAnimating && !_isPaused)
-            {
-                if (_isPlayerAActive && speedA > 0) _mediaPlayerA.Play();
-                else if (!_isPlayerAActive && speedB > 0) _mediaPlayerB.Play();
+                if (_overlayPlayer[i]?.PlaybackSession != null)
+                {
+                    double trackSpeed = speed;
+                    if (_activeOverlay[i] != null) trackSpeed *= _activeOverlay[i].PlaybackSpeed;
+                    
+                    if (trackSpeed == 0) _overlayPlayer[i].Pause();
+                    else
+                    {
+                        _overlayPlayer[i].PlaybackSession.PlaybackRate = trackSpeed;
+                        _overlayPlayer[i].Play();
+                    }
+                }
             }
         }
-
-        public void SeekActiveOperation(TimeSpan position)
+public void SeekActiveOperation(TimeSpan position)
         {
-            // In Edit mode the subject is the edit player — the main player for a spine clip, the
-            // OVERLAY player for an overlay. Seeking the main player here left the overlay preview
-            // blank while trimming (the overlay frame was never moved).
-            if (_mode == EditorMode.Edit && _editPlayer?.PlaybackSession != null)
+            if (_mode == EditorMode.Edit && _overlayPlayer[0]?.PlaybackSession != null)
             {
-                _editPlayer.PlaybackSession.Position = position;
-                if (!_editPreviewPlaying) RenderPausedFrame(_editPlayer);
-                return;
+                _overlayPlayer[0].PlaybackSession.Position = position;
             }
-
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            activePlayer.PlaybackSession.Position = position;
         }
 
         // A paused MediaPlayer that was just seeked or freshly attached (the overlay edit surface is
         // attached on demand) often shows no frame until it plays. StepForwardOneFrame forces the
         // current frame to decode and display while staying paused — otherwise: blank preview.
-        private static void RenderPausedFrame(MediaPlayer player)
+public async Task TogglePlayPauseAsync()
         {
-            var s = player?.PlaybackSession;
-            if (s == null || s.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Playing) return;
-            try { player.StepForwardOneFrame(); } catch { }
-        }
-
-        private void InitializePlayers()
-        {
-            _mediaPlayerA = new MediaPlayer { IsLoopingEnabled = false, AutoPlay = false };
-            _mediaPlayerB = new MediaPlayer { IsLoopingEnabled = false, AutoPlay = false };
-
-            // Each MediaPlayer auto-registers with the OS's System Media Transport Controls
-            // (lock-screen/media-key "Now Playing" session) unless disabled. With multiple
-            // MediaPlayer instances playing concurrently (main track + overlays), that
-            // background negotiation overhead is a known cause of stutter. This app has no
-            // use for OS transport-control integration, so turn it off on every player.
-            _mediaPlayerA.CommandManager.IsEnabled = false;
-            _mediaPlayerB.CommandManager.IsEnabled = false;
-
-            _playerA.SetMediaPlayer(_mediaPlayerA);
-            _playerB.SetMediaPlayer(_mediaPlayerB);
-
-            _playerControl.ActiveTransform = _playerControl.TransformA;
-        }
-
-        public async Task TogglePlayPauseAsync()
-        {
-            if (_playbackCts == null || _playbackCts.IsCancellationRequested)
+            if (_playbackTimer == null || !_playbackTimer.IsEnabled)
             {
-                // The playhead is the source of truth: resume exactly where the scrubber sits,
-                // including part-way into a clip. (Selecting a clip parks the playhead at that
-                // clip's start, so selection still plays the clip from its beginning.)
-                var at = _viewModel.CurrentStoryTime;
-                int startIdx = _viewModel.GetTimelineIndexForStoryTime(at);
-                var offset = at - _viewModel.GetSpineClipStart(startIdx);
-                if (offset < TimeSpan.Zero) offset = TimeSpan.Zero;
-                if (startIdx >= 0 && startIdx < _viewModel.TimelineNodes.Count
-                    && offset > _viewModel.TimelineNodes[startIdx].OpDuration) offset = TimeSpan.Zero;
-
-                await StartPlaybackAsync(startIdx, offset);
+                await StartPlaybackAsync();
                 return;
             }
 
             if (_isPaused)
-            {
                 ResumePlayback();
-            }
             else
-            {
                 PausePlayback();
-            }
         }
 
         private void PausePlayback()
         {
             _isPaused = true;
-            _pauseStartTime = DateTime.Now;
             _viewModel.IsPlaying = false;
-            
             if (_viewModel.IsRecordingMotion)
-            {
                 _dispatcher.TryEnqueue(() => _viewModel.IsRecordingMotion = false);
-            }
             
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            activePlayer.Pause();
-            if (_inTransition || _isPreparingTransition)
-            {
-                var otherPlayer = _isPlayerAActive ? _mediaPlayerB : _mediaPlayerA;
-                otherPlayer.Pause();
-            }
-
-            // Overlay players are driven from the per-frame render loop, which stops running
-            // entirely while paused — so they must be paused explicitly here rather than
-            // relying on the render loop to catch up to the paused state.
             for (int i = 0; i < MaxOverlayTracks; i++) _overlayPlayer[i]?.Pause();
 
             _dispatcher.TryEnqueue(() =>
             {
                 UpdateWysiwygOverlay();
-                // The render loop is stopped now, so nothing else will re-evaluate the composite:
-                // switch the PiPs back to arrangeable stills (frame + handles) explicitly.
                 RefreshComposite();
             });
         }
@@ -260,22 +160,9 @@ namespace VideoDirector.Models
         private void ResumePlayback()
         {
             _isPaused = false;
-            var pauseDuration = DateTime.Now - _pauseStartTime;
-            _opAStartTime += pauseDuration;
-            _opBStartTime += pauseDuration;
-            _transitionStartTime += pauseDuration;
+            _lastTickTime = DateTime.Now;
             _viewModel.IsPlaying = true;
             
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            activePlayer.Play();
-            if (_inTransition || _isPreparingTransition)
-            {
-                var otherPlayer = _isPlayerAActive ? _mediaPlayerB : _mediaPlayerA;
-                otherPlayer.Play();
-            }
-
-            // Resume whichever overlay tracks are currently occupied; EvaluateOverlays will
-            // re-sync their exact position on the next render tick via drift correction.
             if (_viewModel.PlaybackSpeed > 0)
             {
                 for (int i = 0; i < MaxOverlayTracks; i++)
@@ -290,628 +177,145 @@ namespace VideoDirector.Models
 
         public async Task StartPlaybackAsync(int startIndex = 0, TimeSpan startOffset = default)
         {
-            if (_viewModel.TimelineNodes.Count == 0) return;
+            if (System.Linq.Enumerable.All(_viewModel.Tracks, t => t.Clips.Count == 0)) return;
 
-            // Composite playback is Arrange mode: exit any Edit state so the whole timeline plays.
             _isEditingOverlay = false;
             _mode = EditorMode.Arrange;
             _editClip = null;
-            _editPlayer = null;
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
             _viewModel.IsEditMode = false;
             StopEditPreview();
-            StopPlayback(); // Ensure we stop cleanly first
-            var myCts = new CancellationTokenSource();
-            _playbackCts = myCts;
-            var token = myCts.Token;
+            StopPlayback();
 
             _viewModel.IsPlaying = true;
             _isPaused = false;
+            _isAnimating = true;
             
-            // Calculate CurrentStoryTime based on startIndex
-            _viewModel.CurrentStoryTime = TimeSpan.Zero;
-            for(int i=0; i<startIndex; i++)
-            {
-                _viewModel.CurrentStoryTime += _viewModel.TimelineNodes[i].OpDuration + _viewModel.TimelineNodes[i].TransitionDuration;
-            }
-            _storyTimeAtClipStart = _viewModel.CurrentStoryTime;   // baseline = clip boundary
-            // Resume mid-clip (e.g. after scrubbing): the render loop derives CurrentStoryTime as
-            // baseline + elapsed-into-clip, so it lands back on the scrubbed position.
-            if (startOffset > TimeSpan.Zero) _viewModel.CurrentStoryTime += startOffset;
-
-            // Arrange marks tracks active WITHOUT loading any video (still-only path), so clear the
-            // active set here — otherwise playback would see them as already active and skip
-            // ActivateOverlaySlot, leaving the overlay players with no source loaded.
             for (int i = 0; i < MaxOverlayTracks; i++) _activeOverlay[i] = null;
 
-            _isAnimating = true;
-            CompositionTarget.Rendering += CompositionTarget_Rendering;
-
-            try
+            if (_playbackTimer == null)
             {
-                await PlaybackLoopAsync(startIndex, token, startOffset);
+                _playbackTimer = new Microsoft.UI.Xaml.DispatcherTimer();
+                _playbackTimer.Interval = TimeSpan.FromMilliseconds(16); // ~60fps
+                _playbackTimer.Tick += PlaybackTimer_Tick;
             }
-            catch (OperationCanceledException)
-            {
-                // Playback stopped or skipped
-            }
-            finally
-            {
-                if (_playbackCts == myCts)
-                {
-                    bool wasCancelled = myCts.IsCancellationRequested;
-                    StopPlayback(false);
-
-                    if (!wasCancelled)
-                    {
-                        // Reaching the end used to blank the main players and silently drop into
-                        // Edit mode — the same trap as before (Play then previews one clip and the
-                        // playhead looks frozen). Stay in Arrange and just re-render the composite.
-                        _dispatcher.TryEnqueue(() => RefreshComposite());
-                    }
-                }
-            }
+            _lastTickTime = DateTime.Now;
+            _playbackTimer.Start();
         }
 
         public void StopPlayback(bool cancelRecording = true)
         {
-            _playbackCts?.Cancel();
-            _isAnimating = false;
-            _isPreparingTransition = false;
-            CompositionTarget.Rendering -= CompositionTarget_Rendering;
-            CompositionTarget.Rendering -= RecordMotion_Rendering;
+            _playbackTimer?.Stop();
             
-            _mediaPlayerA?.Pause();
-            _mediaPlayerB?.Pause();
             HideAllOverlays();
             
             if (_viewModel != null)
             {
                 _viewModel.IsPlaying = false;
                 _isPaused = false;
+                _isAnimating = false;
                 if (cancelRecording && _viewModel.IsRecordingMotion)
                 {
                     _dispatcher.TryEnqueue(() => _viewModel.IsRecordingMotion = false);
                 }
             }
 
-            // Stopping while arranging (not on the way into Edit, which sets _mode first) should
-            // leave the static composite on screen — HideAllOverlays just tore the PiPs down, so
-            // rebuild them (with their handles) at the current story time for continued arranging.
             if (_mode == EditorMode.Arrange)
             {
                 _dispatcher.TryEnqueue(() => EvaluateOverlays(_viewModel.CurrentStoryTime));
             }
         }
 
-        public void SkipNext()
+        private void PlaybackTimer_Tick(object sender, object e)
         {
-            if (_viewModel.SelectedTimelineNode != null)
+            if (_isPaused) return;
+
+            var now = DateTime.Now;
+            var elapsed = now - _lastTickTime;
+            _lastTickTime = now;
+            
+            // Stall the clock if we're waiting for media to load, so clips don't skip the first 500ms
+            if (System.Threading.Interlocked.CompareExchange(ref _pendingMediaOpens, 0, 0) > 0) return;
+            
+            // Also stall the clock if any active player is buffering or opening, to prevent the clock
+            // from running ahead and triggering continuous drift correction seeks (which causes stutter).
+            for (int i = 0; i < MaxOverlayTracks; i++)
             {
-                int idx = _viewModel.TimelineNodes.IndexOf(_viewModel.SelectedTimelineNode as CinematicOperation);
-                if (idx < _viewModel.TimelineNodes.Count - 1)
+                if (_activeOverlay[i] != null && _overlayPlayer[i]?.PlaybackSession != null)
                 {
-                    _ = StartPlaybackAsync(idx + 1);
+                    var state = _overlayPlayer[i].PlaybackSession.PlaybackState;
+                    if (state == MediaPlaybackState.Buffering || state == MediaPlaybackState.Opening)
+                    {
+                        return; // stall clock
+                    }
                 }
             }
-        }
 
-        public void SkipPrevious()
-        {
-            if (_viewModel.SelectedTimelineNode != null)
+            bool drivenByHardware = false;
+            var mainOp = _activeOverlay[0];
+            var mainPlayer = _overlayPlayer[0];
+            
+            if (mainOp != null && !mainOp.IsStill && mainPlayer?.PlaybackSession != null)
             {
-                int idx = _viewModel.TimelineNodes.IndexOf(_viewModel.SelectedTimelineNode as CinematicOperation);
-                if (idx > 0) idx--;
-                _ = StartPlaybackAsync(idx);
-            }
-        }
-
-        private async Task PlaybackLoopAsync(int startIndex, CancellationToken token, TimeSpan startOffset = default)
-        {
-            bool startedByTransition = false;
-            TimeSpan previousTransitionDuration = TimeSpan.Zero;
-            int currentIndex = startIndex;
-
-            while (true)
-            {
-                for (int i = currentIndex; i < _viewModel.TimelineNodes.Count; i++)
+                double clipSpeed = mainOp.PlaybackSpeed > 0 ? mainOp.PlaybackSpeed : 1.0;
+                double videoElapsed = (mainPlayer.PlaybackSession.Position - mainOp.VideoStartTime).TotalSeconds / clipSpeed;
+                if (videoElapsed >= 0 && videoElapsed <= mainOp.OpDuration.TotalSeconds + 0.5)
                 {
-                    token.ThrowIfCancellationRequested();
-                    var op = _viewModel.TimelineNodes[i] as CinematicOperation;
-                    
-                    CurrentPlayingOperation = op;
-                    _dispatcher.TryEnqueue(() => 
-                    {
-                        _viewModel.SelectedTimelineNode = op;
-                    });
-
-                    
-                    var nextOp = i + 1 < _viewModel.TimelineNodes.Count ? _viewModel.TimelineNodes[i + 1] as CinematicOperation : null;
-                    if (nextOp == null && _viewModel.IsLooping && _viewModel.TimelineNodes.Count > 0)
-                    {
-                        nextOp = _viewModel.TimelineNodes[0] as CinematicOperation;
-                    }
-                    bool hasNextTransition = nextOp != null;
-
-                    _skipTcs = new TaskCompletionSource<bool>();
-                    
-                    // 1. Play the main portion of the clip
-                    await PlayOperationAsync(op, nextOp, startedByTransition, hasNextTransition, previousTransitionDuration, token, startOffset);
-                    startOffset = TimeSpan.Zero; // only the first clip resumes mid-way
-                    
-                    // Advance the clip-start baseline by exactly this clip's story contribution.
-                    // The render loop drives CurrentStoryTime continuously off this baseline, so
-                    // accumulate into the baseline (not CurrentStoryTime) — adding to
-                    // CurrentStoryTime here would double-count, since the render loop has already
-                    // advanced it to this clip's end.
-                    if (_skipTcs.Task.IsCompleted)
-                    {
-                        // Skipped!
-                        startedByTransition = false;
-                        _storyTimeAtClipStart += op.OpDuration + op.TransitionDuration;
-                        _viewModel.CurrentStoryTime = _storyTimeAtClipStart;
-                        continue;
-                    }
-                    _storyTimeAtClipStart += op.OpDuration;
-                    _viewModel.CurrentStoryTime = _storyTimeAtClipStart;
-
-                    // 2. Play the transition into the next clip if applicable
-                    if (hasNextTransition)
-                    {
-                        await PlayTransitionAsync(op, nextOp, token);
-                        startedByTransition = true;
-                        previousTransitionDuration = op.TransitionDuration;
-                        _storyTimeAtClipStart += op.TransitionDuration;
-                        _viewModel.CurrentStoryTime = _storyTimeAtClipStart;
-                    }
-                    else
-                    {
-                        startedByTransition = false;
-                    }
+                    // Drive the master timeline clock directly from the Track 1 hardware decoder.
+                    // This prevents the UI thread (which can drop frames during heavy Ken Burns zooming)
+                    // from running ahead and forcing stuttering drift-correction seeks.
+                    _viewModel.CurrentStoryTime = mainOp.StartTime + TimeSpan.FromSeconds(videoElapsed);
+                    drivenByHardware = true;
                 }
+            }
 
+            if (!drivenByHardware)
+            {
+                _viewModel.CurrentStoryTime += TimeSpan.FromSeconds(elapsed.TotalSeconds * _viewModel.PlaybackSpeed);
+            }
+
+            if (_viewModel.TotalStoryTime > TimeSpan.Zero && _viewModel.CurrentStoryTime >= _viewModel.TotalStoryTime)
+            {
                 if (_viewModel.IsLooping)
                 {
-                    currentIndex = 0;
                     _viewModel.CurrentStoryTime = TimeSpan.Zero;
-                    _storyTimeAtClipStart = TimeSpan.Zero;
                 }
                 else
                 {
-                    break;
-                }
-            }
-        }
-
-        private async Task PlayOperationAsync(CinematicOperation op, CinematicOperation nextOp, bool startedByTransition, bool hasNextTransition, TimeSpan previousTransitionDuration, CancellationToken token, TimeSpan startOffset = default)
-        {
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var activeElement = _isPlayerAActive ? _playerA : _playerB;
-            var standbyPlayer = _isPlayerAActive ? _mediaPlayerB : _mediaPlayerA;
-            var standbyElement = _isPlayerAActive ? _playerB : _playerA;
-
-            if (!startedByTransition)
-            {
-                if (!string.IsNullOrWhiteSpace(op.FilePath))
-                {
-                    if (activePlayer.Source == null || !string.Equals((activePlayer.Source as MediaSource)?.Uri?.LocalPath, op.FilePath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var tcs = new TaskCompletionSource<bool>();
-                        void OnMediaOpened(MediaPlayer sender, object args) => tcs.TrySetResult(true);
-                        activePlayer.MediaOpened += OnMediaOpened;
-
-                        activePlayer.Source = MediaSource.CreateFromUri(new Uri(op.FilePath));
-                        
-                        await Task.WhenAny(tcs.Task, WaitWithPauseAsync(TimeSpan.FromSeconds(2), token));
-                        activePlayer.MediaOpened -= OnMediaOpened;
-                    }
-
-                    activePlayer.PlaybackSession.Position = op.VideoStartTime + startOffset;
-                    
-                    double combinedSpeed = _viewModel.PlaybackSpeed * op.PlaybackSpeed;
-                    activePlayer.PlaybackSession.PlaybackRate = combinedSpeed;
-                    activePlayer.Volume = op.Volume;
-                    
-                    if (!_isPaused && combinedSpeed > 0) activePlayer.Play();
-                    else if (combinedSpeed == 0) activePlayer.Pause();
-                }
-
-                _dispatcher.TryEnqueue(() =>
-                {
-                    activeElement.Opacity = 1;
-                    standbyElement.Opacity = 0;
-                });
-            }
-            
-            // Preload next operation into standby player to ensure gapless playback
-            if (hasNextTransition && nextOp != null && !string.IsNullOrWhiteSpace(nextOp.FilePath))
-            {
-                if (standbyPlayer.Source == null || !string.Equals((standbyPlayer.Source as MediaSource)?.Uri?.LocalPath, nextOp.FilePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    standbyPlayer.Source = MediaSource.CreateFromUri(new Uri(nextOp.FilePath));
-                    standbyPlayer.PlaybackSession.Position = nextOp.VideoStartTime;
-                    standbyPlayer.Volume = 0.0;
-                    standbyPlayer.Pause();
-                }
-            }
-            
-            // Back-date by startOffset so elapsed accounting matches the seeked-in position and
-            // the clip still ends at its proper boundary.
-            var opStartTime = startedByTransition ? DateTime.Now - previousTransitionDuration : DateTime.Now - startOffset;
-            var totalVisibleDuration = op.OpDuration + previousTransitionDuration + (hasNextTransition ? op.TransitionDuration : TimeSpan.Zero);
-            
-            double globalSpeed = _viewModel.PlaybackSpeed == 0 ? 1.0 : _viewModel.PlaybackSpeed;
-            if (globalSpeed != 1.0)
-            {
-                totalVisibleDuration = TimeSpan.FromSeconds(totalVisibleDuration.TotalSeconds / globalSpeed);
-            }
-            
-            if (_isPlayerAActive)
-            {
-                _opA = op;
-                _opADuration = totalVisibleDuration;
-                _opAStartTime = opStartTime;
-            }
-            else
-            {
-                _opB = op;
-                _opBDuration = totalVisibleDuration;
-                _opBStartTime = opStartTime;
-            }
-            
-            _inTransition = false;
-
-            TimeSpan elapsed = TimeSpan.Zero;
-            DateTime lastTick = DateTime.Now;
-
-            // Stills (image files or speed-0 frozen frames) have no advancing decode position, so
-            // they can only be timed by wall clock. Real videos end at their trimmed out-point
-            // (decode position) — but with a wall-clock backstop: a slow seek deep into a long
-            // source (e.g. a 50-min .mkv) can leave Position lagging for seconds, and without the
-            // backstop the clip runs past its out-point until the file ends. The two measures are
-            // designed to coincide across every speed combination, so breaking on whichever fires
-            // first is frame-accurate in the normal case and self-correcting when Position stalls.
-            bool isStill = op.IsStill;
-
-            while (true)
-            {
-                token.ThrowIfCancellationRequested();
-
-                var now = DateTime.Now;
-                if (!_isPaused)
-                {
-                    double currentSpeed = globalSpeed == 0 ? 1.0 : globalSpeed;
-                    elapsed += TimeSpan.FromSeconds((now - lastTick).TotalSeconds * currentSpeed);
-
-                    if (isStill)
-                    {
-                        if (elapsed >= op.OpDuration) break;
-                    }
-                    else
-                    {
-                        if (activePlayer.PlaybackSession.Position >= op.VideoEndTime || elapsed >= op.OpDuration) break;
-                    }
-                }
-                lastTick = now;
-
-                // Polled at ~1 frame instead of 50ms so a clip can't keep playing noticeably
-                // past its nominal end before the transition machinery notices — that overshoot
-                // window was a source of transient story-time inaccuracy at clip boundaries.
-                await Task.Delay(15, token);
-            }
-
-            if (!hasNextTransition)
-            {
-                activePlayer.Pause();
-                _isPlayerAActive = !_isPlayerAActive;
-                _playerControl.ActiveTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
-            }
-        }
-
-        private async Task PlayTransitionAsync(CinematicOperation op, CinematicOperation nextOp, CancellationToken token)
-        {
-            var fadingOutPlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var fadingOutElement = _isPlayerAActive ? _playerA : _playerB;
-            var fadingOutGrid = _isPlayerAActive ? _playerControl.GridA : _playerControl.GridB;
-            
-            _isPreparingTransition = true;
-            _isPlayerAActive = !_isPlayerAActive; // Swap to next
-            _playerControl.ActiveTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
-
-            // Update _opA/_opB atomically with the _isPlayerAActive flip above (not after the
-            // awaits below) — otherwise there's a window where _isPlayerAActive already points
-            // at the next clip's player but _opA/_opB still reference the previous clip, which
-            // the per-frame story-time calc reads and briefly computes a garbage value from.
-            if (nextOp != null)
-            {
-                var nextTotalDuration = nextOp.OpDuration + op.TransitionDuration;
-
-                double opGlobalSpeed = _viewModel.PlaybackSpeed == 0 ? 1.0 : _viewModel.PlaybackSpeed;
-                if (opGlobalSpeed != 1.0)
-                {
-                    nextTotalDuration = TimeSpan.FromSeconds(nextTotalDuration.TotalSeconds / opGlobalSpeed);
-                }
-
-                if (!_isPlayerAActive)
-                {
-                    _opB = nextOp;
-                    _opBDuration = nextTotalDuration;
-                    _opBStartTime = DateTime.Now;
-                }
-                else
-                {
-                    _opA = nextOp;
-                    _opADuration = nextTotalDuration;
-                    _opAStartTime = DateTime.Now;
+                    _viewModel.CurrentStoryTime = _viewModel.TotalStoryTime;
+                    StopPlayback(false);
+                    return;
                 }
             }
 
-            var fadingInPlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var fadingInElement = _isPlayerAActive ? _playerA : _playerB;
-            var fadingInGrid = _isPlayerAActive ? _playerControl.GridA : _playerControl.GridB;
-
-            if (nextOp != null && !string.IsNullOrWhiteSpace(nextOp.FilePath))
-            {
-                if (fadingInPlayer.Source == null || !string.Equals((fadingInPlayer.Source as MediaSource)?.Uri?.LocalPath, nextOp.FilePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    var tcs = new TaskCompletionSource<bool>();
-                    Windows.Foundation.TypedEventHandler<MediaPlayer, object> handler = (s, e) => tcs.TrySetResult(true);
-                    fadingInPlayer.MediaOpened += handler;
-                    
-                    fadingInPlayer.Source = MediaSource.CreateFromUri(new Uri(nextOp.FilePath));
-                    
-                    await Task.WhenAny(tcs.Task, Task.Delay(1500));
-                    fadingInPlayer.MediaOpened -= handler;
-                }
-
-                fadingInPlayer.PlaybackSession.Position = nextOp.VideoStartTime;
-                
-                double combinedNextSpeed = _viewModel.PlaybackSpeed * nextOp.PlaybackSpeed;
-                fadingInPlayer.PlaybackSession.PlaybackRate = combinedNextSpeed;
-                fadingInPlayer.Volume = 0.0;
-                
-                if (!_isPaused && combinedNextSpeed > 0) fadingInPlayer.Play();
-                else if (combinedNextSpeed == 0) fadingInPlayer.Pause();
-            }
-            
-            if (op.TransitionDuration <= TimeSpan.Zero || op.TransitionStyle == TransitionStyle.HardSnap)
-            {
-                _dispatcher.TryEnqueue(() =>
-                {
-                    Canvas.SetZIndex(fadingInGrid, 1);
-                    Canvas.SetZIndex(fadingOutGrid, 0);
-                    fadingInElement.Opacity = 1.0;
-                });
-                
-                fadingInPlayer.Volume = nextOp?.Volume ?? 1.0;
-
-                _ = Task.Delay(150).ContinueWith(_ =>
-                {
-                    _dispatcher.TryEnqueue(() => fadingOutElement.Opacity = 0.0);
-                    fadingOutPlayer.Pause();
-                });
-                _isPreparingTransition = false;
-                return;
-            }
-
-            _dispatcher.TryEnqueue(() =>
-            {
-                Canvas.SetZIndex(fadingOutGrid, 1); // Current clip on top for Transition Out
-                Canvas.SetZIndex(fadingInGrid, 0);  // Next clip underneath
-            });
-
-            _fadeOutElement = fadingOutElement;
-            _fadeInElement = fadingInElement;
-            _fadeOutVolume = op.Volume;
-            _fadeInVolume = nextOp?.Volume ?? 1.0;
-            _isPreparingTransition = false;
-            _inTransition = true;
-            _transitionStyle = op.TransitionStyle;
-            _renderDuration = op.TransitionDuration;
-            _transitionStartTime = DateTime.Now;
-
-            double activeGlobalSpeed = _viewModel.PlaybackSpeed == 0 ? 1.0 : _viewModel.PlaybackSpeed;
-            TimeSpan realTransitionDuration = op.TransitionDuration;
-            if (activeGlobalSpeed != 1.0)
-            {
-                realTransitionDuration = TimeSpan.FromSeconds(realTransitionDuration.TotalSeconds / activeGlobalSpeed);
-            }
-
-            await WaitWithPauseAsync(realTransitionDuration, token);
-
-            fadingOutPlayer.Pause();
-            fadingOutPlayer.Volume = 1.0;
-            
-            _dispatcher.TryEnqueue(() =>
-            {
-                fadingInElement.Opacity = 1.0;
-                fadingInPlayer.Volume = nextOp?.Volume ?? 1.0;
-                fadingOutElement.Opacity = 0.0;
-            });
-            _inTransition = false;
-        }
-
-        private async Task WaitWithPauseAsync(TimeSpan duration, CancellationToken token)
-        {
-            var targetTime = DateTime.Now + duration;
-            while (DateTime.Now < targetTime)
-            {
-                token.ThrowIfCancellationRequested();
-                if (_isPaused)
-                {
-                    var pauseStart = DateTime.Now;
-                    await Task.Delay(50, token);
-                    targetTime += (DateTime.Now - pauseStart);
-                    continue;
-                }
-                
-                var remaining = targetTime - DateTime.Now;
-                if (remaining <= TimeSpan.Zero) break;
-                
-                var delay = remaining > TimeSpan.FromMilliseconds(50) ? TimeSpan.FromMilliseconds(50) : remaining;
-                await Task.Delay(delay, token);
-            }
-        }
-
-        private TransitionStyle _transitionStyle;
-
-        private void CompositionTarget_Rendering(object? sender, object e)
-        {
-            if (!_isAnimating || _isPaused) return;
-            
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            if (activePlayer != null && activePlayer.PlaybackSession != null)
-            {
-                _viewModel.CurrentOperationTime = activePlayer.PlaybackSession.Position;
-                _viewModel.CurrentOperationDuration = activePlayer.PlaybackSession.NaturalDuration;
-            }
-
-            if (_inTransition)
-            {
-                var transElapsed = DateTime.Now - _transitionStartTime;
-                var transProgress = _renderDuration.TotalMilliseconds > 0 
-                    ? Math.Clamp(transElapsed.TotalMilliseconds / _renderDuration.TotalMilliseconds, 0, 1) 
-                    : 1;
-
-                if (_transitionStyle == TransitionStyle.DipToColor)
-                {
-                    if (transProgress < 0.5)
-                    {
-                        _fadeOutElement.Opacity = 1.0 - (transProgress * 2.0);
-                        _fadeInElement.Opacity = 0.0;
-                    }
-                    else
-                    {
-                        _fadeOutElement.Opacity = 0.0;
-                        _fadeInElement.Opacity = (transProgress - 0.5) * 2.0;
-                    }
-                }
-                else if (_transitionStyle == TransitionStyle.CinematicBridge)
-                {
-                    double smoothProgress = transProgress * transProgress * (3.0 - 2.0 * transProgress);
-                    _fadeOutElement.Opacity = 1.0 - smoothProgress;
-                    _fadeInElement.Opacity = 1.0; // Keep bottom opaque
-                }
-                else
-                {
-                    _fadeOutElement.Opacity = 1.0 - transProgress; // Fade out top clip
-                    _fadeInElement.Opacity = 1.0; // Keep bottom clip fully opaque
-                }
-
-                // Audio Crossfade
-                var fadingOutPlayer = _fadeOutElement == _playerA ? _mediaPlayerA : _mediaPlayerB;
-                var fadingInPlayer = _fadeInElement == _playerA ? _mediaPlayerA : _mediaPlayerB;
-                
-                fadingOutPlayer.Volume = (1.0 - transProgress) * _fadeOutVolume;
-                fadingInPlayer.Volume = transProgress * _fadeInVolume;
-            }
-
-            void UpdateSpatial(CinematicOperation op, Windows.Media.Playback.MediaPlayer player, DateTime startTime, TimeSpan duration, Microsoft.UI.Xaml.Media.CompositeTransform transform)
-            {
-                if (op == null || transform == null) return;
-                double spatialProgress = 1.0;
-                if (duration.TotalMilliseconds > 0)
-                {
-                    if (!op.IsStill && player?.PlaybackSession != null)
-                    {
-                        var actualElapsed = player.PlaybackSession.Position - op.VideoStartTime;
-                        spatialProgress = Math.Clamp(actualElapsed.TotalMilliseconds / duration.TotalMilliseconds, 0.0, 1.0);
-                    }
-                    else
-                    {
-                        var spatialElapsed = DateTime.Now - startTime;
-                        spatialProgress = Math.Clamp(spatialElapsed.TotalMilliseconds / duration.TotalMilliseconds, 0.0, 1.0);
-                    }
-                }
-                ApplyMarksAtProgress(op, spatialProgress, transform);
-            }
-
-            UpdateSpatial(_opA, _mediaPlayerA, _opAStartTime, _opADuration, _playerControl.TransformA);
-            UpdateSpatial(_opB, _mediaPlayerB, _opBStartTime, _opBDuration, _playerControl.TransformB);
-
-            // CurrentStoryTime only gets bumped at clip boundaries elsewhere in this class —
-            // it does not tick on its own. Advance it continuously here from the active
-            // player's real decode position, or overlay drift-correction (which compares
-            // against this value every frame) sees a stale target and fights the overlay's
-            // real playback, which is what caused the overlay stutter.
-            var storyTimePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var storyTimeOp = _isPlayerAActive ? _opA : _opB;
-            var storyTimeStart = _isPlayerAActive ? _opAStartTime : _opBStartTime;
-            if (storyTimeOp != null)
-            {
-                // Video position advances at the clip's own playback rate, but story time is
-                // measured in real sequence seconds — a clip at 2x contributes half as much
-                // story time as video watched. Divide by the clip speed so the per-frame
-                // advance maxes out at exactly OpDuration, matching the boundary accounting.
-                double videoElapsed;
-                if (!storyTimeOp.IsStill && storyTimePlayer?.PlaybackSession != null)
-                {
-                    double clipSpeed = storyTimeOp.PlaybackSpeed > 0 ? storyTimeOp.PlaybackSpeed : 1.0;
-                    videoElapsed = (storyTimePlayer.PlaybackSession.Position - storyTimeOp.VideoStartTime).TotalSeconds / clipSpeed;
-                }
-                else
-                {
-                    videoElapsed = (DateTime.Now - storyTimeStart).TotalSeconds;
-                }
-                if (videoElapsed < 0) videoElapsed = 0;
-                _viewModel.CurrentStoryTime = _storyTimeAtClipStart + TimeSpan.FromSeconds(videoElapsed);
-            }
-
-            // Evaluate overlay clips against master story time
             EvaluateOverlays(_viewModel.CurrentStoryTime);
-
-            var activeOp = _isPlayerAActive ? _opA : _opB;
             
-            UpdateTimelineNodesIsPlayingState(activeOp);
-        }
-
-        private void UpdateTimelineNodesIsPlayingState(CinematicOperation activeOp)
-        {
-            if (_viewModel.TimelineNodes != null)
+            if ((now - _lastTelemetryUpdate).TotalMilliseconds >= 100)
             {
-                foreach (var node in _viewModel.TimelineNodes)
-                {
-                    bool isPlaying = (node == activeOp);
-                    if (node.IsPlaying != isPlaying)
-                    {
-                        node.IsPlaying = isPlaying;
-                    }
-                }
-            }
-
-            // The telemetry HUD is diagnostic text a human can't usefully read at 60fps —
-            // throttle it to ~10/sec instead of recomputing/re-laying-out text every frame,
-            // which otherwise competes with video decode for CPU during overlay playback.
-            if ((DateTime.Now - _lastTelemetryUpdate).TotalMilliseconds >= 100)
-            {
-                _lastTelemetryUpdate = DateTime.Now;
+                _lastTelemetryUpdate = now;
                 UpdateTelemetryOverlay();
             }
         }
 
-        private DateTime _lastTelemetryUpdate = DateTime.MinValue;
+        public void SkipNext() { }
 
-        private void UpdateTelemetryOverlay(bool isEditMode = false)
+        public void SkipPrevious() { }
+
+        
+
+
+        private DateTime _lastTelemetryUpdate = DateTime.MinValue;
+private void UpdateTelemetryOverlay(bool isEditMode = false)
         {
             if (_viewModel.IsTelemetryVisible)
             {
-                // Telemetry follows the SUBJECT: in Edit that's the edited clip, its player, and its
-                // transform — whatever track it's on. Reading the Track-1 player/transform was why
-                // editing an overlay showed irrelevant numbers.
-                var activeTransform = _playerControl.ActiveTransform
-                                      ?? (_isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB);
-
+                var activeTransform = _playerControl.ActiveTransform;
                 _playerControl.TelemetryOverlay.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
 
-                var currentActivePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-                var activeOp = _isPlayerAActive ? _opA : _opB;
-                if (isEditMode)
-                {
-                    activeOp = _viewModel.SelectedClip as CinematicOperation;
-                    if (_editPlayer != null) currentActivePlayer = _editPlayer;
-                }
+                var currentActivePlayer = isEditMode ? _overlayPlayer[0] : null;
+                var activeOp = isEditMode ? _viewModel.SelectedClip as CinematicOperation : null;
 
-                string currentFileName = activeOp != null ? System.IO.Path.GetFileName(activeOp.FilePath) : "Transition";
+                string currentFileName = activeOp != null ? System.IO.Path.GetFileName(activeOp.FilePath) : "";
                 
                 var currentStoryTime = _viewModel.CurrentStoryTime;
                 var clipEndTime = activeOp != null ? (activeOp.VideoStartTime + activeOp.OpDuration) : TimeSpan.Zero;
@@ -949,7 +353,6 @@ namespace VideoDirector.Models
                     double txc = activeTransform != null ? activeTransform.TranslateX : 0.0;
                     double tyc = activeTransform != null ? activeTransform.TranslateY : 0.0;
 
-                    // Start Mark Box
                     double St_s = activeOp.StartMark.Scale;
                     double txt_s = activeOp.StartMark.X;
                     double tyt_s = activeOp.StartMark.Y;
@@ -958,7 +361,6 @@ namespace VideoDirector.Models
                     double startWidth = W * (Sc / St_s);
                     double startHeight = H * (Sc / St_s);
 
-                    // End Mark Box
                     double St_e = activeOp.EndMark.Scale;
                     double txt_e = activeOp.EndMark.X;
                     double tyt_e = activeOp.EndMark.Y;
@@ -1021,25 +423,24 @@ namespace VideoDirector.Models
             double W = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
             double H = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
 
-            // If we're editing an overlay track, the crop box aspect ratio must match the PiP's aspect ratio.
+            // Every clip (Track 1 or overlay) frames its content into a placement box.
+            // A placement of 1.0x1.0 means it fills the 16:9 workspace.
+            double pipAspect = (16.0 / 9.0) * (op.PlacementWidth / op.PlacementHeight);
+            double videoAspect = W / H;
+
             double boxW = W;
             double boxH = H;
-            if (_viewModel.IsOverlaySelected)
-            {
-                double pipAspect = (16.0 / 9.0) * (op.PlacementWidth / op.PlacementHeight);
-                double videoAspect = W / H;
 
-                // When Scale=1 (UniformToFill), the PiP crop box fits the video on one axis.
-                if (pipAspect > videoAspect)
-                {
-                    boxW = W;
-                    boxH = W / pipAspect;
-                }
-                else
-                {
-                    boxH = H;
-                    boxW = H * pipAspect;
-                }
+            // When Scale=1 (UniformToFill), the crop box fits the video on one axis.
+            if (pipAspect > videoAspect)
+            {
+                boxW = W;
+                boxH = W / pipAspect;
+            }
+            else
+            {
+                boxH = H;
+                boxW = H * pipAspect;
             }
 
             void DrawRect(Microsoft.UI.Xaml.Shapes.Rectangle rect, SpatialMark targetMark, bool show)
@@ -1087,151 +488,11 @@ namespace VideoDirector.Models
             var natural = player.PlaybackSession.NaturalDuration;
             if (natural > TimeSpan.Zero) op.SourceDuration = natural;
         }
-
-        public async void EnterEditMode(CinematicOperation op, EditTarget target)
+public async void SeekCompositeToStoryTime(TimeSpan t)
         {
-            StopPlayback();
-            UpdateTimelineNodesIsPlayingState(op);
-
-            if (string.IsNullOrWhiteSpace(op.FilePath)) return;
-
-            // Track 1 clip entering Edit mode: content input + clip-scoped preview target.
-            // isOverlayEdit:false so HideAllOverlays (in StopPlayback above) releases BOTH overlay
-            // slots — only the Track 1 clip is shown, nothing on top of it.
-            SetEditModeState(op, _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB, isOverlayEdit: false);
-            HideAllOverlays();
-
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var activeElement = _isPlayerAActive ? _playerA : _playerB;
-            var standbyElement = _isPlayerAActive ? _playerB : _playerA;
-            var activeTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
-
-            if (activePlayer.Source == null || !string.Equals((activePlayer.Source as MediaSource)?.Uri?.LocalPath, op.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                var tcs = new TaskCompletionSource<bool>();
-                Windows.Foundation.TypedEventHandler<MediaPlayer, object> handler = (s, e) => tcs.TrySetResult(true);
-                activePlayer.MediaOpened += handler;
-                
-                activePlayer.Source = MediaSource.CreateFromUri(new Uri(op.FilePath));
-                
-                await Task.WhenAny(tcs.Task, Task.Delay(1500));
-                activePlayer.MediaOpened -= handler;
-            }
-            
-            _dispatcher.TryEnqueue(() =>
-            {
-                activeElement.Opacity = 1;
-                standbyElement.Opacity = 0;
-            });
-            
-            activePlayer.Pause();
-            
-            TimeSpan globalStartTime = TimeSpan.Zero;
-            foreach (var node in _viewModel.TimelineNodes)
-            {
-                if (node == op) break;
-                if (node is CinematicOperation prevOp)
-                {
-                    globalStartTime += prevOp.OpDuration + prevOp.TransitionDuration;
-                }
-            }
-            
-            _dispatcher.TryEnqueue(() =>
-            {
-                _viewModel.CurrentStoryTime = globalStartTime;
-            });
-
-            SpatialMark markToEdit;
-            if (target == EditTarget.Start)
-            {
-                activePlayer.PlaybackSession.Position = op.VideoStartTime;
-                markToEdit = op.StartMark;
-            }
-            else if (target == EditTarget.Mid && op.MidMark != null)
-            {
-                activePlayer.PlaybackSession.Position = op.VideoStartTime + TimeSpan.FromSeconds(op.OpDuration.TotalSeconds / 2);
-                markToEdit = op.MidMark;
-            }
-            else
-            {
-                activePlayer.PlaybackSession.Position = op.VideoStartTime + op.OpDuration;
-                markToEdit = op.EndMark;
-            }
-            
-            _dispatcher.TryEnqueue(() =>
-            {
-                if (activePlayer.PlaybackSession != null)
-                {
-                    BackfillSourceDuration(op, activePlayer);
-                    _viewModel.CurrentOperationDuration = activePlayer.PlaybackSession.NaturalDuration;
-                    _viewModel.CurrentOperationTime = activePlayer.PlaybackSession.Position;
-                }
-                activeTransform.ScaleX = markToEdit.Scale;
-                activeTransform.ScaleY = markToEdit.Scale;
-                activeTransform.TranslateX = markToEdit.X;
-                activeTransform.TranslateY = markToEdit.Y;
-                _playerControl.ActiveTransform = activeTransform;
-                UpdateWysiwygOverlay();
-            });
-        }
-
-        // Static composite seek (§7G): show the composite at story-time t WITHOUT playing — the
-        // spine frame (main player seeked to the right clip + offset, marks applied) plus the
-        // overlays active then. Drives the global scrubber. A drag on the timeline means "navigate
-        // the whole thing", so if we were in Edit we drop back to Arrange first (once — the mode
-        // flip self-limits repeat calls).
-        public async void SeekCompositeToStoryTime(TimeSpan t)
-        {
-            // Pausing leaves the playback loop alive (_isAnimating stays true, _isPaused flips),
-            // so guarding on _isAnimating alone made the scrubber dead after play->pause until
-            // something else called StopPlayback. Scrubbing while paused means "take over": end
-            // the playback loop and settle into Arrange at the scrubbed point.
-            if (_isAnimating)
-            {
-                if (!_isPaused) return;   // actively playing — don't fight it
-                StopPlayback();
-            }
             if (_mode != EditorMode.Arrange) ExitToArrange();
-
-            var nodes = _viewModel.TimelineNodes;
-            if (nodes.Count == 0) return;
             if (t < TimeSpan.Zero) t = TimeSpan.Zero;
             _viewModel.CurrentStoryTime = t;
-
-            int index = _viewModel.GetTimelineIndexForStoryTime(t);
-            if (index < 0 || index >= nodes.Count) return;
-            var op = nodes[index];
-            if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) return;
-
-            TimeSpan offset = t - _viewModel.GetSpineClipStart(index);
-            if (offset < TimeSpan.Zero) offset = TimeSpan.Zero;
-            if (offset > op.OpDuration) offset = op.OpDuration;
-
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var activeElement = _isPlayerAActive ? _playerA : _playerB;
-            var standbyElement = _isPlayerAActive ? _playerB : _playerA;
-            var activeTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
-
-            if (activePlayer.Source == null || !string.Equals((activePlayer.Source as MediaSource)?.Uri?.LocalPath, op.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                var tcs = new TaskCompletionSource<bool>();
-                Windows.Foundation.TypedEventHandler<MediaPlayer, object> handler = (s, e) => tcs.TrySetResult(true);
-                activePlayer.MediaOpened += handler;
-                activePlayer.Source = MediaSource.CreateFromUri(new Uri(op.FilePath));
-                await Task.WhenAny(tcs.Task, Task.Delay(1500));
-                activePlayer.MediaOpened -= handler;
-            }
-
-            activeElement.Opacity = 1;
-            standbyElement.Opacity = 0;
-            activePlayer.Pause();
-            if (activePlayer.PlaybackSession != null)
-                activePlayer.PlaybackSession.Position = op.VideoStartTime + offset;
-
-            double progress = op.OpDuration.TotalMilliseconds > 0 ? offset.TotalMilliseconds / op.OpDuration.TotalMilliseconds : 0;
-            ApplyMarksAtProgress(op, progress, activeTransform);
-            _playerControl.ActiveTransform = activeTransform;
-
             EvaluateOverlays(t);
         }
 
@@ -1241,18 +502,12 @@ namespace VideoDirector.Models
         {
             if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) return;
             
-            _playbackCts?.Cancel();
-            _playbackCts = null;
-            _isAnimating = false;
-            CompositionTarget.Rendering -= CompositionTarget_Rendering;
-            CompositionTarget.Rendering -= RecordMotion_Rendering;
-            
-            _mediaPlayerB?.Pause();
+            StopPlayback();
             
             op.RecordedPath.Clear();
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            var activeElement = _isPlayerAActive ? _playerA : _playerB;
-            var activeTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
+            var activePlayer = _overlayPlayer[0];
+            var activeElement = _playerControl.OverlayVisuals[0].Grid;
+            var activeTransform = _playerControl.OverlayVisuals[0].Transform;
 
             if (activePlayer.Source == null || !string.Equals((activePlayer.Source as MediaSource)?.Uri?.LocalPath, op.FilePath, StringComparison.OrdinalIgnoreCase))
             {
@@ -1263,14 +518,6 @@ namespace VideoDirector.Models
                 await Task.WhenAny(tcs.Task, Task.Delay(1500));
                 activePlayer.MediaOpened -= handler;
             }
-
-            _dispatcher.TryEnqueue(() =>
-            {
-                var standbyElement = _isPlayerAActive ? _playerB : _playerA;
-                activeElement.Opacity = 1;
-                standbyElement.Opacity = 0;
-                _playerControl.ActiveTransform = activeTransform;
-            });
 
             activePlayer.PlaybackSession.Position = op.VideoStartTime;
             activePlayer.PlaybackSession.PlaybackRate = _viewModel.PlaybackSpeed;
@@ -1284,68 +531,56 @@ namespace VideoDirector.Models
                 _dispatcher.TryEnqueue(() => _viewModel.IsPlaying = true);
             }
             
-            _isAnimating = true;
-            _opA = op;
             _recordStartTime = DateTime.Now;
-            
-            // CRITICAL: Initialize ActiveTransform so input handlers and the recording loop can function
-            _playerControl.ActiveTransform = _isPlayerAActive ? _playerControl.TransformA : _playerControl.TransformB;
+            _editClip = op;
+            _playerControl.ActiveTransform = activeTransform;
 
-            CompositionTarget.Rendering += RecordMotion_Rendering;
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += RecordMotion_Rendering;
         }
 
         public void StopRecordingMotion(CinematicOperation op)
         {
             if (op == null) return;
-            _isAnimating = false;
-            CompositionTarget.Rendering -= RecordMotion_Rendering;
-            
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RecordMotion_Rendering;
             DistillRecordedPath(op);
-
             EnterEditMode(op, EditTarget.Start);
         }
 
         private void RecordMotion_Rendering(object? sender, object e)
         {
-            if (_opA == null || _playerControl.ActiveTransform == null) return;
+            if (_editClip == null || _playerControl.ActiveTransform == null) return;
             
-            // CRITICAL: Use the correct active player, not a hardcoded _mediaPlayerA
-            var activePlayer = _isPlayerAActive ? _mediaPlayerA : _mediaPlayerB;
-            
+            var activePlayer = _overlayPlayer[0];
             var activeTransform = _playerControl.ActiveTransform;
             var mark = new SpatialMark((float)activeTransform.ScaleX, (float)activeTransform.TranslateX, (float)activeTransform.TranslateY);
             
             var realTimeElapsed = DateTime.Now - _recordStartTime;
             var speed = _viewModel.PlaybackSpeed;
-            if (speed == 0) speed = 1.0; // Prevent freeze if playback speed is 0
+            if (speed == 0) speed = 1.0;
             
             var time = TimeSpan.FromSeconds(realTimeElapsed.TotalSeconds * speed);
             if (time < TimeSpan.Zero) time = TimeSpan.Zero;
-            _opA.RecordedPath.Add(new TransformKeyframe(time, mark));
+            _editClip.RecordedPath.Add(new TransformKeyframe(time, mark));
             
-            _viewModel.CurrentOperationTime = _opA.VideoStartTime + time;
+            _viewModel.CurrentOperationTime = _editClip.VideoStartTime + time;
             if (activePlayer.PlaybackSession != null)
             {
                 activePlayer.PlaybackSession.Position = _viewModel.CurrentOperationTime;
                 _viewModel.CurrentOperationDuration = activePlayer.PlaybackSession.NaturalDuration;
             }
 
-            // Update UI
             _dispatcher.TryEnqueue(() => 
             {
                 UpdateTelemetryOverlay(false);
                 UpdateWysiwygOverlay();
             });
 
-            // Automatically stop recording when we reach the end of the operation's duration
-            if (time >= _opA.OpDuration)
+            if (time >= _editClip.OpDuration)
             {
                 _dispatcher.TryEnqueue(() => 
                 {
                     if (_viewModel.IsRecordingMotion)
-                    {
                         _viewModel.IsRecordingMotion = false;
-                    }
                 });
             }
         }
@@ -1404,7 +639,7 @@ namespace VideoDirector.Models
             // instead of one — and could stomp the edit view that was just set up.
             if (_mode != EditorMode.Arrange) return;
 
-            var tracks = _viewModel.OverlayTracks;
+            var tracks = _viewModel.Tracks;
 
             for (int i = 0; i < MaxOverlayTracks; i++)
             {
@@ -1484,6 +719,12 @@ namespace VideoDirector.Models
         {
             var v = _playerControl.OverlayVisuals[track];
 
+            if (v.Frame != null && v.Frame.Children.Count > 0 && v.Frame.Children[0] is Microsoft.UI.Xaml.Controls.Border border)
+            {
+                bool isSelected = clip != null && _viewModel?.SelectedClip == clip;
+                border.BorderThickness = new Microsoft.UI.Xaml.Thickness(isSelected ? 5 : 2);
+            }
+
             switch (mode)
             {
                 case OverlayRender.Hidden:
@@ -1547,7 +788,7 @@ namespace VideoDirector.Models
             => (track >= 0 && track < MaxOverlayTracks) ? _activeOverlay[track] : null;
 
         // Strict track ⇒ the first clip whose window contains t is the only one.
-        private static CinematicOperation ResolveActiveClip(OverlayTrack track, TimeSpan t)
+        private static CinematicOperation ResolveActiveClip(TimelineTrack track, TimeSpan t)
         {
             foreach (var clip in track.Clips)
                 if (clip.IsActiveAt(t)) return clip;
@@ -1570,12 +811,12 @@ namespace VideoDirector.Models
 
             if (needsNewSource)
             {
-                // MediaPlayer.PlaybackSession isn't seekable until MediaOpened fires — seeking
-                // (or even touching PlaybackSession) before then throws. Defer the seek/play
-                // until the media actually finishes opening instead of doing it synchronously.
+                System.Threading.Interlocked.Increment(ref _pendingMediaOpens);
+
                 void OnOpened(MediaPlayer sender, object args)
                 {
                     sender.MediaOpened -= OnOpened;
+                    System.Threading.Interlocked.Decrement(ref _pendingMediaOpens);
 
                     // The overlay this slot wants may have changed while we were waiting
                     // (e.g. playback moved past it, or it got released) — bail if so.
@@ -1590,7 +831,15 @@ namespace VideoDirector.Models
                     });
                 }
 
+                void OnFailed(MediaPlayer sender, MediaPlayerFailedEventArgs args)
+                {
+                    sender.MediaOpened -= OnOpened;
+                    sender.MediaFailed -= OnFailed;
+                    System.Threading.Interlocked.Decrement(ref _pendingMediaOpens);
+                }
+
                 player.MediaOpened += OnOpened;
+                player.MediaFailed += OnFailed;
                 player.Source = MediaSource.CreateFromUri(new Uri(overlay.FilePath));
             }
             else
@@ -1883,24 +1132,20 @@ namespace VideoDirector.Models
         //                      ONLY that clip's Ken Burns (InputMode = Content).
         // You enter Edit by selecting a clip in the dock; Exit returns to Arrange.
 
-        private enum EditorMode { Arrange, Edit }
-        private EditorMode _mode = EditorMode.Arrange;
         public bool IsEditMode => _mode == EditorMode.Edit;
 
         // The single clip being edited + the player showing it (main player for Track 1, overlay
         // player for Track 2). Used by the clip-scoped Edit-mode preview.
-        private CinematicOperation _editClip;
-        private MediaPlayer _editPlayer;
+        
 
         // Put the app into Edit mode for the given clip/player. isOverlayEdit = true when the clip
         // is a Track 2 overlay (edited in the overlay player); false for a Track 1 clip. The flag
         // decides whether the subsequent HideAllOverlays keeps overlay slot 1 (the edit surface).
-        private void SetEditModeState(CinematicOperation clip, MediaPlayer player, bool isOverlayEdit)
+private void SetEditModeState(CinematicOperation clip, MediaPlayer player, bool isOverlayEdit)
         {
             StopEditPreview();
             _mode = EditorMode.Edit;
             _editClip = clip;
-            _editPlayer = player;
             _isEditingOverlay = isOverlayEdit;
             _playerControl.InputMode = Views.PlayerInputMode.Content;
             _viewModel.IsEditMode = true;
@@ -1908,42 +1153,32 @@ namespace VideoDirector.Models
 
         // Return to Arrange (the default composite view). Releases the edit surface and lays the
         // composite PiPs out at the current playhead.
-        public void ExitToArrange()
+public void ExitToArrange()
         {
             StopEditPreview();
             _mode = EditorMode.Arrange;
             _isEditingOverlay = false;
             _editClip = null;
-            _editPlayer = null;
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
             _viewModel.IsEditMode = false;
-            UpdateWysiwygOverlay();                        // hide Track-1 edit rectangles
-            // Restore the Track 1 base (a Track 2 edit had hidden the main players).
-            _playerA.Opacity = _isPlayerAActive ? 1 : 0;
-            _playerB.Opacity = _isPlayerAActive ? 0 : 1;
-            EvaluateOverlays(_viewModel.CurrentStoryTime); // show the composite's active PiPs
+            UpdateWysiwygOverlay();
+            EvaluateOverlays(_viewModel.CurrentStoryTime);
         }
 
         // Single entry point for editing ANY clip. Dispatches to the correct surface (spine clips
         // live in the main players; overlay clips in the overlay player) but every clip goes
         // through one call, one Edit state, one WYSIWYG/telemetry path — that's the "one Edit
         // pipeline" contract the UI relies on.
-        public void BeginEdit(CinematicOperation clip, EditTarget target)
+public void BeginEdit(CinematicOperation clip, EditTarget target)
         {
             if (clip == null) return;
-            if (_viewModel.TimelineNodes.Contains(clip)) EnterEditMode(clip, target);
-            else EnterOverlayEditMode(clip, target);
+            EnterEditMode(clip, target);
         }
 
-        // Edit an overlay clip's content full-screen — same idea as Track 1's EnterEditMode, but
-        // the clip lives in the overlay player. Zoom & Motion controls apply to its content, and
-        // Start/Mid/End target selection works identically.
-        public async void EnterOverlayEditMode(CinematicOperation overlay, EditTarget target = EditTarget.Start)
+        public async void EnterEditMode(CinematicOperation overlay, EditTarget target = EditTarget.Start)
         {
             if (overlay == null || string.IsNullOrWhiteSpace(overlay.FilePath)) return;
 
-            // Track 0's surface is reused as the full-screen content-edit surface for ANY upper
-            // clip, whichever track it belongs to; every other track is hidden while editing.
             SetEditModeState(overlay, _overlayPlayer[0], isOverlayEdit: true);
             StopPlayback();
             UpdateWysiwygOverlay();
@@ -1967,8 +1202,6 @@ namespace VideoDirector.Models
             }
             if (_activeOverlay[0] != overlay) return;
 
-            // Resolve the edit target to a source position + the mark being framed (same three
-            // targets as Track 1). Seek within the clip's own trimmed source window.
             SpatialMark markToEdit;
             TimeSpan seekPos;
             if (target == EditTarget.Mid && overlay.MidMark != null)
@@ -1997,26 +1230,18 @@ namespace VideoDirector.Models
                 transform.ScaleY = markToEdit.Scale;
                 transform.TranslateX = markToEdit.X;
                 transform.TranslateY = markToEdit.Y;
-                // Must cache into the SAME index the edit surface uses (0) — caching elsewhere
-                // leaves a stale aspect here, which sizes the box to the wrong shape and makes
-                // UniformToFill crop the clip (e.g. a portrait clip shown as a cropped landscape).
-                CacheOverlayAspect(0, player);
-                SetOverlayRender(0, OverlayRender.Video, overlay); // live video for content framing
-                ApplyOverlayBox(0, overlay, true);                 // full-screen box
-                grid.Opacity = 1.0;
-                // Hide the Track 1 base so ONLY this overlay clip is shown while editing it.
-                _playerA.Opacity = 0;
-                _playerB.Opacity = 0;
                 _playerControl.ActiveTransform = transform;
-                // Per-clip scrubber range + the WYSIWYG framing rects, exactly as Track 1 does.
+                CacheOverlayAspect(0, player);
+                SetOverlayRender(0, OverlayRender.Video, overlay); 
+                ApplyOverlayBox(0, overlay, true);
+                grid.Opacity = 1.0;
+                
                 if (player.PlaybackSession != null)
                 {
                     BackfillSourceDuration(overlay, player);
                     _viewModel.CurrentOperationDuration = player.PlaybackSession.NaturalDuration;
                     _viewModel.CurrentOperationTime = player.PlaybackSession.Position;
                 }
-                RenderPausedFrame(player); // show the frame now, not just after you press play
-                UpdateWysiwygOverlay();
             });
         }
 
@@ -2043,24 +1268,24 @@ namespace VideoDirector.Models
 
         private void StartEditPreview()
         {
-            if (_editClip == null || _editPlayer?.PlaybackSession == null) return;
+            if (_editClip == null || _overlayPlayer[0]?.PlaybackSession == null) return;
             _editPreviewPlaying = true;
             _editPreviewStart = DateTime.Now;
-            _editPlayer.PlaybackSession.Position = _editClip.VideoStartTime;
+            _overlayPlayer[0].PlaybackSession.Position = _editClip.VideoStartTime;
 
             // Respect the clip's own speed. Speed 0 = a STILL: freeze the frame; the Ken Burns
             // marks still animate over OpDuration below. (Was hardcoded to 1.0 + Play, so a
             // speed-0 clip wrongly ran at full speed.)
             double clipSpeed = _editClip.PlaybackSpeed;
-            _editPlayer.Volume = _editClip.Volume;
+            _overlayPlayer[0].Volume = _editClip.Volume;
             if (clipSpeed > 0)
             {
-                _editPlayer.PlaybackSession.PlaybackRate = clipSpeed;
-                _editPlayer.Play();
+                _overlayPlayer[0].PlaybackSession.PlaybackRate = clipSpeed;
+                _overlayPlayer[0].Play();
             }
             else
             {
-                _editPlayer.Pause();
+                _overlayPlayer[0].Pause();
             }
             CompositionTarget.Rendering += EditPreview_Rendering;
             _viewModel.IsPlaying = true;
@@ -2071,7 +1296,7 @@ namespace VideoDirector.Models
             if (!_editPreviewPlaying) return;
             _editPreviewPlaying = false;
             CompositionTarget.Rendering -= EditPreview_Rendering;
-            _editPlayer?.Pause();
+            _overlayPlayer[0]?.Pause();
             _viewModel.IsPlaying = false;
         }
 
@@ -2080,23 +1305,23 @@ namespace VideoDirector.Models
             if (_editClip == null || _playerControl.ActiveTransform == null) return;
             // Apply Volume live so the audio slider works while the preview is playing (overlays
             // start muted, so a one-time apply at play meant raising it did nothing until restart).
-            if (_editPlayer != null) _editPlayer.Volume = _editClip.Volume;
+            if (_overlayPlayer[0] != null) _overlayPlayer[0].Volume = _editClip.Volume;
             double dur = _editClip.OpDuration.TotalSeconds;
             if (dur <= 0) dur = 1;
             double progress = (DateTime.Now - _editPreviewStart).TotalSeconds / dur;
-            if (_editPlayer?.PlaybackSession != null)
+            if (_overlayPlayer[0]?.PlaybackSession != null)
             {
-                progress = (_editPlayer.PlaybackSession.Position - _editClip.VideoStartTime).TotalSeconds / dur;
+                progress = (_overlayPlayer[0].PlaybackSession.Position - _editClip.VideoStartTime).TotalSeconds / dur;
             }
             if (progress >= 1.0)
             {
                 _editPreviewStart = DateTime.Now; // loop the preview
                 progress = 0;
-                if (_editPlayer?.PlaybackSession != null)
+                if (_overlayPlayer[0]?.PlaybackSession != null)
                 {
-                    _editPlayer.PlaybackSession.Position = _editClip.VideoStartTime;
+                    _overlayPlayer[0].PlaybackSession.Position = _editClip.VideoStartTime;
                     // Resume if it hit end-of-media mid-loop; a still (speed 0) stays paused.
-                    if (_editClip.PlaybackSpeed > 0) _editPlayer.Play();
+                    if (_editClip.PlaybackSpeed > 0) _overlayPlayer[0].Play();
                 }
             }
             ApplyMarksAtProgress(_editClip, Math.Clamp(progress, 0.0, 1.0), _playerControl.ActiveTransform);
@@ -2104,8 +1329,8 @@ namespace VideoDirector.Models
             // Drive the per-clip scrubber off the real decode position so it tracks the preview.
             // (Assigning CurrentOperationTime — not …Seconds — only notifies the slider; it does
             // not fire a seek back into the player, so there's no feedback loop.)
-            if (_editPlayer?.PlaybackSession != null)
-                _viewModel.CurrentOperationTime = _editPlayer.PlaybackSession.Position;
+            if (_overlayPlayer[0]?.PlaybackSession != null)
+                _viewModel.CurrentOperationTime = _overlayPlayer[0].PlaybackSession.Position;
 
             // Keep the telemetry HUD live while previewing in Edit — the composite render loop that
             // normally drives it doesn't run here, so without this it froze until you paused.
@@ -2117,6 +1342,13 @@ namespace VideoDirector.Models
         }
 
         // ---- Arrange mode: drag / wheel the PiP under the cursor (the hit slot) ----
+
+        private void OnOverlayBoxPointerPressed(object? sender, int slot)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[slot];
+            if (overlay != null) _viewModel.SelectedClip = overlay;
+        }
 
         private void OnOverlayBoxDragged(object? sender, (int slot, Views.BoxGrab grab, double dx, double dy) e)
         {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -52,6 +52,7 @@ namespace VideoDirector.Views
         // tells the engine whether to translate the box or reshape it from an edge/corner.
         public event EventHandler<(int slot, BoxGrab grab, double dx, double dy)> OverlayBoxDragged;
         public event EventHandler<(int slot, int delta)> OverlayBoxWheel;
+        public event EventHandler<int>? OverlayBoxPointerPressed;
 
         // Double-tap the image to enter Edit for the clip under the cursor (slot = overlay track
         // index, or -1 = Track 1). In Edit mode a double-tap exits instead.
@@ -66,16 +67,14 @@ namespace VideoDirector.Views
 
             OverlayVisuals = new[]
             {
-                new OverlayVisual { Grid = OverlayGrid1, Video = OverlayPlayer1, Still = OverlayImage1, Transform = OverlayTransform1, Frame = OverlayFrame1 },
-                new OverlayVisual { Grid = OverlayGrid2, Video = OverlayPlayer2, Still = OverlayImage2, Transform = OverlayTransform2, Frame = OverlayFrame2 },
-                new OverlayVisual { Grid = OverlayGrid3, Video = OverlayPlayer3, Still = OverlayImage3, Transform = OverlayTransform3, Frame = OverlayFrame3 },
+                new OverlayVisual { Grid = TrackGrid0, Video = TrackPlayer0, Still = TrackImage0, Transform = TrackTransform0, Frame = TrackFrame0 },
+                new OverlayVisual { Grid = TrackGrid1, Video = TrackPlayer1, Still = TrackImage1, Transform = TrackTransform1, Frame = TrackFrame1 },
+                new OverlayVisual { Grid = TrackGrid2, Video = TrackPlayer2, Still = TrackImage2, Transform = TrackTransform2, Frame = TrackFrame2 },
+                new OverlayVisual { Grid = TrackGrid3, Video = TrackPlayer3, Still = TrackImage3, Transform = TrackTransform3, Frame = TrackFrame3 },
             };
 
-            // Surface i always renders overlay track i, so its identity colour + track badge are
-            // fixed. Colouring the frame to match the dashboard row (and a "T2".."T4" badge) is the
-            // correlation key: which picture on screen is which timeline row.
             for (int i = 0; i < OverlayVisuals.Length; i++)
-                StyleOverlayFrame(OverlayVisuals[i].Frame, TrackPalette.Overlay(i), "T" + (i + 2));
+                StyleOverlayFrame(OverlayVisuals[i].Frame, i == 0 ? TrackPalette.Spine : TrackPalette.Overlay(i - 1), "T" + (i + 1));
         }
 
         private static void StyleOverlayFrame(Microsoft.UI.Xaml.Controls.Grid frame, Windows.UI.Color color, string badgeText)
@@ -155,7 +154,8 @@ namespace VideoDirector.Views
             if (InputMode == PlayerInputMode.ArrangePips)
             {
                 _dragSlot = HitTestOverlaySlot(p);
-                if (_dragSlot < 0) return; // clicked empty canvas — nothing to arrange
+                if (_dragSlot < 0) return; // clicked empty canvas
+                OverlayBoxPointerPressed?.Invoke(this, _dragSlot);
                 _dragGrab = ClassifyGrab(_dragSlot, p);
                 _isDragging = true;
                 _lastPointerPosition = p;

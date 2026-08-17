@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Linq;
 using Windows.Foundation;
 using Windows.Media.Editing;
 using Windows.Media.MediaProperties;
@@ -75,11 +76,13 @@ namespace VideoDirector.Models
         // per overlay track. Overlays within a track never overlap in time (enforced on add/move),
         // which is exactly the constraint MediaOverlayLayer requires.
         public async Task<MediaComposition> BuildCompositionAsync(
-            IEnumerable<CinematicOperation> spine, IEnumerable<OverlayTrack> overlayTracks, List<string> skipped)
+            IEnumerable<TimelineTrack> tracks, List<string> skipped)
         {
             var composition = new MediaComposition();
+            var tracksList = tracks?.ToList();
+            if (tracksList == null || tracksList.Count == 0) return composition;
 
-            foreach (var op in spine)
+            foreach (var op in tracksList[0].Clips)
             {
                 if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) continue;
                 var clip = await CreateClipAsync(op);
@@ -87,9 +90,9 @@ namespace VideoDirector.Models
                 else skipped?.Add(System.IO.Path.GetFileName(op.FilePath));
             }
 
-            if (overlayTracks != null)
+            if (tracksList.Count > 1)
             {
-                foreach (var track in overlayTracks)
+                foreach (var track in tracksList.Skip(1))
                 {
                     if (track?.Clips == null || track.Clips.Count == 0) continue;
 
@@ -125,14 +128,14 @@ namespace VideoDirector.Models
         // Render the composite to `output`. Reports 0..100 progress. Never throws for the expected
         // cases (missing files, nothing to render) — returns a described ExportResult.
         public async Task<ExportResult> ExportAsync(
-            IEnumerable<CinematicOperation> spine, IEnumerable<OverlayTrack> overlayTracks,
+            IEnumerable<TimelineTrack> tracks,
             StorageFile output, IProgress<double> progress)
         {
             var skipped = new List<string>();
             MediaComposition composition;
             try
             {
-                composition = await BuildCompositionAsync(spine, overlayTracks, skipped);
+                composition = await BuildCompositionAsync(tracks, skipped);
             }
             catch (Exception ex)
             {

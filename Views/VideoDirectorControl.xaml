@@ -1,4 +1,4 @@
-﻿<UserControl
+<UserControl
     x:Class="VideoDirector.Views.VideoDirectorControl"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -390,16 +390,6 @@
                         <Button Click="Redo_Click" IsEnabled="{x:Bind ViewModel.CanRedo, Mode=OneWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Redo (Ctrl+Y)">
                             <SymbolIcon Symbol="Redo" />
                         </Button>
-                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
-                        <ToggleButton x:Name="MagnetButton" IsChecked="True" Click="MagnetButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Snapping (Magnet Tool): Snap clips to edges and playhead (S)">
-                            <FontIcon Glyph="&#xE81E;" FontSize="13" />
-                        </ToggleButton>
-                        <ToggleButton x:Name="RippleEditButton" IsChecked="True" Click="RippleEditButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Magnetic Timeline: Automatically ripple clips when inserting, trimming, or deleting (R)">
-                            <FontIcon Glyph="&#xE8DE;" FontSize="13" />
-                        </ToggleButton>
-                        <ToggleButton x:Name="WaveformButton" Click="WaveformButton_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Show Audio Waveforms on timeline clips (W)">
-                            <FontIcon Glyph="&#xE8D6;" FontSize="13" />
-                        </ToggleButton>
                     </StackPanel>
 
                     <!-- Right: Zoom, Fit, Project File operations, and Export -->
@@ -446,7 +436,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Canvas x:Name="TimelineLabels" Grid.Column="0" Background="Transparent" />
-                        <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch">
+                        <ScrollViewer x:Name="TimelineScroll" Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" PointerWheelChanged="TimelineScroll_PointerWheelChanged">
                             <Canvas x:Name="TimelineBar" Height="52" HorizontalAlignment="Stretch"
                                     Background="Transparent" SizeChanged="TimelineBar_SizeChanged"
                                     PointerPressed="TimelineBar_PointerPressed"

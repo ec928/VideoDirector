@@ -1,8 +1,9 @@
-﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using VideoDirector.ViewModels;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
@@ -90,41 +91,37 @@ namespace VideoDirector.Views
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
             ViewModel.EditTargetChanged += ViewModel_EditTargetChanged;
 
-            ViewModel.TimelineNodes.CollectionChanged += (s, ev) => BuildTimelineBar();
-            ViewModel.OverlayTracks.CollectionChanged += (s, ev) => { HookOverlayTrackClips(); BuildTimelineBar(); _playbackEngine?.RefreshComposite(); };
+            ViewModel.Tracks.CollectionChanged += (s, ev) => { HookOverlayTrackClips(); BuildTimelineBar(); _playbackEngine?.RefreshComposite(); };
             HookOverlayTrackClips();
             BuildTimelineBar();
         }
 
-        // Each overlay track owns its own clip collection, so the timeline has to watch them all.
-        private readonly System.Collections.Generic.HashSet<OverlayTrack> _hookedTracks = new();
+        // Each track owns its own clip collection, so the timeline has to watch them all.
+        private readonly System.Collections.Generic.HashSet<TimelineTrack> _hookedTracks = new();
         private void HookOverlayTrackClips()
         {
-            foreach (var track in ViewModel.OverlayTracks)
+            foreach (var track in ViewModel.Tracks)
                 if (_hookedTracks.Add(track))
                     track.Clips.CollectionChanged += (s, ev) => { BuildTimelineBar(); _playbackEngine?.RefreshComposite(); };
         }
 
-
-        // The track that owns a given upper-track clip (null if it's a spine clip).
-        private OverlayTrack TrackOf(CinematicOperation clip)
+        // The track that owns a given clip.
+        private TimelineTrack TrackOf(CinematicOperation clip)
         {
-            foreach (var track in ViewModel.OverlayTracks)
+            foreach (var track in ViewModel.Tracks)
                 if (track.Clips.Contains(clip)) return track;
             return null;
         }
 
         private void TimelineBar_SizeChanged(object? sender, SizeChangedEventArgs e) => BuildTimelineBar();
 
-        // Timeline layout: a scrub ruler on top, then the spine row, then the overlay row — all on
+        // Timeline layout: a scrub ruler on top, then track rows — all on
         // one shared px=seconds scale (§7E). Scrub on the ruler; drag clips in their rows.
         private const double RulerH = 14, RowSpineY = 16, RowOvY = 34, BlockH = 16, RowPitch = 18;
 
-        // Bar height grows with the number of upper tracks. The last row is BlockH tall starting at
-        // (count-1)*RowPitch, so allow for that plus a small bottom margin — otherwise the bottom
-        // track gets clipped by a few pixels.
+        // Bar height grows with the number of tracks. 
         private double TimelineBarHeight =>
-            RowOvY + (Math.Max(1, ViewModel.OverlayTracks.Count) - 1) * RowPitch + BlockH + 6;
+            RowSpineY + (Math.Max(1, ViewModel.Tracks.Count)) * RowPitch + BlockH + 6;
 
         private void BuildTimelineBar()
         {
@@ -134,12 +131,15 @@ namespace VideoDirector.Views
             _playhead = null; _playheadKnob = null;
 
             TimelineBar.Height = TimelineBarHeight;   // grows with the upper-track count
-            double viewportW = (TimelineBar.Parent as FrameworkElement)?.ActualWidth ?? TimelineBar.ActualWidth;
+            double viewportW = TimelineScroll.ActualWidth;
             if (viewportW <= 0) viewportW = TimelineBar.ActualWidth;
             double w = viewportW * _timelineZoomFactor;
             if (w > 0) TimelineBar.Width = w;
             double h = TimelineBarHeight;
-            double total = ViewModel.TotalStoryDuration.TotalSeconds;
+            double total = Math.Max(30.0, ViewModel.TotalStoryDuration.TotalSeconds);
+
+            // Add a 20% pad at the end for comfortable dragging
+            total *= 1.2;
 
             BuildTrackLabels(); // Build track headers regardless of whether the timeline is empty
 
@@ -149,9 +149,10 @@ namespace VideoDirector.Views
             // Per-lane bands: a faint tint of the track's own colour distinguishes the lanes by
             // colour rather than by height (space is at a premium), and ties each lane to its
             // identity colour. Drawn first so blocks/gridlines paint over them.
-            DrawRowBand(RowSpineY, w, TrackPalette.Spine);
-            for (int ti = 0; ti < ViewModel.OverlayTracks.Count; ti++)
-                DrawRowBand(RowOvY + ti * RowPitch, w, TrackPalette.Overlay(ti));
+            if (ViewModel.Tracks.Count > 0)
+                DrawRowBand(RowSpineY, w, TrackPalette.Spine);
+            for (int ti = 1; ti < ViewModel.Tracks.Count; ti++)
+                DrawRowBand(RowOvY + (ti - 1) * RowPitch, w, TrackPalette.Overlay(ti - 1));
 
             // Faint ruler strip marks the scrub zone.
             var ruler = new Microsoft.UI.Xaml.Shapes.Rectangle
@@ -190,54 +191,61 @@ namespace VideoDirector.Views
             var transColor = Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x64, 0x74, 0x8B);
             bool spineGhost = _timelineMovingClip && _dragIsSpine && _dragClip != null;
 
-            if (!spineGhost)
+            if (ViewModel.Tracks.Count > 0)
             {
-                for (int i = 0; i < ViewModel.TimelineNodes.Count; i++)
+                var mainTrack = ViewModel.Tracks[0];
+                if (!spineGhost)
                 {
-                    var clip = ViewModel.TimelineNodes[i];
-                    double x = ViewModel.GetSpineClipStart(i).TotalSeconds * _timelinePxPerSec;
-                    double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                    AddTimelineBlock(x, RowSpineY, cw, BlockH, spineColor, clip);
-                    double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
-                    if (tw > 0.5)
-                        AddTimelineBlock(x + cw, RowSpineY, tw, BlockH, transColor);
+                    for (int i = 0; i < mainTrack.Clips.Count; i++)
+                    {
+                        var clip = mainTrack.Clips[i];
+                        double x = clip.StartTime.TotalSeconds * _timelinePxPerSec;
+                        double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
+                        AddTimelineBlock(x, RowSpineY, cw, BlockH, spineColor, clip, mainTrack.ShowAudioWaveforms);
+                        double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
+                        if (tw > 0.5)
+                            AddTimelineBlock(x + cw, RowSpineY, tw, BlockH, transColor, null, false);
+                    }
                 }
-            }
-            else
-            {
-                // Spine is order-based, so there is no continuous position to write. Instead the
-                // other clips reflow with a gap at the insertion point, and the grabbed clip is
-                // drawn as a free ghost under the cursor. The order only changes on release.
-                double dragW = _dragClip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                double x = 0;
-                int drawn = 0;
-                foreach (var clip in ViewModel.TimelineNodes)
+                else
                 {
-                    if (clip == _dragClip) continue;
-                    if (drawn == _dragInsertIndex) x += dragW;   // open the drop gap
-                    double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                    AddTimelineBlock(x, RowSpineY, cw, BlockH, spineColor, clip);
-                    double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
-                    if (tw > 0.5) AddTimelineBlock(x + cw, RowSpineY, tw, BlockH, transColor);
-                    x += cw + tw;
-                    drawn++;
-                }
+                    // Spine is order-based in gapless mode, so there is no continuous position to write. Instead the
+                    // other clips reflow with a gap at the insertion point, and the grabbed clip is
+                    // drawn as a free ghost under the cursor. The order only changes on release.
+                    double dragW = _dragClip.OpDuration.TotalSeconds * _timelinePxPerSec;
+                    double x = 0;
+                    int drawn = 0;
+                    foreach (var clip in mainTrack.Clips)
+                    {
+                        if (clip == _dragClip) continue;
+                        if (drawn == _dragInsertIndex) x += dragW;   // open the drop gap
+                        
+                        double actualStartX = mainTrack.IsGapless ? x : (clip.StartTime.TotalSeconds * _timelinePxPerSec);
+                        
+                        double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
+                        AddTimelineBlock(actualStartX, RowSpineY, cw, BlockH, spineColor, clip, mainTrack.ShowAudioWaveforms);
+                        double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
+                        if (tw > 0.5) AddTimelineBlock(actualStartX + cw, RowSpineY, tw, BlockH, transColor, null, false);
+                        x += cw + tw;
+                        drawn++;
+                    }
 
-                double ghostX = _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec;
-                AddTimelineBlock(ghostX, RowSpineY, dragW, BlockH,
-                    Microsoft.UI.ColorHelper.FromArgb(0xCC, 0x93, 0xC5, 0xFD), _dragClip); // ghost
+                    double ghostX = _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec;
+                    AddTimelineBlock(ghostX, RowSpineY, dragW, BlockH,
+                        Microsoft.UI.ColorHelper.FromArgb(0xCC, 0x93, 0xC5, 0xFD), _dragClip); // ghost
+                }
             }
 
             // One row per upper track (§7B) — same loop for 1 track or 3, each in its own colour.
-            for (int ti = 0; ti < ViewModel.OverlayTracks.Count; ti++)
+            for (int ti = 1; ti < ViewModel.Tracks.Count; ti++)
             {
-                double rowY = RowOvY + ti * RowPitch;
-                var trackColor = TrackPalette.Overlay(ti);
-                foreach (var ov in ViewModel.OverlayTracks[ti].Clips)
+                double rowY = RowOvY + (ti - 1) * RowPitch;
+                var trackColor = TrackPalette.Overlay(ti - 1);
+                foreach (var ov in ViewModel.Tracks[ti].Clips)
                 {
                     double x = ov.StartTimeSeconds * _timelinePxPerSec;
                     double ow = ov.OpDuration.TotalSeconds * _timelinePxPerSec;
-                    AddTimelineBlock(x, rowY, ow, BlockH, trackColor, ov);
+                    AddTimelineBlock(x, rowY, ow, BlockH, trackColor, ov, ViewModel.Tracks[ti].ShowAudioWaveforms);
                 }
             }
 
@@ -300,15 +308,18 @@ namespace VideoDirector.Views
             TimelineLabels.Children.Clear();
             TimelineLabels.Height = TimelineBarHeight;
 
-            AddTrackLabel("Track 1", RowSpineY, TrackPalette.Spine, -1);        // -1 = spine
-            for (int ti = 0; ti < ViewModel.OverlayTracks.Count; ti++)
-                AddTrackLabel("Track " + (ti + 2), RowOvY + ti * RowPitch, TrackPalette.Overlay(ti), ti);
+            if (ViewModel.Tracks.Count > 0)
+                AddTrackLabel("T1", RowSpineY, TrackPalette.Spine, 0);        // 0 = spine
+            
+            for (int ti = 1; ti < ViewModel.Tracks.Count; ti++)
+                AddTrackLabel("T" + (ti + 1), RowOvY + (ti - 1) * RowPitch, TrackPalette.Overlay(ti - 1), ti);
         }
 
         // Each track label is a button: click it to load a video into that track via a file picker
         // (trackIndex -1 = spine/Track 1, 0..2 = overlay tracks). Drag & drop still works too.
         private void AddTrackLabel(string text, double y, Windows.UI.Color color, int trackIndex)
         {
+            var track = ViewModel.Tracks[trackIndex];
             // A colour cap ties the label to the track's identity colour (same as its blocks/PiP).
             var cap = new Microsoft.UI.Xaml.Shapes.Rectangle
             {
@@ -337,9 +348,42 @@ namespace VideoDirector.Views
             ToolTipService.SetToolTip(btn, "Load a video into " + text + " (or drag & drop)");
             btn.Click += (s, e) => LoadIntoTrack(trackIndex);
 
-            Canvas.SetLeft(btn, 2);
-            Canvas.SetTop(btn, y - 1);
-            TimelineLabels.Children.Add(btn);
+            var settingsMenu = new MenuFlyout();
+
+            var snapItem = new ToggleMenuFlyoutItem { Text = "Snapping", IsChecked = track.IsSnappingEnabled };
+            snapItem.Click += (s, e) => { track.IsSnappingEnabled = snapItem.IsChecked; };
+
+            var magItem = new ToggleMenuFlyoutItem { Text = "Magnetic Timeline", IsChecked = track.IsGapless };
+            magItem.Click += (s, e) => { track.IsGapless = magItem.IsChecked; };
+
+            var waveItem = new ToggleMenuFlyoutItem { Text = "Show Waveforms", IsChecked = track.ShowAudioWaveforms };
+            waveItem.Click += (s, e) => { track.ShowAudioWaveforms = waveItem.IsChecked; BuildTimelineBar(); };
+
+            settingsMenu.Items.Add(snapItem);
+            settingsMenu.Items.Add(magItem);
+            settingsMenu.Items.Add(waveItem);
+
+            var settingsBtn = new Button
+            {
+                Content = new FontIcon { Glyph = "\uE713", FontSize = 10 },
+                Padding = new Thickness(4, 0, 4, 0),
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(0),
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                MinHeight = 0,
+                MinWidth = 0,
+                Height = 18,
+                Flyout = settingsMenu
+            };
+            ToolTipService.SetToolTip(settingsBtn, text + " Settings");
+
+            var wrapper = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+            wrapper.Children.Add(btn);
+            wrapper.Children.Add(settingsBtn);
+
+            Canvas.SetLeft(wrapper, 2);
+            Canvas.SetTop(wrapper, y - 1);
+            TimelineLabels.Children.Add(wrapper);
         }
 
         // Open a file picker and add the chosen video(s)/image(s) to a track, then drop into Edit —
@@ -358,7 +402,7 @@ namespace VideoDirector.Views
             var files = await openPicker.PickMultipleFilesAsync();
             if (files == null || files.Count == 0) return;
 
-            if (trackIndex < 0)
+            if (trackIndex == 0)
             {
                 var paths = new List<string>();
                 foreach (var f in files) paths.Add(f.Path);
@@ -369,9 +413,9 @@ namespace VideoDirector.Views
             {
                 foreach (var f in files)
                     await ViewModel.AddOverlayAsync(f.Path, TimeSpan.Zero, trackIndex);
-                if (trackIndex < ViewModel.OverlayTracks.Count)
+                if (trackIndex < ViewModel.Tracks.Count)
                 {
-                    var track = ViewModel.OverlayTracks[trackIndex];
+                    var track = ViewModel.Tracks[trackIndex];
                     if (track.Clips.Count > 0)
                     {
                         if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback();
@@ -399,8 +443,8 @@ namespace VideoDirector.Views
         private bool IsActiveAtPlayhead(CinematicOperation clip)
         {
             var t = ViewModel.CurrentStoryTime;
-            if (ViewModel.TimelineNodes.Contains(clip))   // spine: the clip at the playhead
-                return ViewModel.TimelineNodes.IndexOf(clip) == ViewModel.GetTimelineIndexForStoryTime(t);
+            if (ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Contains(clip))   // spine: the clip at the playhead
+                return ViewModel.Tracks[0].Clips.IndexOf(clip) == ViewModel.GetTimelineIndexForStoryTime(t);
             return clip.IsActiveAt(t);                    // overlay: live in its window
         }
 
@@ -411,13 +455,13 @@ namespace VideoDirector.Views
         {
             var t = ViewModel.CurrentStoryTime;
             int sig = 17 * 31 + ViewModel.GetTimelineIndexForStoryTime(t);
-            foreach (var track in ViewModel.OverlayTracks)
+            foreach (var track in ViewModel.Tracks)
                 foreach (var ov in track.Clips)
                     if (ov.IsActiveAt(t)) sig = sig * 31 + ov.GetHashCode();
             return sig;
         }
 
-        private void AddTimelineBlock(double x, double y, double width, double height, Windows.UI.Color color, CinematicOperation clip = null)
+        private void AddTimelineBlock(double x, double y, double width, double height, Windows.UI.Color color, CinematicOperation clip = null, bool showWaveforms = false)
         {
             if (width < 1) width = 1;
 
@@ -465,7 +509,7 @@ namespace VideoDirector.Views
                 list.Add(r);
             }
 
-            if (ViewModel.ShowAudioWaveforms && width > 10 && height > 10)
+            if (showWaveforms && width > 10 && height > 10)
             {
                 var wf = new Microsoft.UI.Xaml.Shapes.Polyline
                 {
@@ -580,48 +624,58 @@ namespace VideoDirector.Views
             if (!_timelineMovingClip && Math.Abs(p.X - _timelinePressPoint.X) < 4) return;
             _timelineMovingClip = true;
 
-            // Live transfer between Track 1 (Spine) and Track 2/3/4 (Overlays)
-            if (_dragIsSpine && p.Y >= RowOvY && ViewModel.TimelineNodes.Count > 1)
-            {
-                ViewModel.TimelineNodes.Remove(_dragClip);
-                int targetIndex = Math.Clamp((int)((p.Y - RowOvY) / RowPitch), 0, ViewModel.OverlayTracks.Count - 1);
-                var targetTrk = ViewModel.OverlayTracks[targetIndex];
-                double newStart = Math.Max(0, (p.X / _timelinePxPerSec) - _dragGrabOffsetSec);
-                _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
-                targetTrk.Clips.Add(_dragClip);
-                targetTrk.ResolveOverlaps();
-                _dragIsSpine = false;
-            }
-            else if (!_dragIsSpine && p.Y < RowOvY)
-            {
-                var currentTrk = TrackOf(_dragClip);
-                currentTrk?.Clips.Remove(_dragClip);
-                int insertIdx = ComputeSpineInsertIndex(p.X);
-                insertIdx = Math.Clamp(insertIdx, 0, ViewModel.TimelineNodes.Count);
-                ViewModel.TimelineNodes.Insert(insertIdx, _dragClip);
-                _dragIsSpine = true;
-            }
+            var currentTrk = TrackOf(_dragClip);
+            bool isGapless = currentTrk != null && currentTrk.IsGapless;
 
-            if (_dragIsSpine)
+            if (isGapless)
             {
-                // Ghost follows the cursor; the order itself is committed on release.
-                _dragCursorX = p.X;
-                int newIndex = ComputeSpineInsertIndex(p.X);
-                if (newIndex != _dragInsertIndex)
+                // Live transfer between Track 1 (Spine) and Track 2/3/4 (Overlays)
+                if (_dragIsSpine && p.Y >= RowOvY && ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 1)
                 {
-                    _dragInsertIndex = newIndex;
-                    BuildTimelineBar();
+                    ViewModel.Tracks[0].Clips.Remove(_dragClip);
+                    int targetIndex = Math.Clamp((int)((p.Y - RowOvY) / RowPitch), 0, ViewModel.Tracks.Count - 2) + 1;
+                    var targetTrk = ViewModel.Tracks[targetIndex];
+                    double newStart = Math.Max(0, (p.X / _timelinePxPerSec) - _dragGrabOffsetSec);
+                    _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
+                    targetTrk.Clips.Add(_dragClip);
+                    targetTrk.ResolveOverlaps();
+                    _dragIsSpine = false;
                 }
-                else if (_clipBlockElements.TryGetValue(_dragClip, out var ghostElements))
+                else if (!_dragIsSpine && p.Y < RowOvY && ViewModel.Tracks.Count > 0)
                 {
-                    double ghostX = _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec;
-                    foreach (var el in ghostElements)
+                    var cTrk = TrackOf(_dragClip);
+                    cTrk?.Clips.Remove(_dragClip);
+                    int insertIdx = ComputeSpineInsertIndex(p.X);
+                    insertIdx = Math.Clamp(insertIdx, 0, ViewModel.Tracks[0].Clips.Count);
+                    ViewModel.Tracks[0].Clips.Insert(insertIdx, _dragClip);
+                    _dragIsSpine = true;
+                }
+
+                if (_dragIsSpine)
+                {
+                    // Ghost follows the cursor; the order itself is committed on release.
+                    _dragCursorX = p.X;
+                    int newIndex = ComputeSpineInsertIndex(p.X);
+                    if (newIndex != _dragInsertIndex)
                     {
-                        Canvas.SetLeft(el, el is StackPanel ? ghostX + 6 : ghostX);
+                        _dragInsertIndex = newIndex;
+                        BuildTimelineBar();
+                    }
+                    else if (_clipBlockElements.TryGetValue(_dragClip, out var ghostElements))
+                    {
+                        double ghostX = _dragCursorX - _dragGrabOffsetSec * _timelinePxPerSec;
+                        foreach (var el in ghostElements)
+                        {
+                            Canvas.SetLeft(el, el is StackPanel ? ghostX + 6 : ghostX);
+                        }
                     }
                 }
+                else MoveOverlayTo(p);   // x = time, y = which track
             }
-            else MoveOverlayTo(p);   // x = time, y = which track
+            else
+            {
+                MoveOverlayTo(p);
+            }
         }
 
         // Insertion index = how many OTHER spine clips have their centre left of the cursor,
@@ -630,12 +684,21 @@ namespace VideoDirector.Views
         {
             int insert = 0;
             double x = 0;
-            foreach (var clip in ViewModel.TimelineNodes)
+            if (ViewModel.Tracks.Count == 0) return 0;
+            var mainTrack = ViewModel.Tracks[0];
+            foreach (var clip in mainTrack.Clips)
             {
                 if (clip == _dragClip) continue;
                 double w = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
-                if (x + w / 2 < cursorX) insert++;
-                x += w + clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
+                if (mainTrack.IsGapless)
+                {
+                    if (x + w / 2 < cursorX) insert++;
+                    x += w + clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
+                }
+                else
+                {
+                    if (clip.StartTime.TotalSeconds * _timelinePxPerSec + w / 2 < cursorX) insert++;
+                }
             }
             return insert;
         }
@@ -654,17 +717,28 @@ namespace VideoDirector.Views
             if (_dragClip != null)
             {
                 if (!wasMoving) SelectClip(_dragClip, _dragIsSpine); // a tap selects
-                else if (_dragIsSpine)
-                {
-                    // Commit the reorder exactly once, at the ghost's drop position.
-                    int cur = ViewModel.TimelineNodes.IndexOf(_dragClip);
-                    int target = Math.Clamp(_dragInsertIndex, 0, ViewModel.TimelineNodes.Count - 1);
-                    if (cur >= 0 && target != cur) ViewModel.TimelineNodes.Move(cur, target);
-                }
                 else
                 {
-                    TrackOf(_dragClip)?.ResolveOverlaps();
-                    _playbackEngine?.RefreshComposite();
+                    var track = TrackOf(_dragClip);
+                    bool isGapless = track != null && track.IsGapless;
+                    
+                    if (isGapless && _dragIsSpine)
+                    {
+                        if (ViewModel.Tracks.Count > 0)
+                        {
+                            var mainTrack = ViewModel.Tracks[0];
+                            // Commit the reorder exactly once, at the ghost's drop position.
+                            int cur = mainTrack.Clips.IndexOf(_dragClip);
+                            int target = Math.Clamp(_dragInsertIndex, 0, mainTrack.Clips.Count - 1);
+                            if (cur >= 0 && target != cur) mainTrack.Clips.Move(cur, target);
+                            mainTrack.ResolveOverlaps();
+                        }
+                    }
+                    else
+                    {
+                        track?.ResolveOverlaps();
+                        _playbackEngine?.RefreshComposite();
+                    }
                 }
             }
             _timelinePressed = false;
@@ -741,20 +815,13 @@ namespace VideoDirector.Views
         // track), placing overlays at the requested start time clamped to a free slot.
         private void InsertAfter(CinematicOperation after, bool isSpine, CinematicOperation toInsert, double overlayStartSec)
         {
-            if (isSpine)
-            {
-                int i = ViewModel.TimelineNodes.IndexOf(after);
-                if (i >= 0) ViewModel.TimelineNodes.Insert(i + 1, toInsert);
-            }
-            else
-            {
-                var track = TrackOf(after);
-                int i = track?.Clips.IndexOf(after) ?? -1;
-                if (i < 0) return;
-                toInsert.StartTime = TimeSpan.FromSeconds(
-                    track.ClampToFreeSlot(null, overlayStartSec, toInsert.OpDuration.TotalSeconds));
-                track.Clips.Insert(i + 1, toInsert);
-            }
+            var track = TrackOf(after);
+            int i = track?.Clips.IndexOf(after) ?? -1;
+            if (i < 0) return;
+            toInsert.StartTime = TimeSpan.FromSeconds(
+                track.ClampToFreeSlot(null, overlayStartSec, toInsert.OpDuration.TotalSeconds));
+            track.Clips.Insert(i + 1, toInsert);
+            
             ViewModel.RecordIfChanged();
             BuildTimelineBar();
             _playbackEngine?.RefreshComposite();
@@ -782,6 +849,7 @@ namespace VideoDirector.Views
             second.VideoEndTime = TimeSpan.FromSeconds(endS);
 
             // Second half sits immediately after the (now shorter) first half.
+            // For gapless tracks, the start time parameter is ignored by ClampToFreeSlot anyway.
             InsertAfter(clip, isSpine, second, clip.StartTime.TotalSeconds + clip.OpDuration.TotalSeconds);
         }
 
@@ -824,7 +892,7 @@ namespace VideoDirector.Views
             double op = clip.OpDuration.TotalSeconds;
             if (op <= 0) return 0.5;
             double clipStartStory = isSpine
-                ? ViewModel.GetSpineClipStart(ViewModel.TimelineNodes.IndexOf(clip)).TotalSeconds
+                ? ViewModel.GetSpineClipStart(ViewModel.Tracks[0].Clips.IndexOf(clip)).TotalSeconds
                 : clip.StartTime.TotalSeconds;
             double into = ViewModel.CurrentStoryTime.TotalSeconds - clipStartStory;
             double f = (into > 0 && into < op) ? into / op : 0.5;
@@ -833,16 +901,9 @@ namespace VideoDirector.Views
 
         private void RemoveClip(CinematicOperation clip, bool isSpine)
         {
-            if (isSpine)
-            {
-                ViewModel.TimelineNodes.Remove(clip);
-                if (ViewModel.SelectedTimelineNode == clip) ViewModel.SelectedTimelineNode = null;
-            }
-            else
-            {
-                TrackOf(clip)?.Clips.Remove(clip);
-                if (ViewModel.SelectedOverlay == clip) ViewModel.SelectedOverlay = null;
-            }
+            var track = TrackOf(clip);
+            track?.Clips.Remove(clip);
+            if (ViewModel.SelectedClip == clip) ViewModel.SelectedClip = null;
             ViewModel.RecordIfChanged();
         }
 
@@ -852,21 +913,11 @@ namespace VideoDirector.Views
             if (includePlayhead && ViewModel != null)
                 points.Add(ViewModel.CurrentStoryTime.TotalSeconds);
             
-            if (ViewModel?.TimelineNodes != null)
+            if (ViewModel?.Tracks != null)
             {
-                for (int i = 0; i < ViewModel.TimelineNodes.Count; i++)
+                foreach (var trk in ViewModel.Tracks)
                 {
-                    var c = ViewModel.TimelineNodes[i];
-                    if (c == ignoreClip) continue;
-                    double s = ViewModel.GetSpineClipStart(i).TotalSeconds;
-                    points.Add(s);
-                    points.Add(s + c.OpDuration.TotalSeconds);
-                }
-            }
-            if (ViewModel?.OverlayTracks != null)
-            {
-                foreach (var trk in ViewModel.OverlayTracks)
-                {
+                    if (!trk.IsSnappingEnabled) continue;
                     foreach (var c in trk.Clips)
                     {
                         if (c == ignoreClip) continue;
@@ -880,7 +931,7 @@ namespace VideoDirector.Views
 
         private double ApplyScrubSnapping(double sec)
         {
-            if (ViewModel == null || !ViewModel.IsSnappingEnabled || _timelinePxPerSec <= 0) return sec;
+            if (ViewModel == null || _timelinePxPerSec <= 0 || !ViewModel.Tracks.Any(t => t.IsSnappingEnabled)) return sec;
             double threshold = 8.0 / _timelinePxPerSec; // 8px magnetic radius
             double best = sec;
             double minDiff = threshold;
@@ -896,9 +947,9 @@ namespace VideoDirector.Views
             return best;
         }
 
-        private double ApplyClipSnapping(double desiredStartSec, double durSec, CinematicOperation ignoreClip)
+        private double ApplyClipSnapping(double desiredStartSec, double durSec, CinematicOperation ignoreClip, Models.TimelineTrack targetTrack)
         {
-            if (ViewModel == null || !ViewModel.IsSnappingEnabled || _timelinePxPerSec <= 0) return desiredStartSec;
+            if (ViewModel == null || targetTrack == null || !targetTrack.IsSnappingEnabled || _timelinePxPerSec <= 0) return desiredStartSec;
             double threshold = 8.0 / _timelinePxPerSec; // 8px magnetic radius
             double best = desiredStartSec;
             double minDiff = threshold;
@@ -936,18 +987,18 @@ namespace VideoDirector.Views
             if (_timelinePxPerSec <= 0) return (null, false, 0);
             var t = TimeSpan.FromSeconds(Math.Max(0, p.X / _timelinePxPerSec));
 
-            if (p.Y >= RowSpineY && p.Y < RowSpineY + BlockH && ViewModel.TimelineNodes.Count > 0)
+            if (p.Y >= RowSpineY && p.Y < RowSpineY + BlockH && ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
             {
                 int idx = ViewModel.GetTimelineIndexForStoryTime(t);
-                if (idx >= 0 && idx < ViewModel.TimelineNodes.Count)
-                    return (ViewModel.TimelineNodes[idx], true, ViewModel.GetSpineClipStart(idx).TotalSeconds);
+                if (idx >= 0 && idx < ViewModel.Tracks[0].Clips.Count)
+                    return (ViewModel.Tracks[0].Clips[idx], true, ViewModel.GetSpineClipStart(idx).TotalSeconds);
             }
             else if (p.Y >= RowOvY)
             {
-                int ti = (int)((p.Y - RowOvY) / RowPitch);   // which upper-track row
-                if (ti >= 0 && ti < ViewModel.OverlayTracks.Count)
+                int ti = (int)((p.Y - RowOvY) / RowPitch) + 1;   // which upper-track row
+                if (ti > 0 && ti < ViewModel.Tracks.Count)
                 {
-                    foreach (var ov in ViewModel.OverlayTracks[ti].Clips)
+                    foreach (var ov in ViewModel.Tracks[ti].Clips)
                         if (t >= ov.StartTime && t < ov.StartTime + ov.OpDuration)
                             return (ov, false, ov.StartTimeSeconds);
                 }
@@ -960,7 +1011,7 @@ namespace VideoDirector.Views
             if (isSpine)
             {
                 ViewModel.SelectedTimelineNode = clip;
-                int idx = ViewModel.TimelineNodes.IndexOf(clip);
+                int idx = ViewModel.Tracks.Count > 0 ? ViewModel.Tracks[0].Clips.IndexOf(clip) : -1;
                 if (ViewModel.IsPlaying)
                 {
                     if (_playbackEngine?.CurrentPlayingOperation != clip && idx >= 0)
@@ -981,9 +1032,9 @@ namespace VideoDirector.Views
             if (_dragClip == null || _timelinePxPerSec <= 0) return;
 
             // Vertical: which track row is the cursor over?
-            int targetIndex = p.Y >= RowOvY ? (int)((p.Y - RowOvY) / RowPitch) : 0;
-            targetIndex = Math.Clamp(targetIndex, 0, ViewModel.OverlayTracks.Count - 1);
-            var target = ViewModel.OverlayTracks[targetIndex];
+            int targetIndex = p.Y >= RowOvY ? (int)((p.Y - RowOvY) / RowPitch) + 1 : 0;
+            targetIndex = Math.Clamp(targetIndex, 0, ViewModel.Tracks.Count - 1);
+            var target = ViewModel.Tracks[targetIndex];
             var current = TrackOf(_dragClip);
             bool trackChanged = current != null && !ReferenceEquals(current, target);
             if (trackChanged)
@@ -992,13 +1043,12 @@ namespace VideoDirector.Views
                 target.Clips.Add(_dragClip);
             }
 
-            // Horizontal: set the start time, clamped so it can't overlap siblings on this track
+            // Horizontal: set the start time
             // (tracks are strict — an overlap would silently hide one clip at playback).
-            double total = ViewModel.TotalStoryDuration.TotalSeconds;
             double dur = _dragClip.OpDuration.TotalSeconds;
             double newStart = (p.X / _timelinePxPerSec) - _dragGrabOffsetSec;
-            newStart = Math.Clamp(newStart, 0, Math.Max(0, total - dur));
-            newStart = ApplyClipSnapping(newStart, dur, _dragClip);
+            newStart = Math.Max(0, newStart);
+            newStart = ApplyClipSnapping(newStart, dur, _dragClip, target);
             _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
 
             if (trackChanged)
@@ -1010,7 +1060,7 @@ namespace VideoDirector.Views
             else if (_clipBlockElements.TryGetValue(_dragClip, out var elements))
             {
                 double newX = newStart * _timelinePxPerSec;
-                double rowY = RowOvY + targetIndex * RowPitch;
+                double rowY = targetIndex == 0 ? RowSpineY : RowOvY + (targetIndex - 1) * RowPitch;
                 foreach (var el in elements)
                 {
                     Canvas.SetLeft(el, el is StackPanel ? newX + 6 : newX);
@@ -1111,29 +1161,22 @@ namespace VideoDirector.Views
             ViewModel.CurrentOperationTimeSeconds = target;
         }
 
-        private void MagnetButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
-            {
-                ViewModel.IsSnappingEnabled = tb.IsChecked ?? true;
-            }
-        }
 
-        private void RippleEditButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
-            {
-                ViewModel.IsRippleEditEnabled = tb.IsChecked ?? true;
-            }
-        }
 
-        private void WaveformButton_Click(object? sender, RoutedEventArgs e)
+        private void TimelineScroll_PointerWheelChanged(object? sender, PointerRoutedEventArgs e)
         {
-            if (sender is Microsoft.UI.Xaml.Controls.Primitives.ToggleButton tb)
+            var p = e.GetCurrentPoint(TimelineScroll);
+            if (p.Properties.MouseWheelDelta > 0)
             {
-                ViewModel.ShowAudioWaveforms = tb.IsChecked ?? false;
-                BuildTimelineBar();
+                _timelineZoomFactor = Math.Min(16.0, _timelineZoomFactor * 1.3333333);
             }
+            else
+            {
+                _timelineZoomFactor = Math.Max(1.0, _timelineZoomFactor / 1.3333333);
+                if (_timelineZoomFactor <= 1.01) _timelineZoomFactor = 1.0;
+            }
+            BuildTimelineBar();
+            e.Handled = true;
         }
 
         private void ZoomInTimeline_Click(object? sender, RoutedEventArgs e)
@@ -1341,9 +1384,9 @@ namespace VideoDirector.Views
         // and framed immediately (adding a clip is usually the prelude to editing it).
         private void EditNewestSpineClip()
         {
-            if (ViewModel.TimelineNodes.Count == 0) return;
-            if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback(); // adding a clip drops out of playback into Edit
-            SelectClip(ViewModel.TimelineNodes[^1], isSpine: true);
+            if (ViewModel.Tracks.Count == 0 || ViewModel.Tracks[0].Clips.Count == 0) return;
+            var endSlot = ViewModel.Tracks[0].ClampToFreeSlot(null, ViewModel.TotalStoryDuration.TotalSeconds, 0);
+            SelectClip(ViewModel.Tracks[0].Clips[^1], isSpine: true);
         }
 
         private async void PlayPause_Click(object? sender, RoutedEventArgs e)
@@ -1431,12 +1474,16 @@ namespace VideoDirector.Views
                 BuildTimelineBar();
             }
             double targetAspect = 16.0 / 9.0;
-            var mpA = PlayerControl.PlayerA?.MediaPlayer;
-            var mpB = PlayerControl.PlayerB?.MediaPlayer;
+            var mpA = (Windows.Media.Playback.MediaPlayer)null;
+            var mpB = (Windows.Media.Playback.MediaPlayer)null;
             
             // Get the true video aspect ratio directly from the file container
             // This bypasses Windows Media Foundation padding (e.g. 1918x804 padded to 1920x816)
-            var activeClip = System.Linq.Enumerable.FirstOrDefault(ViewModel.TimelineNodes);
+            CinematicOperation activeClip = null;
+            if (ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
+            {
+                activeClip = ViewModel.Tracks[0].Clips[0]; // just grab the first one for baseline
+            }
             if (activeClip != null && !string.IsNullOrEmpty(activeClip.FilePath))
             {
                 try
@@ -1454,7 +1501,7 @@ namespace VideoDirector.Views
             // Fallback to WMF dimensions if file properties failed
             if (targetAspect == 16.0 / 9.0)
             {
-                var activePlayer = PlayerControl.PlayerA.Opacity > 0.5 ? mpA : mpB;
+                var activePlayer = (Windows.Media.Playback.MediaPlayer)null;
                 if (activePlayer != null && activePlayer.PlaybackSession != null)
                 {
                     uint vw = activePlayer.PlaybackSession.NaturalVideoWidth;
@@ -1529,7 +1576,7 @@ namespace VideoDirector.Views
             if (file != null)
             {
                 await ViewModel.LoadAsync(file);
-                if (ViewModel.IsAutoPlayEnabled && ViewModel.TimelineNodes.Count > 0)
+                if (ViewModel.IsAutoPlayEnabled && ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
                 {
                     _ = _playbackEngine?.StartPlaybackAsync(0);
                 }
@@ -1538,10 +1585,14 @@ namespace VideoDirector.Views
 
         private async void Clear_Click(object? sender, RoutedEventArgs e)
         {
-            bool hasContent = ViewModel.TimelineNodes.Count > 0;
-            if (!hasContent)
-                foreach (var t in ViewModel.OverlayTracks)
+            bool hasContent = false;
+            if (ViewModel.Tracks.Count > 0)
+            {
+                foreach (var t in ViewModel.Tracks)
+                {
                     if (t.Clips.Count > 0) { hasContent = true; break; }
+                }
+            }
 
             if (hasContent)
             {
@@ -1562,9 +1613,16 @@ namespace VideoDirector.Views
 
         private async void Export_Click(object? sender, RoutedEventArgs e)
         {
-            if (ViewModel.TimelineNodes.Count == 0)
+            bool hasClips = false;
+            if (ViewModel.Tracks.Count > 0)
             {
-                await ShowExportMessage("Nothing to export", "Add at least one Track 1 clip first.");
+                foreach (var track in ViewModel.Tracks)
+                    if (track.Clips.Count > 0) { hasClips = true; break; }
+            }
+
+            if (!hasClips)
+            {
+                await ShowExportMessage("Nothing to export", "Add at least one clip first.");
                 return;
             }
 
@@ -1595,7 +1653,7 @@ namespace VideoDirector.Views
             var progress = new Progress<double>(p => bar.Value = p);
 
             _ = progressDialog.ShowAsync(); // non-blocking; hidden when the render finishes
-            var result = await exporter.ExportAsync(ViewModel.TimelineNodes, ViewModel.OverlayTracks, file, progress);
+            var result = await exporter.ExportAsync(ViewModel.Tracks, file, progress);
             progressDialog.Hide();
 
             switch (result.Outcome)
@@ -1681,11 +1739,11 @@ namespace VideoDirector.Views
                 var clip = _playbackEngine?.GetActiveOverlay(slot);
                 if (clip != null) SelectClip(clip, isSpine: false);
             }
-            else if (ViewModel.TimelineNodes.Count > 0)
+            else if (ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
             {
                 int idx = ViewModel.GetTimelineIndexForStoryTime(ViewModel.CurrentStoryTime);
-                if (idx >= 0 && idx < ViewModel.TimelineNodes.Count)
-                    SelectClip(ViewModel.TimelineNodes[idx], isSpine: true);
+                if (idx >= 0 && idx < ViewModel.Tracks[0].Clips.Count)
+                    SelectClip(ViewModel.Tracks[0].Clips[idx], isSpine: true);
             }
         }
 
@@ -1693,10 +1751,11 @@ namespace VideoDirector.Views
         {
             if (!ViewModel.IsEditMode) return;
 
-            if (ViewModel.SelectedOverlay != null)
+            if (ViewModel.SelectedOverlay != null && ViewModel.Tracks.Count > 1)
             {
-                foreach (var track in ViewModel.OverlayTracks)
+                for (int i = 1; i < ViewModel.Tracks.Count; i++)
                 {
+                    var track = ViewModel.Tracks[i];
                     if (track.Clips.Contains(ViewModel.SelectedOverlay))
                     {
                         track.ResolveOverlaps();
@@ -1822,7 +1881,7 @@ namespace VideoDirector.Views
         private string TrackNameAt(double y)
         {
             if (y < RowOvY) return "Track 1";
-            int i = Math.Clamp((int)((y - RowOvY) / RowPitch), 0, Math.Max(0, ViewModel.OverlayTracks.Count - 1));
+            int i = Math.Clamp((int)((y - RowOvY) / RowPitch), 0, Math.Max(0, ViewModel.Tracks.Count - 2));
             return "Track " + (i + 2);
         }
 
@@ -1842,32 +1901,24 @@ namespace VideoDirector.Views
                 // The row you drop on decides the destination: the Track 1 row (and the ruler
                 // above it) adds to the spine; the rows below add to that overlay track.
                 bool toSpine = drop.Y < RowOvY;
-                int trackIndex = toSpine ? 0 : (int)((drop.Y - RowOvY) / RowPitch);
-                trackIndex = Math.Clamp(trackIndex, 0, Math.Max(0, ViewModel.OverlayTracks.Count - 1));
+                int trackIndex = toSpine ? 0 : (int)((drop.Y - RowOvY) / RowPitch) + 1;
+                trackIndex = Math.Clamp(trackIndex, 0, Math.Max(0, ViewModel.Tracks.Count - 1));
 
                 var items = await e.DataView.GetStorageItemsAsync();
-                var spinePaths = new System.Collections.Generic.List<string>();
                 foreach (var item in items)
                 {
                     if (item is Windows.Storage.StorageFile file && (file.FileType == ".mp4" || file.FileType == ".mkv" || file.FileType == ".avi" || file.FileType == ".jpg" || file.FileType == ".png"))
                     {
-                        if (toSpine) spinePaths.Add(item.Path);
-                        else await ViewModel.AddOverlayAsync(item.Path, startTime, trackIndex);
+                        await ViewModel.AddOverlayAsync(item.Path, startTime, trackIndex);
                     }
                 }
-                if (spinePaths.Count > 0) await ViewModel.AddFilesAsync(spinePaths);
 
-                // Open the newest clip for editing, same as a canvas drop (dropping into Edit even
-                // if we were mid-playback).
-                if (toSpine) EditNewestSpineClip();
-                else
+                // Open the newest clip for editing
+                var track = ViewModel.Tracks[trackIndex];
+                if (track.Clips.Count > 0)
                 {
-                    var track = ViewModel.OverlayTracks[trackIndex];
-                    if (track.Clips.Count > 0)
-                    {
-                        if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback();
-                        SelectClip(track.Clips[^1], isSpine: false);
-                    }
+                    if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback();
+                    SelectClip(track.Clips[^1], isSpine: trackIndex == 0);
                 }
             }
         }

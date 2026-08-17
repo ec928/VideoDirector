@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -19,32 +19,53 @@ namespace VideoDirector.ViewModels
 
     public class DirectorViewModel : ObservableObject
     {
-        public ObservableCollection<CinematicOperation> TimelineNodes { get; } = new();
-
-        // Upper tracks (Track 2..4). Same clip type as Track 1 — a clip is a clip. Upper-track
-        // clips are freely placed on the timeline (editable StartTime, gaps allowed) and
-        // composited over Track 1. Bounded at 3: track i maps 1:1 to overlay player/surface i.
-        public const int MaxOverlayTracks = 3;
-        public ObservableCollection<OverlayTrack> OverlayTracks { get; } = new();
+        public const int MaxTracks = 4;
+        public ObservableCollection<TimelineTrack> Tracks { get; } = new();
 
         // Default corners so stacked PiPs don't land on top of each other.
-        private static readonly (double x, double y)[] TrackCorners =
-            { (0.72, 0.72), (0.28, 0.72), (0.72, 0.28) };
-
-        public bool CanAddOverlayTrack => OverlayTracks.Count < MaxOverlayTracks;
-
-        public OverlayTrack AddOverlayTrack()
-        {
-            if (OverlayTracks.Count >= MaxOverlayTracks) return null;
-            int i = OverlayTracks.Count;
-            var track = new OverlayTrack
-            {
-                Name = "Track " + (i + 2),
-                DefaultCenterX = TrackCorners[i].x,
-                DefaultCenterY = TrackCorners[i].y
+        // We have 4 tracks now. Track 1 defaults to center/full screen.
+        private static readonly (double x, double y, double w, double h)[] TrackDefaults =
+            { 
+                (0.5, 0.5, 1.0, 1.0), // Track 1: full screen center
+                (0.72, 0.72, 0.3, 0.3), // Track 2
+                (0.28, 0.72, 0.3, 0.3), // Track 3
+                (0.72, 0.28, 0.3, 0.3)  // Track 4
             };
-            OverlayTracks.Add(track);
-            OnPropertyChanged(nameof(CanAddOverlayTrack));
+
+        public bool CanAddOverlayTrack => false; // Track count is now fixed.
+
+        public TimelineTrack AddTrack(int index)
+        {
+            if (index >= MaxTracks) return null;
+            var track = new TimelineTrack
+            {
+                Name = "Track " + (index + 1),
+                DefaultCenterX = TrackDefaults[index].x,
+                DefaultCenterY = TrackDefaults[index].y,
+                IsGapless = false // All tracks allow gaps now
+            };
+            
+            // Re-route clip property changes to TotalStoryTime
+            track.Clips.CollectionChanged += (s, e) =>
+            {
+                if (e.OldItems != null)
+                {
+                    foreach (CinematicOperation item in e.OldItems)
+                    {
+                        item.PropertyChanged -= CinematicOperation_PropertyChanged;
+                    }
+                }
+                if (e.NewItems != null)
+                {
+                    foreach (CinematicOperation item in e.NewItems)
+                    {
+                        item.PropertyChanged += CinematicOperation_PropertyChanged;
+                    }
+                }
+                OnPropertyChanged(nameof(TotalStoryTime));
+            };
+
+            Tracks.Insert(index, track);
             return track;
         }
 
@@ -152,13 +173,16 @@ namespace VideoDirector.ViewModels
         {
             get
             {
-                TimeSpan total = TimeSpan.Zero;
-                foreach (var node in TimelineNodes)
+                TimeSpan max = TimeSpan.Zero;
+                foreach (var track in Tracks)
                 {
-                    total += node.OpDuration;
-                    total += node.TransitionDuration;
+                    foreach (var node in track.Clips)
+                    {
+                        var end = node.StartTime + node.OpDuration + node.TransitionDuration;
+                        if (end > max) max = end;
+                    }
                 }
-                return total;
+                return max;
             }
         }
 
@@ -169,69 +193,63 @@ namespace VideoDirector.ViewModels
             set => SetProperty(ref _currentStoryTime, value);
         }
 
-        private CinematicOperation _selectedTimelineNode;
+        private CinematicOperation _selectedClip;
+        public CinematicOperation SelectedClip
+        {
+            get => _selectedClip;
+            set
+            {
+                if (SetProperty(ref _selectedClip, value))
+                {
+                    OnPropertyChanged(nameof(HasSelection));
+                    OnPropertyChanged(nameof(IsTrack1Selected));
+                    OnPropertyChanged(nameof(IsOverlaySelected));
+                    OnPropertyChanged(nameof(SelectedTrackLabel));
+                    OnPropertyChanged(nameof(ModeLabel));
+                }
+            }
+        }
+
+        // SelectedTimelineNode and SelectedOverlay were used for splitting properties.
+        // We map them roughly for backwards compatibility with UI bindings, though we should unify them.
         public CinematicOperation SelectedTimelineNode
         {
-            get => _selectedTimelineNode;
-            set
-            {
-                if (SetProperty(ref _selectedTimelineNode, value))
-                {
-                    if (value != null) SelectedOverlay = null;
-                    OnPropertyChanged(nameof(HasSelection));
-                    OnPropertyChanged(nameof(SelectedClip));
-                    OnPropertyChanged(nameof(IsTrack1Selected));
-                    OnPropertyChanged(nameof(IsOverlaySelected));
-                    OnPropertyChanged(nameof(SelectedTrackLabel));
-                    OnPropertyChanged(nameof(ModeLabel));
-                }
-            }
+            get => (IsTrack1Selected) ? _selectedClip : null;
+            set { if (value != null) SelectedClip = value; }
         }
 
-        private CinematicOperation _selectedOverlay;
         public CinematicOperation SelectedOverlay
         {
-            get => _selectedOverlay;
-            set
-            {
-                if (SetProperty(ref _selectedOverlay, value))
-                {
-                    if (value != null) SelectedTimelineNode = null;
-                    OnPropertyChanged(nameof(HasSelection));
-                    OnPropertyChanged(nameof(SelectedClip));
-                    OnPropertyChanged(nameof(IsTrack1Selected));
-                    OnPropertyChanged(nameof(IsOverlaySelected));
-                    OnPropertyChanged(nameof(SelectedTrackLabel));
-                    OnPropertyChanged(nameof(ModeLabel));
-                }
-            }
+            get => (!IsTrack1Selected && _selectedClip != null) ? _selectedClip : null;
+            set { if (value != null) SelectedClip = value; }
         }
 
-        // True when either a Track 1 clip or an overlay is selected — the right panel shows
-        // the relevant inspector, otherwise a "nothing selected" hint.
-        public bool HasSelection => _selectedTimelineNode != null || _selectedOverlay != null;
+        public bool HasSelection => _selectedClip != null;
 
-        // The single selected clip regardless of track — the unified inspector binds to this so
-        // Track 1 and Track 2+ share one layout. IsTrack1Selected / IsOverlaySelected drive the
-        // visibility of the track-specific rows (Speed/Transition vs Size/Opacity).
-        public CinematicOperation SelectedClip => _selectedTimelineNode ?? _selectedOverlay;
-        public bool IsTrack1Selected => _selectedTimelineNode != null;
-        public bool IsOverlaySelected => _selectedOverlay != null;
+        // IsTrack1Selected / IsOverlaySelected drive the visibility of the track-specific rows.
+        public bool IsTrack1Selected
+        {
+            get
+            {
+                if (_selectedClip == null || Tracks.Count == 0) return false;
+                return Tracks[0].Clips.Contains(_selectedClip);
+            }
+        }
+        public bool IsOverlaySelected => _selectedClip != null && !IsTrack1Selected;
 
-        // Plain, correct track label for the selected clip — "Track 1 · main" for the spine, or the
-        // real overlay track number (Track 2/3/4 · overlay). Replaces the old two hardcoded labels
-        // that always said "Track 2" even for track 3/4.
         public string SelectedTrackLabel
         {
             get
             {
-                if (_selectedTimelineNode != null) return "Track 1 · main";
-                if (_selectedOverlay != null)
+                if (_selectedClip != null)
                 {
-                    for (int i = 0; i < OverlayTracks.Count; i++)
-                        if (OverlayTracks[i].Clips.Contains(_selectedOverlay))
-                            return $"Track {i + 2} · overlay";
-                    return "Overlay";
+                    for (int i = 0; i < Tracks.Count; i++)
+                    {
+                        if (Tracks[i].Clips.Contains(_selectedClip))
+                        {
+                            return i == 0 ? "Track 1 · main" : $"Track {i + 1} · overlay";
+                        }
+                    }
                 }
                 return string.Empty;
             }
@@ -265,7 +283,6 @@ namespace VideoDirector.ViewModels
                 }
             }
         }
-
         private TimeSpan _currentOperationTime;
         public TimeSpan CurrentOperationTime
         {
@@ -278,15 +295,6 @@ namespace VideoDirector.ViewModels
                 }
             }
         }
-
-        private bool _isSnappingEnabled = true;
-        public bool IsSnappingEnabled { get => _isSnappingEnabled; set => SetProperty(ref _isSnappingEnabled, value); }
-
-        private bool _isRippleEditEnabled = true;
-        public bool IsRippleEditEnabled { get => _isRippleEditEnabled; set => SetProperty(ref _isRippleEditEnabled, value); }
-
-        private bool _showAudioWaveforms = false;
-        public bool ShowAudioWaveforms { get => _showAudioWaveforms; set => SetProperty(ref _showAudioWaveforms, value); }
 
         public double CurrentOperationTimeSeconds
         {
@@ -352,40 +360,19 @@ namespace VideoDirector.ViewModels
 
         public DirectorViewModel()
         {
-            TimelineNodes.CollectionChanged += TimelineNodes_CollectionChanged;
-            EnsureOverlayTracks(); // always the full set of upper tracks (Track 2..4)
-            ResetHistory();        // baseline = the empty project, so the first edit is undoable
+            EnsureTracks(); // always the full set of tracks
+            ResetHistory(); // baseline = the empty project, so the first edit is undoable
         }
 
-        // The track count is fixed: 1 spine + MaxOverlayTracks upper tracks are always present,
-        // so the timeline always shows Track 1..4 and nothing has to be "added".
-        public void EnsureOverlayTracks()
+        // The track count is fixed: 1 main + MaxOverlayTracks upper tracks are always present.
+        public void EnsureTracks()
         {
-            while (OverlayTracks.Count < MaxOverlayTracks) AddOverlayTrack();
-        }
-
-        private void TimelineNodes_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-        {
-            if (e.OldItems != null)
-            {
-                foreach (CinematicOperation item in e.OldItems)
-                {
-                    item.PropertyChanged -= CinematicOperation_PropertyChanged;
-                }
-            }
-            if (e.NewItems != null)
-            {
-                foreach (CinematicOperation item in e.NewItems)
-                {
-                    item.PropertyChanged += CinematicOperation_PropertyChanged;
-                }
-            }
-            OnPropertyChanged(nameof(TotalStoryTime));
+            while (Tracks.Count < MaxTracks) AddTrack(Tracks.Count);
         }
 
         private void CinematicOperation_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            if (e.PropertyName == nameof(CinematicOperation.OpDuration) || e.PropertyName == nameof(CinematicOperation.TransitionDuration))
+            if (e.PropertyName == nameof(CinematicOperation.OpDuration) || e.PropertyName == nameof(CinematicOperation.TransitionDuration) || e.PropertyName == nameof(CinematicOperation.StartTime))
             {
                 OnPropertyChanged(nameof(TotalStoryTime));
             }
@@ -424,11 +411,14 @@ namespace VideoDirector.ViewModels
                 }
                 catch { }
 
-                // Update previous clip's transition if it doesn't have one
-                if (TimelineNodes.Count > 0)
+                // Update previous clip's transition if it doesn't have one, if dropping on Track 1 and it's gapless.
+                var mainTrack = Tracks[0];
+                double newStartTime = 0;
+                
+                if (mainTrack.Clips.Count > 0)
                 {
-                    var lastNode = TimelineNodes[^1];
-                    if (lastNode.TransitionDuration == TimeSpan.Zero)
+                    var lastNode = mainTrack.Clips[^1];
+                    if (mainTrack.IsGapless && lastNode.TransitionDuration == TimeSpan.Zero)
                     {
                         lastNode.TransitionDuration = TimeSpan.FromSeconds(1);
                         if (lastNode.TransitionStyle == TransitionStyle.HardSnap)
@@ -436,62 +426,61 @@ namespace VideoDirector.ViewModels
                             lastNode.TransitionStyle = TransitionStyle.Crossfade;
                         }
                     }
+                    newStartTime = mainTrack.ClampToFreeSlot(null, mainTrack.Clips[^1].StartTimeSeconds + mainTrack.Clips[^1].OpDuration.TotalSeconds, duration.TotalSeconds);
                 }
 
-                // Insert the new operation
-                TimelineNodes.Add(new CinematicOperation
+                // Insert the new operation on Track 1
+                mainTrack.Clips.Add(new CinematicOperation
                 {
                     FilePath = path,
                     SourceDuration = duration,   // full source length; trim In/Out live within it
                     OpDuration = duration,
                     VideoEndTime = duration,
+                    StartTime = TimeSpan.FromSeconds(newStartTime),
                     TransitionDuration = TimeSpan.Zero, // Default 0s transition for the new last clip
-                    Thumbnail = thumbnail
+                    Thumbnail = thumbnail,
+                    PlacementCenterX = mainTrack.DefaultCenterX,
+                    PlacementCenterY = mainTrack.DefaultCenterY,
+                    PlacementWidth = TrackDefaults[0].w,
+                    PlacementHeight = TrackDefaults[0].h
                 });
             }
             RecordIfChanged();
         }
 
         // Finds which Track 1 clip a given absolute story time falls within. Used to resume
-        // playback from the correct clip when there's no selected timeline node to go by
-        // (e.g. an overlay is selected instead) rather than silently restarting from clip 0.
+        // playback from the correct clip when there's no selected timeline node to go by.
         public int GetTimelineIndexForStoryTime(TimeSpan storyTime)
         {
-            TimeSpan accumulated = TimeSpan.Zero;
-            for (int i = 0; i < TimelineNodes.Count; i++)
+            if (Tracks.Count == 0 || Tracks[0].Clips.Count == 0) return 0;
+            for (int i = 0; i < Tracks[0].Clips.Count; i++)
             {
-                var nodeSpan = TimelineNodes[i].OpDuration + TimelineNodes[i].TransitionDuration;
-                if (storyTime < accumulated + nodeSpan || i == TimelineNodes.Count - 1)
+                var clip = Tracks[0].Clips[i];
+                var end = clip.StartTime + clip.OpDuration + clip.TransitionDuration;
+                if (storyTime >= clip.StartTime && storyTime < end)
                 {
                     return i;
                 }
-                accumulated += nodeSpan;
+            }
+            // If it falls in a gap, return the clip index just before it or the last clip
+            for (int i = Tracks[0].Clips.Count - 1; i >= 0; i--)
+            {
+                if (storyTime >= Tracks[0].Clips[i].StartTime) return i;
             }
             return 0;
         }
 
         // --- Story-time model (§7C): single authority the trackbar + scrubber read, so they
-        // agree with playback at transition boundaries. The spine (Track 1) defines total length;
-        // transitions are ADDITIVE — each spine clip occupies OpDuration + TransitionDuration.
+        // agree with playback at transition boundaries. 
 
-        // Total composite length = the spine's cumulative span. Overlays live within it.
-        public TimeSpan TotalStoryDuration
-        {
-            get
-            {
-                var total = TimeSpan.Zero;
-                foreach (var clip in TimelineNodes) total += clip.OpDuration + clip.TransitionDuration;
-                return total;
-            }
-        }
+        // Total composite length = max end time across all tracks.
+        public TimeSpan TotalStoryDuration => TotalStoryTime;
 
-        // Story-time start of spine clip `index` = cumulative span of everything before it.
+        // Story-time start of spine clip `index`.
         public TimeSpan GetSpineClipStart(int index)
         {
-            var start = TimeSpan.Zero;
-            for (int i = 0; i < index && i < TimelineNodes.Count; i++)
-                start += TimelineNodes[i].OpDuration + TimelineNodes[i].TransitionDuration;
-            return start;
+            if (Tracks.Count == 0 || index < 0 || index >= Tracks[0].Clips.Count) return TimeSpan.Zero;
+            return Tracks[0].Clips[index].StartTime;
         }
 
         public async Task AddOverlayAsync(string filePath, TimeSpan startTime, int trackIndex = 0)
@@ -533,12 +522,11 @@ namespace VideoDirector.ViewModels
             // An upper-track clip is a normal CinematicOperation placed at the current playhead.
             // Content framing defaults to full-frame (marks at scale 1); the clip appears as a
             // 30% corner PiP via its placement (PlacementScale/Center defaults on the clip).
-            if (OverlayTracks.Count == 0) AddOverlayTrack();
-            trackIndex = Math.Clamp(trackIndex, 0, OverlayTracks.Count - 1);
-            var track = OverlayTracks[trackIndex];
+            if (Tracks.Count == 0) EnsureTracks();
+            trackIndex = Math.Clamp(trackIndex, 0, Tracks.Count - 1);
+            var track = Tracks[trackIndex];
 
-            // Same clamp as dragging: a dropped file must not land on top of an existing clip,
-            // since only one clip per track can be active at a time.
+            // Same clamp as dragging: a dropped file must not land on top of an existing clip
             startTime = TimeSpan.FromSeconds(
                 track.ClampToFreeSlot(null, Math.Max(0, startTime.TotalSeconds), duration.TotalSeconds));
 
@@ -550,10 +538,12 @@ namespace VideoDirector.ViewModels
                 VideoEndTime = duration,
                 StartTime = startTime,
                 SourceAspect = sourceAspect,
-                Volume = 0.0,                // overlays start muted; opt in per-clip if the PiP's audio matters
+                Volume = trackIndex == 0 ? 1.0 : 0.0,
                 PlacementCenterX = track.DefaultCenterX,
                 PlacementCenterY = track.DefaultCenterY,
-                Thumbnail = thumbnail
+                Thumbnail = thumbnail,
+                PlacementWidth = TrackDefaults[trackIndex].w,
+                PlacementHeight = TrackDefaults[trackIndex].h
             };
             track.Clips.Add(overlay);
             RecordIfChanged();
@@ -562,12 +552,12 @@ namespace VideoDirector.ViewModels
             // playhead appears frozen). Adding clips is an Arrange activity — stay in Arrange.
         }
 
-        // Serialization wrapper. OverlayTracks is the current shape; OverlayClips is the legacy
-        // flat list, still read so older project files migrate into track 0.
+        // Serialization wrapper. 
         private class ProjectData
         {
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> TimelineNodes { get; set; } = new();
-            public System.Collections.ObjectModel.ObservableCollection<OverlayTrack> OverlayTracks { get; set; } = new();
+            public System.Collections.ObjectModel.ObservableCollection<TimelineTrack> OverlayTracks { get; set; } = new();
+            public System.Collections.ObjectModel.ObservableCollection<TimelineTrack> Tracks { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> OverlayClips { get; set; } = new();
         }
 
@@ -575,8 +565,7 @@ namespace VideoDirector.ViewModels
         {
             var data = new ProjectData
             {
-                TimelineNodes = TimelineNodes,
-                OverlayTracks = OverlayTracks
+                Tracks = Tracks
             };
             var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
             using var stream = await file.OpenStreamForWriteAsync();
@@ -597,7 +586,8 @@ namespace VideoDirector.ViewModels
             var trimmed = json.TrimStart();
 
             System.Collections.ObjectModel.ObservableCollection<CinematicOperation> nodes = null;
-            System.Collections.ObjectModel.ObservableCollection<OverlayTrack> tracks = null;
+            System.Collections.ObjectModel.ObservableCollection<TimelineTrack> legacyOverlayTracks = null;
+            System.Collections.ObjectModel.ObservableCollection<TimelineTrack> tracks = null;
             System.Collections.ObjectModel.ObservableCollection<CinematicOperation> legacyOverlays = null;
 
             if (trimmed.StartsWith("["))
@@ -612,42 +602,76 @@ namespace VideoDirector.ViewModels
                 if (data != null)
                 {
                     nodes = data.TimelineNodes;
-                    tracks = data.OverlayTracks;
+                    legacyOverlayTracks = data.OverlayTracks;
+                    tracks = data.Tracks;
                     legacyOverlays = data.OverlayClips;
                 }
             }
 
-            if (nodes != null)
-            {
-                TimelineNodes.Clear();
-                foreach (var node in nodes)
-                {
-                    TimelineNodes.Add(node);
-                    _ = LoadThumbnailAsync(node, dispatcher);
-                }
-            }
+            Tracks.Clear();
+            EnsureTracks();
 
-            OverlayTracks.Clear();
             if (tracks != null && tracks.Count > 0)
             {
+                Tracks.Clear();
                 foreach (var track in tracks)
                 {
-                    if (OverlayTracks.Count >= MaxOverlayTracks) break;
-                    OverlayTracks.Add(track);
-                    foreach (var clip in track.Clips) _ = LoadOverlayThumbnailAsync(clip, dispatcher);
+                    if (Tracks.Count >= MaxTracks) break;
+                    // Add listeners to loaded tracks
+                    track.Clips.CollectionChanged += (s, e) =>
+                    {
+                        if (e.OldItems != null) foreach (CinematicOperation item in e.OldItems) item.PropertyChanged -= CinematicOperation_PropertyChanged;
+                        if (e.NewItems != null) foreach (CinematicOperation item in e.NewItems) item.PropertyChanged += CinematicOperation_PropertyChanged;
+                        OnPropertyChanged(nameof(TotalStoryTime));
+                    };
+                    foreach (var clip in track.Clips) { clip.PropertyChanged += CinematicOperation_PropertyChanged; _ = LoadThumbnailAsync(clip, dispatcher); }
+                    Tracks.Add(track);
                 }
             }
-            else if (legacyOverlays != null && legacyOverlays.Count > 0)
+            else
             {
-                // Migrate an older flat overlay list into track 0.
-                var track = AddOverlayTrack();
-                foreach (var clip in legacyOverlays)
+                // Migrate legacy formats
+                if (nodes != null)
                 {
-                    track.Clips.Add(clip);
-                    _ = LoadOverlayThumbnailAsync(clip, dispatcher);
+                    double accumulated = 0;
+                    foreach (var node in nodes)
+                    {
+                        node.StartTime = TimeSpan.FromSeconds(accumulated);
+                        accumulated += node.OpDuration.TotalSeconds + node.TransitionDuration.TotalSeconds;
+                        node.PlacementWidth = TrackDefaults[0].w;
+                        node.PlacementHeight = TrackDefaults[0].h;
+                        node.PlacementCenterX = TrackDefaults[0].x;
+                        node.PlacementCenterY = TrackDefaults[0].y;
+                        Tracks[0].Clips.Add(node);
+                        _ = LoadThumbnailAsync(node, dispatcher);
+                    }
+                }
+
+                if (legacyOverlayTracks != null && legacyOverlayTracks.Count > 0)
+                {
+                    int trackIdx = 1;
+                    foreach (var track in legacyOverlayTracks)
+                    {
+                        if (trackIdx >= MaxTracks) break;
+                        foreach (var clip in track.Clips)
+                        {
+                            Tracks[trackIdx].Clips.Add(clip);
+                            _ = LoadThumbnailAsync(clip, dispatcher);
+                        }
+                        trackIdx++;
+                    }
+                }
+                else if (legacyOverlays != null && legacyOverlays.Count > 0)
+                {
+                    foreach (var clip in legacyOverlays)
+                    {
+                        Tracks[1].Clips.Add(clip);
+                        _ = LoadThumbnailAsync(clip, dispatcher);
+                    }
                 }
             }
-            EnsureOverlayTracks(); // top up so the timeline always shows the full Track 1..4 set
+            
+            EnsureTracks(); // top up so the timeline always shows the full set
             OnPropertyChanged(nameof(CanAddOverlayTrack));
             ResetHistory(); // the loaded project is the new baseline, not an undo step
         }
@@ -695,9 +719,8 @@ namespace VideoDirector.ViewModels
 
         public void Clear()
         {
-            TimelineNodes.Clear();
-            OverlayTracks.Clear();
-            EnsureOverlayTracks();
+            Tracks.Clear();
+            EnsureTracks();
             RecordIfChanged();
         }
 
@@ -718,7 +741,7 @@ namespace VideoDirector.ViewModels
 
         private string CaptureSnapshot()
         {
-            var data = new ProjectData { TimelineNodes = TimelineNodes, OverlayTracks = OverlayTracks };
+            var data = new ProjectData { Tracks = Tracks };
             return System.Text.Json.JsonSerializer.Serialize(data, _snapshotOptions);
         }
 
@@ -788,27 +811,30 @@ namespace VideoDirector.ViewModels
 
             var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
-            SelectedTimelineNode = null;
-            SelectedOverlay = null;
+            SelectedClip = null;
 
-            TimelineNodes.Clear();
-            if (data.TimelineNodes != null)
-                foreach (var node in data.TimelineNodes)
+            Tracks.Clear();
+            EnsureTracks();
+
+            if (data.Tracks != null)
+            {
+                Tracks.Clear();
+                foreach (var track in data.Tracks)
                 {
-                    TimelineNodes.Add(node);
-                    _ = LoadThumbnailAsync(node, dispatcher);
+                    // Add listeners to loaded tracks
+                    track.Clips.CollectionChanged += (s, e) =>
+                    {
+                        if (e.OldItems != null) foreach (CinematicOperation item in e.OldItems) item.PropertyChanged -= CinematicOperation_PropertyChanged;
+                        if (e.NewItems != null) foreach (CinematicOperation item in e.NewItems) item.PropertyChanged += CinematicOperation_PropertyChanged;
+                        OnPropertyChanged(nameof(TotalStoryTime));
+                    };
+                    foreach (var clip in track.Clips) { clip.PropertyChanged += CinematicOperation_PropertyChanged; _ = LoadThumbnailAsync(clip, dispatcher); }
+                    Tracks.Add(track);
                 }
-
-            OverlayTracks.Clear();
-            if (data.OverlayTracks != null)
-                foreach (var track in data.OverlayTracks)
-                {
-                    if (OverlayTracks.Count >= MaxOverlayTracks) break;
-                    OverlayTracks.Add(track);
-                    foreach (var clip in track.Clips) _ = LoadOverlayThumbnailAsync(clip, dispatcher);
-                }
-
-            EnsureOverlayTracks();
+            }
+            // Legacy restore paths handled inside LoadAsync. Snapshot restoration only 
+            // needs to deal with the current format since snapshots are created in-session.
+            EnsureTracks();
             OnPropertyChanged(nameof(CanAddOverlayTrack));
             OnPropertyChanged(nameof(TotalStoryTime));
         }

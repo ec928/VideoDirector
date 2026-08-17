@@ -1,17 +1,17 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 
 namespace VideoDirector.Models
 {
-    // One upper track (Track 2, 3, 4). Strict: its clips are sequential and never overlap, so at
-    // most ONE clip is active at any story time — which is what lets each track own exactly one
-    // player/render surface. Simultaneity is expressed by using another track, never by stacking
-    // within one. The spine (Track 1) is NOT an OverlayTrack; it keeps its own A/B-roll path.
-    public sealed class OverlayTrack : ObservableObject
+    // A generalized track that can hold clips. Clips on a track never overlap, so at most ONE clip
+    // is active at any story time. The engine addresses these generically (track 0 = bottom, track 3 = top).
+    public sealed class TimelineTrack : ObservableObject
     {
         public ObservableCollection<CinematicOperation> Clips { get; set; } = new();
 
-        // Where new clips on this track default to sitting (opposing corners per track).
+        // Where new clips on this track default to sitting. 
+        // For Track 1 (index 0), we will default to 0.5, 0.5 (center) and width/height = 1.0 (full screen) 
+        // in the ViewModel when creating the track.
         private double _defaultCenterX = 0.72;
         public double DefaultCenterX
         {
@@ -33,29 +33,84 @@ namespace VideoDirector.Models
             set => SetProperty(ref _name, value);
         }
 
+        // True if this track forces clips to be perfectly adjacent (like the old spine).
+        private bool _isGapless = false;
+        public bool IsGapless
+        {
+            get => _isGapless;
+            set
+            {
+                if (SetProperty(ref _isGapless, value))
+                {
+                    if (value) ResolveOverlaps();
+                }
+            }
+        }
+
+        private bool _isSnappingEnabled = true;
+        public bool IsSnappingEnabled
+        {
+            get => _isSnappingEnabled;
+            set => SetProperty(ref _isSnappingEnabled, value);
+        }
+
+        private bool _showAudioWaveforms = false;
+        public bool ShowAudioWaveforms
+        {
+            get => _showAudioWaveforms;
+            set
+            {
+                if (SetProperty(ref _showAudioWaveforms, value))
+                {
+                    // This change requires a timeline rebuild. We'll rely on the VM/View to handle it.
+                }
+            }
+        }
+
         // Nearest start time (seconds) at which a clip of length `dur` fits WITHOUT overlapping the
-        // others on this track. The track is strict — only one clip can be active at a time, so an
-        // overlap would silently hide one at playback. Pass the clip being moved so it ignores
-        // itself; pass null when placing a brand-new clip.
+        // others on this track.
         public void ResolveOverlaps()
         {
             var sorted = new System.Collections.Generic.List<CinematicOperation>(Clips);
             sorted.Sort((a, b) => a.StartTimeSeconds.CompareTo(b.StartTimeSeconds));
-            for (int i = 1; i < sorted.Count; i++)
+            
+            double nextValidStart = 0.0;
+
+            for (int i = 0; i < sorted.Count; i++)
             {
-                var prev = sorted[i - 1];
                 var curr = sorted[i];
-                double prevEnd = prev.StartTimeSeconds + prev.OpDuration.TotalSeconds;
-                if (curr.StartTimeSeconds < prevEnd)
+
+                if (_isGapless)
                 {
-                    curr.StartTimeSeconds = prevEnd;
+                    curr.StartTimeSeconds = nextValidStart;
                 }
+                else if (curr.StartTimeSeconds < nextValidStart && i > 0)
+                {
+                    curr.StartTimeSeconds = nextValidStart;
+                }
+                
+                nextValidStart = curr.StartTimeSeconds + curr.OpDuration.TotalSeconds;
             }
         }
 
         public double ClampToFreeSlot(CinematicOperation moving, double start, double dur)
         {
             start = Math.Max(0, start);
+
+            if (_isGapless)
+            {
+                // In gapless mode, a new clip just goes to the very end. 
+                // If it's an existing clip moving, we let Reorder logic handle it elsewhere, 
+                // but for simple drops, append it.
+                double maxEnd = 0.0;
+                foreach (var other in Clips)
+                {
+                    if (moving != null && ReferenceEquals(other, moving)) continue;
+                    double e = other.StartTimeSeconds + other.OpDuration.TotalSeconds;
+                    if (e > maxEnd) maxEnd = e;
+                }
+                return maxEnd;
+            }
 
             // Occupied spans on this track (excluding the clip being moved), merged so the gaps
             // between them are real.
