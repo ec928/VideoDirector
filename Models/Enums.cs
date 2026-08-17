@@ -1,4 +1,4 @@
-﻿namespace VideoDirector.Models
+namespace VideoDirector.Models
 {
     public enum CurveProfile
     {
@@ -13,5 +13,13 @@
         Crossfade,
         CinematicBridge,
         DipToColor
+    }
+
+    public enum BorderType
+    {
+        None,
+        Solid,
+        Soft,
+        FilmStrip
     }
 }

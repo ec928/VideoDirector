@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -330,6 +330,27 @@ namespace VideoDirector.Models
         {
             get => _volume;
             set => SetProperty(ref _volume, Math.Clamp(value, 0.0, 1.0));
+        }
+
+        private BorderType _borderType = BorderType.None;
+        public BorderType BorderType
+        {
+            get => _borderType;
+            set => SetProperty(ref _borderType, value);
+        }
+
+        private Windows.UI.Color _borderColor = Microsoft.UI.Colors.White;
+        public Windows.UI.Color BorderColor
+        {
+            get => _borderColor;
+            set => SetProperty(ref _borderColor, value);
+        }
+
+        private double _borderThickness = 4.0;
+        public double BorderThickness
+        {
+            get => _borderThickness;
+            set => SetProperty(ref _borderThickness, Math.Clamp(value, 0.0, 50.0));
         }
 
         // End of this clip's window on the master timeline (upper tracks).

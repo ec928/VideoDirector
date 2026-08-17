@@ -765,6 +765,26 @@ namespace VideoDirector.Views
             var hit = HitClip(_lastHoverPoint);
             _contextClip = hit.clip;
             _contextIsSpine = hit.isSpine;
+
+            if (_contextClip != null)
+            {
+                TimelineBorderTypeNone.IsChecked = _contextClip.BorderType == Models.BorderType.None;
+                TimelineBorderTypeSolid.IsChecked = _contextClip.BorderType == Models.BorderType.Solid;
+                TimelineBorderTypeSoft.IsChecked = _contextClip.BorderType == Models.BorderType.Soft;
+                TimelineBorderTypeFilmStrip.IsChecked = _contextClip.BorderType == Models.BorderType.FilmStrip;
+
+                TimelineBorderColorWhite.IsChecked = _contextClip.BorderColor == Microsoft.UI.Colors.White;
+                TimelineBorderColorBlack.IsChecked = _contextClip.BorderColor == Microsoft.UI.Colors.Black;
+                TimelineBorderColorRed.IsChecked = _contextClip.BorderColor == Microsoft.UI.Colors.Red;
+                TimelineBorderColorGold.IsChecked = _contextClip.BorderColor == Microsoft.UI.Colors.Gold;
+                TimelineBorderColorBlue.IsChecked = _contextClip.BorderColor == Microsoft.UI.Colors.DodgerBlue;
+                TimelineBorderColorGreen.IsChecked = _contextClip.BorderColor == Microsoft.UI.Colors.LimeGreen;
+                TimelineBorderColorDarkGrey.IsChecked = _contextClip.BorderColor == Microsoft.UI.Colors.DarkGray;
+
+                TimelineBorderThick2.IsChecked = _contextClip.BorderThickness == 2;
+                TimelineBorderThick4.IsChecked = _contextClip.BorderThickness == 4;
+                TimelineBorderThick8.IsChecked = _contextClip.BorderThickness == 8;
+            }
         }
 
         private void TimelineSplit_Click(object? sender, RoutedEventArgs e)
@@ -785,6 +805,46 @@ namespace VideoDirector.Views
         private void TimelineRemove_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextClip != null) RemoveClip(_contextClip, _contextIsSpine);
+        }
+
+        private void TimelineEdit_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip != null) SelectClip(_contextClip, _contextIsSpine);
+        }
+
+        private void TimelineBorderType_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip != null && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (Enum.TryParse(tag, out Models.BorderType type))
+                    _contextClip.BorderType = type;
+                _playbackEngine?.RefreshComposite();
+            }
+        }
+
+        private void TimelineBorderColor_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip != null && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (tag == "White") _contextClip.BorderColor = Microsoft.UI.Colors.White;
+                else if (tag == "Black") _contextClip.BorderColor = Microsoft.UI.Colors.Black;
+                else if (tag == "Red") _contextClip.BorderColor = Microsoft.UI.Colors.Red;
+                else if (tag == "Gold") _contextClip.BorderColor = Microsoft.UI.Colors.Gold;
+                else if (tag == "Blue") _contextClip.BorderColor = Microsoft.UI.Colors.DodgerBlue;
+                else if (tag == "Green") _contextClip.BorderColor = Microsoft.UI.Colors.LimeGreen;
+                else if (tag == "DarkGrey") _contextClip.BorderColor = Microsoft.UI.Colors.DarkGray;
+                _playbackEngine?.RefreshComposite();
+            }
+        }
+
+        private void TimelineBorderThickness_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip != null && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (double.TryParse(tag, out double t))
+                    _contextClip.BorderThickness = t;
+                _playbackEngine?.RefreshComposite();
+            }
         }
 
         // A full clone of a clip's editable state. SourceDuration and PlaybackSpeed must precede

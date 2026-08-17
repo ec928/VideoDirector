@@ -73,13 +73,6 @@
             </Grid>
         </Grid>
 
-        <!-- WYSIWYG Overlay for Edit Mode -->
-        <Canvas x:Name="WysiwygCanvas" x:FieldModifier="public" IsHitTestVisible="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-            <Rectangle x:Name="WysiwygStartRect" x:FieldModifier="public" Stroke="Cyan" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" Visibility="Collapsed" />
-            <Rectangle x:Name="WysiwygMidRect" x:FieldModifier="public" Stroke="DeepSkyBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" Visibility="Collapsed" />
-            <Rectangle x:Name="WysiwygEndRect" x:FieldModifier="public" Stroke="RoyalBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" Visibility="Collapsed" />
-        </Canvas>
-
         <!-- Interactive Input Layer for Manual Targeting -->
         <Grid x:Name="InputLayer" Background="Transparent"
               PointerWheelChanged="InputLayer_PointerWheelChanged"
@@ -91,11 +84,74 @@
               RightTapped="InputLayer_RightTapped">
             <FlyoutBase.AttachedFlyout>
                 <MenuFlyout x:Name="PipContextMenu">
+                    <MenuFlyoutItem Text="Edit" Click="EditClip_Click" />
+                    <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Full Screen (16:9)" Click="MakeFullScreen_Click" />
                     <MenuFlyoutItem Text="Window (30% PIP)" Click="MakeWindow_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutSubItem Text="Border" x:Name="PipBorderMenu">
+                        <RadioMenuFlyoutItem x:Name="PipBorderTypeNone" Text="Type: None" Click="BorderType_Click" Tag="None" GroupName="PipBorderType" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderTypeSolid" Text="Type: Solid" Click="BorderType_Click" Tag="Solid" GroupName="PipBorderType" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderTypeSoft" Text="Type: Soft" Click="BorderType_Click" Tag="Soft" GroupName="PipBorderType" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderTypeFilmStrip" Text="Type: FilmStrip" Click="BorderType_Click" Tag="FilmStrip" GroupName="PipBorderType" />
+                        <MenuFlyoutSeparator />
+                        <RadioMenuFlyoutItem x:Name="PipBorderColorWhite" Text="Color: White" Click="BorderColor_Click" Tag="White" GroupName="PipBorderColor" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderColorBlack" Text="Color: Black" Click="BorderColor_Click" Tag="Black" GroupName="PipBorderColor" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderColorRed" Text="Color: Red" Click="BorderColor_Click" Tag="Red" GroupName="PipBorderColor" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderColorGold" Text="Color: Gold" Click="BorderColor_Click" Tag="Gold" GroupName="PipBorderColor" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderColorBlue" Text="Color: Blue" Click="BorderColor_Click" Tag="Blue" GroupName="PipBorderColor" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderColorGreen" Text="Color: Green" Click="BorderColor_Click" Tag="Green" GroupName="PipBorderColor" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderColorDarkGrey" Text="Color: Dark Grey" Click="BorderColor_Click" Tag="DarkGrey" GroupName="PipBorderColor" />
+                        <MenuFlyoutSeparator />
+                        <RadioMenuFlyoutItem x:Name="PipBorderThick2" Text="Thickness: Thin (2)" Click="BorderThickness_Click" Tag="2" GroupName="PipBorderThickness" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderThick4" Text="Thickness: Normal (4)" Click="BorderThickness_Click" Tag="4" GroupName="PipBorderThickness" />
+                        <RadioMenuFlyoutItem x:Name="PipBorderThick8" Text="Thickness: Thick (8)" Click="BorderThickness_Click" Tag="8" GroupName="PipBorderThickness" />
+                    </MenuFlyoutSubItem>
                 </MenuFlyout>
             </FlyoutBase.AttachedFlyout>
         </Grid>
+
+        <!-- WYSIWYG Overlay for Edit Mode (Interactive Grids) -->
+        <Canvas x:Name="WysiwygCanvas" x:FieldModifier="public" IsHitTestVisible="True" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <!-- Start Box -->
+            <Grid x:Name="WysiwygStartRect" x:FieldModifier="public" Visibility="Collapsed">
+                <Rectangle Stroke="Cyan" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+                <Border Background="Cyan" Padding="6,2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
+                        PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Start">
+                     <TextBlock Text="Start Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
+                </Border>
+                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,TL"/>
+                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,TR"/>
+                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,BL"/>
+                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,BR"/>
+            </Grid>
+
+            <!-- Mid Box -->
+            <Grid x:Name="WysiwygMidRect" x:FieldModifier="public" Visibility="Collapsed">
+                <Rectangle Stroke="DeepSkyBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+                <Border Background="DeepSkyBlue" Padding="6,2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
+                        PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Mid">
+                     <TextBlock Text="Mid Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
+                </Border>
+                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,TL"/>
+                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,TR"/>
+                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,BL"/>
+                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,BR"/>
+            </Grid>
+
+            <!-- End Box -->
+            <Grid x:Name="WysiwygEndRect" x:FieldModifier="public" Visibility="Collapsed">
+                <Rectangle Stroke="RoyalBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+                <Border Background="RoyalBlue" Padding="6,2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
+                        PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="End">
+                     <TextBlock Text="End Frame" FontSize="10" Foreground="White" FontWeight="Bold"/>
+                </Border>
+                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,TL"/>
+                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,TR"/>
+                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,BL"/>
+                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,BR"/>
+            </Grid>
+        </Canvas>
 
         <!-- HUD Overlays -->
         <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="20" Spacing="16" IsHitTestVisible="False">

@@ -51,13 +51,29 @@ namespace VideoDirector.Models
 
             // Arrange mode: drag/wheel the PiP under the cursor.
             _playerControl.OverlayBoxDragged += OnOverlayBoxDragged;
+            _playerControl.WysiwygBoxManipulated += OnWysiwygBoxManipulated;
+            _playerControl.WysiwygBoxGrabbed += OnWysiwygBoxGrabbed;
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
             _playerControl.OverlayBoxPointerPressed += OnOverlayBoxPointerPressed;
             _playerControl.MakeFullScreenRequested += OnMakeFullScreenRequested;
             _playerControl.MakeWindowRequested += OnMakeWindowRequested;
+            _playerControl.EditClipRequested += OnEditClipRequested;
+            _playerControl.BorderTypeRequested += OnBorderTypeRequested;
+            _playerControl.BorderColorRequested += OnBorderColorRequested;
+            _playerControl.BorderThicknessRequested += OnBorderThicknessRequested;
+            _playerControl.ContextMenuOpening += OnContextMenuOpening;
 
             // Start in Arrange (the default mode) — PiP input active.
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
+        }
+
+        private void OnContextMenuOpening(object? sender, int slot)
+        {
+            var overlay = _activeOverlay[slot];
+            if (overlay != null)
+            {
+                _playerControl.UpdateBorderMenuState(overlay.BorderType, overlay.BorderColor, overlay.BorderThickness);
+            }
         }
 
         private void ViewModel_OperationSeekRequested(object? sender, TimeSpan e)
@@ -451,7 +467,7 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
                 boxW = H * pipAspect;
             }
 
-            void DrawRect(Microsoft.UI.Xaml.Shapes.Rectangle rect, SpatialMark targetMark, bool show)
+            void DrawRect(Microsoft.UI.Xaml.FrameworkElement rect, SpatialMark targetMark, bool show)
             {
                 if (!show || targetMark == null)
                 {
@@ -925,6 +941,75 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                     Rect = new Windows.Foundation.Rect(0, 0, boxW, boxH)
                 };
             }
+
+            // Apply border styling
+            if (overlay.BorderType == BorderType.None || editMode)
+            {
+                grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
+                grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
+                HideFilmStrip(grid);
+            }
+            else
+            {
+                if (overlay.BorderType == BorderType.FilmStrip)
+                {
+                    grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
+                    grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
+                    ShowFilmStrip(grid, overlay.BorderColor, overlay.BorderThickness);
+                }
+                else
+                {
+                    HideFilmStrip(grid);
+                    grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(overlay.BorderThickness);
+                    
+                    if (overlay.BorderType == BorderType.Soft)
+                    {
+                        var c = overlay.BorderColor;
+                        grid.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(128, c.R, c.G, c.B));
+                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(16);
+                    }
+                    else // Solid
+                    {
+                        grid.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(overlay.BorderColor);
+                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
+                    }
+                }
+            }
+        }
+
+        private void HideFilmStrip(Microsoft.UI.Xaml.Controls.Grid grid)
+        {
+            foreach (var child in grid.Children)
+            {
+                if (child is Microsoft.UI.Xaml.Shapes.Rectangle r && r.Name == "FilmStripRect")
+                {
+                    r.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    break;
+                }
+            }
+        }
+
+        private void ShowFilmStrip(Microsoft.UI.Xaml.Controls.Grid grid, Windows.UI.Color color, double thickness)
+        {
+            Microsoft.UI.Xaml.Shapes.Rectangle dashRect = null;
+            foreach (var child in grid.Children)
+            {
+                if (child is Microsoft.UI.Xaml.Shapes.Rectangle r && r.Name == "FilmStripRect")
+                {
+                    dashRect = r;
+                    break;
+                }
+            }
+            if (dashRect == null)
+            {
+                dashRect = new Microsoft.UI.Xaml.Shapes.Rectangle() { Name = "FilmStripRect" };
+                grid.Children.Add(dashRect);
+            }
+            dashRect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            dashRect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+            dashRect.StrokeThickness = thickness;
+            // A filmstrip-like pattern
+            dashRect.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection() { 2, 1, 2, 1 };
         }
 
         private void SeekAndPlayOverlay(MediaPlayer player, CinematicOperation overlay, TimeSpan currentStoryTime)
@@ -1380,6 +1465,49 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             }
         }
 
+        private void OnEditClipRequested(object? sender, int slot)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[slot];
+            if (overlay != null)
+            {
+                BeginEdit(overlay, EditTarget.Start);
+            }
+        }
+
+        private void OnBorderTypeRequested(object? sender, (int Slot, Models.BorderType Type) args)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[args.Slot];
+            if (overlay != null)
+            {
+                overlay.BorderType = args.Type;
+                _dispatcher.TryEnqueue(() => ApplyOverlayBox(args.Slot, overlay, false));
+            }
+        }
+
+        private void OnBorderColorRequested(object? sender, (int Slot, Windows.UI.Color Color) args)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[args.Slot];
+            if (overlay != null)
+            {
+                overlay.BorderColor = args.Color;
+                _dispatcher.TryEnqueue(() => ApplyOverlayBox(args.Slot, overlay, false));
+            }
+        }
+
+        private void OnBorderThicknessRequested(object? sender, (int Slot, double Thickness) args)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[args.Slot];
+            if (overlay != null)
+            {
+                overlay.BorderThickness = args.Thickness;
+                _dispatcher.TryEnqueue(() => ApplyOverlayBox(args.Slot, overlay, false));
+            }
+        }
+
         private void OnOverlayBoxPointerPressed(object? sender, int slot)
         {
             if (_mode != EditorMode.Arrange) return;
@@ -1439,6 +1567,110 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             overlay.PlacementCenterX = ((left + right) / 2) / vpW;
             overlay.PlacementCenterY = ((top + bottom) / 2) / vpH;
             ApplyOverlayBox(e.slot, overlay, false);
+        }
+
+        private void OnWysiwygBoxGrabbed(object? sender, string markType)
+        {
+            if (_mode != EditorMode.Edit || _viewModel.SelectedClip == null) return;
+            var op = _viewModel.SelectedClip as CinematicOperation;
+            if (op == null) return;
+
+            if (_editPreviewPlaying) StopEditPreview();
+
+            if (markType == "Start") SeekActiveOperation(op.VideoStartTime);
+            else if (markType == "Mid" && op.MidMark != null) 
+            {
+                var midTime = op.VideoStartTime + TimeSpan.FromSeconds((op.VideoEndTime - op.VideoStartTime).TotalSeconds / 2);
+                SeekActiveOperation(midTime);
+            }
+            else if (markType == "End") SeekActiveOperation(op.VideoEndTime);
+
+            // Poke the decoder so the paused frame updates immediately
+            _overlayPlayer[0]?.StepForwardOneFrame();
+        }
+
+        private void OnWysiwygBoxManipulated(object? sender, (string markType, string action, double dx, double dy) e)
+        {
+            if (_mode != EditorMode.Edit || _viewModel.SelectedClip == null) return;
+            var op = _viewModel.SelectedClip as CinematicOperation;
+            if (op == null) return;
+
+            SpatialMark mark;
+            if (e.markType == "Start") mark = op.StartMark;
+            else if (e.markType == "Mid") mark = op.MidMark;
+            else if (e.markType == "End") mark = op.EndMark;
+            else return;
+
+            if (mark == null) return;
+
+            var transform = _playerControl.ActiveTransform;
+            if (transform == null) return;
+
+            double W = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
+            double H = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
+            double pipAspect = (16.0 / 9.0) * (op.PlacementWidth / op.PlacementHeight);
+            double videoAspect = W / H;
+
+            double boxW = W;
+            double boxH = H;
+            if (pipAspect > videoAspect)
+            {
+                boxW = W;
+                boxH = W / pipAspect;
+            }
+            else
+            {
+                boxH = H;
+                boxW = H * pipAspect;
+            }
+
+            double Sc = transform.ScaleX;
+            double txc = transform.TranslateX;
+            double tyc = transform.TranslateY;
+
+            double St = mark.Scale;
+            double txt = mark.X;
+            double tyt = mark.Y;
+            if (St <= 0) St = 1;
+
+            if (e.action == "Translate")
+            {
+                mark.X -= (float)(e.dx / (Sc / St));
+                mark.Y -= (float)(e.dy / (Sc / St));
+            }
+            else
+            {
+                double deltaW = 0;
+                if (e.action == "TL" || e.action == "BL") deltaW = -e.dx;
+                else if (e.action == "TR" || e.action == "BR") deltaW = e.dx;
+
+                double currentWidth = boxW * (Sc / St);
+                double newWidth = currentWidth + deltaW;
+                if (newWidth < 50) newWidth = 50; 
+
+                double newSt = boxW * Sc / newWidth;
+
+                double cx = -txt * (Sc / St) + W / 2 + txc;
+                double cy = -tyt * (Sc / St) + H / 2 + tyc;
+
+                double dcx = 0;
+                double dcy = 0;
+                double deltaH = deltaW * (boxH / boxW);
+                
+                if (e.action == "TR") { dcy = -deltaH / 2; dcx = deltaW / 2; }
+                else if (e.action == "TL") { dcy = -deltaH / 2; dcx = -deltaW / 2; }
+                else if (e.action == "BR") { dcy = deltaH / 2; dcx = deltaW / 2; }
+                else if (e.action == "BL") { dcy = deltaH / 2; dcx = -deltaW / 2; }
+
+                cx += dcx;
+                cy += dcy;
+
+                mark.Scale = (float)newSt;
+                mark.X = (float)(-(cx - W / 2 - txc) / (Sc / newSt));
+                mark.Y = (float)(-(cy - H / 2 - tyc) / (Sc / newSt));
+            }
+
+            UpdateWysiwygOverlay();
         }
 
         private void OnOverlayBoxWheel(object? sender, (int slot, int delta) e)

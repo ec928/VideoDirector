@@ -9,21 +9,17 @@ standalone.
 
 ## ✨ Key Features
 
-**4-Track Timeline** — One spine track (A-roll) plays gaplessly end-to-end and defines project
-duration. Three overlay tracks (B-roll) composite freely-positioned picture-in-picture layers over
-it, with automatic collision resolution when clips are reordered.
+**4-Track Timeline** — Up to four video/image tracks composited freely. There is no artificial distinction between a "spine" and "overlays"—every track is treated equally, subject to Z-order. Picture-in-picture layers can be positioned anywhere, with automatic collision resolution when clips are reordered.
 
-**Ken Burns Motion** — Any clip, video or still, can carry an animated pan/zoom defined by start,
-optional mid, and end framing keyframes interpolated with easing curves.
+**Ken Burns Motion & Zoom** — Any clip, video or still, can carry an animated pan/zoom defined by start, optional mid, and end framing keyframes interpolated with easing curves.
 
-**Three-Mode Interaction** — Playback, Arrange, and Edit modes strictly segregate what mouse input
-means, so canvas manipulation never collides with timeline scrubbing or review playback.
+**Custom PiP Borders** — Picture-in-picture clips can be styled with custom borders directly from the video canvas or timeline right-click menus. Includes various edge styles (Solid, Soft rounded edges, and dashed FilmStrip perforations) with selectable colors and thickness.
 
-**Stills as First-Class Clips** — Images sit on the spine with a set duration and advance story time
-by wall clock rather than media timestamps, so mixed photo/video sequences stay in sync.
+**Three-Mode Interaction** — Playback, Arrange, and Edit modes strictly segregate what mouse input means, so canvas manipulation never collides with timeline scrubbing or review playback.
 
-**Transitions & Speed** — Optional crossfade and dip-to-black between spine clips, plus variable
-playback speed including full stills.
+**Stills as First-Class Clips** — Images sit on the timeline with a set duration and advance story time by wall clock rather than media timestamps, so mixed photo/video sequences stay in sync.
+
+**Transitions & Speed** — Optional crossfade and dip-to-black between clips, plus variable playback speed including full stills.
 
 ## 🛠 Technical Stack
 

@@ -1,6 +1,7 @@
-﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using System;
+using System.Linq;
 
 namespace VideoDirector.Views
 {
@@ -191,6 +192,33 @@ namespace VideoDirector.Views
         public object ConvertBack(object value, Type targetType, object parameter, string language)
         {
             throw new NotImplementedException();
+        }
+    }
+
+    public class TimeSpanToStringConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, string language)
+        {
+            if (value is TimeSpan ts)
+            {
+                // Format as MM:SS.f (e.g. 01:23.4)
+                return $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds / 100}";
+            }
+            return "00:00.0";
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language)
+        {
+            if (value is string s && !string.IsNullOrWhiteSpace(s))
+            {
+                if (TimeSpan.TryParse(s, out TimeSpan result))
+                    return result;
+
+                // Try fallback format by prepending "00:" to parse MM:SS.f
+                if (s.Count(c => c == ':') == 1 && TimeSpan.TryParse("00:" + s, out TimeSpan fallbackResult))
+                    return fallbackResult;
+            }
+            return TimeSpan.Zero;
         }
     }
 }

@@ -47,11 +47,10 @@ namespace VideoDirector.Views
         public event EventHandler ViewportTransformChanged;
         public Microsoft.UI.Xaml.Media.CompositeTransform ActiveTransform { get; set; }
 
-        // PiP manipulation events (Arrange mode). Raised from the full-screen InputLayer — the
-        // only reliable pointer catcher, since the PiP's MediaPlayerElement video surface does
-        // not raise its own pointer events. Move and resize share one channel; the grab mode
-        // tells the engine whether to translate the box or reshape it from an edge/corner.
+        // PiP manipulation events (Arrange mode). Raised from the full-screen InputLayer
         public event EventHandler<(int slot, BoxGrab grab, double dx, double dy)> OverlayBoxDragged;
+        public event EventHandler<(string markType, string action, double dx, double dy)> WysiwygBoxManipulated;
+        public event EventHandler<string> WysiwygBoxGrabbed;
         public event EventHandler<(int slot, int delta)> OverlayBoxWheel;
         public event EventHandler<int>? OverlayBoxPointerPressed;
 
@@ -192,6 +191,8 @@ namespace VideoDirector.Views
 
         private int _contextSlot = -1;
 
+        public event EventHandler<int>? ContextMenuOpening;
+
         private void InputLayer_RightTapped(object? sender, RightTappedRoutedEventArgs e)
         {
             if (InputMode != PlayerInputMode.ArrangePips) return;
@@ -201,12 +202,17 @@ namespace VideoDirector.Views
             
             if (_contextSlot >= 0)
             {
+                ContextMenuOpening?.Invoke(this, _contextSlot);
                 PipContextMenu.ShowAt(InputLayer, new FlyoutShowOptions { Position = p });
             }
         }
 
         public event EventHandler<int>? MakeFullScreenRequested;
         public event EventHandler<int>? MakeWindowRequested;
+        public event EventHandler<int>? EditClipRequested;
+        public event EventHandler<(int Slot, Models.BorderType Type)>? BorderTypeRequested;
+        public event EventHandler<(int Slot, Windows.UI.Color Color)>? BorderColorRequested;
+        public event EventHandler<(int Slot, double Thickness)>? BorderThicknessRequested;
 
         private void MakeFullScreen_Click(object? sender, RoutedEventArgs e)
         {
@@ -216,6 +222,63 @@ namespace VideoDirector.Views
         private void MakeWindow_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextSlot >= 0) MakeWindowRequested?.Invoke(this, _contextSlot);
+        }
+
+        private void EditClip_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0) EditClipRequested?.Invoke(this, _contextSlot);
+        }
+
+        private void BorderType_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0 && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (Enum.TryParse(tag, out Models.BorderType type))
+                    BorderTypeRequested?.Invoke(this, (_contextSlot, type));
+            }
+        }
+
+        private void BorderColor_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0 && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (tag == "White") BorderColorRequested?.Invoke(this, (_contextSlot, Microsoft.UI.Colors.White));
+                else if (tag == "Black") BorderColorRequested?.Invoke(this, (_contextSlot, Microsoft.UI.Colors.Black));
+                else if (tag == "Red") BorderColorRequested?.Invoke(this, (_contextSlot, Microsoft.UI.Colors.Red));
+                else if (tag == "Gold") BorderColorRequested?.Invoke(this, (_contextSlot, Microsoft.UI.Colors.Gold));
+                else if (tag == "Blue") BorderColorRequested?.Invoke(this, (_contextSlot, Microsoft.UI.Colors.DodgerBlue));
+                else if (tag == "Green") BorderColorRequested?.Invoke(this, (_contextSlot, Microsoft.UI.Colors.LimeGreen));
+                else if (tag == "DarkGrey") BorderColorRequested?.Invoke(this, (_contextSlot, Microsoft.UI.Colors.DarkGray));
+            }
+        }
+
+        private void BorderThickness_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0 && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (double.TryParse(tag, out double t))
+                    BorderThicknessRequested?.Invoke(this, (_contextSlot, t));
+            }
+        }
+
+        public void UpdateBorderMenuState(Models.BorderType type, Windows.UI.Color color, double thickness)
+        {
+            PipBorderTypeNone.IsChecked = type == Models.BorderType.None;
+            PipBorderTypeSolid.IsChecked = type == Models.BorderType.Solid;
+            PipBorderTypeSoft.IsChecked = type == Models.BorderType.Soft;
+            PipBorderTypeFilmStrip.IsChecked = type == Models.BorderType.FilmStrip;
+
+            PipBorderColorWhite.IsChecked = color == Microsoft.UI.Colors.White;
+            PipBorderColorBlack.IsChecked = color == Microsoft.UI.Colors.Black;
+            PipBorderColorRed.IsChecked = color == Microsoft.UI.Colors.Red;
+            PipBorderColorGold.IsChecked = color == Microsoft.UI.Colors.Gold;
+            PipBorderColorBlue.IsChecked = color == Microsoft.UI.Colors.DodgerBlue;
+            PipBorderColorGreen.IsChecked = color == Microsoft.UI.Colors.LimeGreen;
+            PipBorderColorDarkGrey.IsChecked = color == Microsoft.UI.Colors.DarkGray;
+
+            PipBorderThick2.IsChecked = thickness == 2;
+            PipBorderThick4.IsChecked = thickness == 4;
+            PipBorderThick8.IsChecked = thickness == 8;
         }
 
         private void InputLayer_PointerReleased(object? sender, PointerRoutedEventArgs e)
@@ -264,6 +327,75 @@ namespace VideoDirector.Views
                 // Already editing one clip full-screen — double-tap exits.
                 ExitEditRequested?.Invoke(this, EventArgs.Empty);
             }
+            e.Handled = true;
+        }
+
+        private bool _isWysiwygDragging = false;
+        private Point _wysiwygLastPos;
+        private string _wysiwygTarget = "";
+        private string _wysiwygAction = "";
+
+        private void WysiwygTab_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            var el = sender as FrameworkElement;
+            if (el == null) return;
+            _wysiwygTarget = el.Tag?.ToString() ?? "";
+            _wysiwygAction = "Translate";
+            _isWysiwygDragging = true;
+            _wysiwygLastPos = e.GetCurrentPoint(WysiwygCanvas).Position;
+            el.CapturePointer(e.Pointer);
+            WysiwygBoxGrabbed?.Invoke(this, _wysiwygTarget);
+            e.Handled = true;
+        }
+
+        private void WysiwygTab_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_isWysiwygDragging || _wysiwygAction != "Translate") return;
+            var pos = e.GetCurrentPoint(WysiwygCanvas).Position;
+            double dx = pos.X - _wysiwygLastPos.X;
+            double dy = pos.Y - _wysiwygLastPos.Y;
+            _wysiwygLastPos = pos;
+            WysiwygBoxManipulated?.Invoke(this, (_wysiwygTarget, _wysiwygAction, dx, dy));
+            e.Handled = true;
+        }
+
+        private void WysiwygTab_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            _isWysiwygDragging = false;
+            (sender as FrameworkElement)?.ReleasePointerCapture(e.Pointer);
+            e.Handled = true;
+        }
+
+        private void WysiwygHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            var el = sender as FrameworkElement;
+            if (el == null) return;
+            var tags = el.Tag?.ToString().Split(',');
+            if (tags == null || tags.Length < 2) return;
+            _wysiwygTarget = tags[0];
+            _wysiwygAction = tags[1];
+            _isWysiwygDragging = true;
+            _wysiwygLastPos = e.GetCurrentPoint(WysiwygCanvas).Position;
+            el.CapturePointer(e.Pointer);
+            WysiwygBoxGrabbed?.Invoke(this, _wysiwygTarget);
+            e.Handled = true;
+        }
+
+        private void WysiwygHandle_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_isWysiwygDragging || _wysiwygAction == "Translate") return;
+            var pos = e.GetCurrentPoint(WysiwygCanvas).Position;
+            double dx = pos.X - _wysiwygLastPos.X;
+            double dy = pos.Y - _wysiwygLastPos.Y;
+            _wysiwygLastPos = pos;
+            WysiwygBoxManipulated?.Invoke(this, (_wysiwygTarget, _wysiwygAction, dx, dy));
+            e.Handled = true;
+        }
+
+        private void WysiwygHandle_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            _isWysiwygDragging = false;
+            (sender as FrameworkElement)?.ReleasePointerCapture(e.Pointer);
             e.Handled = true;
         }
     }
