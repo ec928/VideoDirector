@@ -12,7 +12,17 @@ This document serves as a hardcoded memory record to prevent the AI agent from f
 
 ## Recent Fixes Applied
 
-### 1. Edit Mode Video Scrubber Disconnected (Resolved)
+### 1. WYSIWYG Zoom Shapes Invisible on Edit Entry (Resolved)
+- **Files Modified:** `Models/VideoPlaybackEngine.cs`
+- **Issue:** The cyan/blue WYSIWYG zoom rectangles didn't appear when entering Edit mode until you scrolled the mouse. `UpdateWysiwygOverlay()` was called too early in `EnterEditMode()`, before the `_playerControl.ActiveTransform` was properly assigned by the UI dispatcher thread, causing the drawing logic to silently abort.
+- **Fix Applied:** Moved the `UpdateWysiwygOverlay()` call to immediately follow the `ActiveTransform` assignment inside the `_dispatcher.TryEnqueue` block in `EnterEditMode()`. 
+
+### 2. Quick Full-Screen PiP Context Menu (Added)
+- **Files Modified:** `Views/DirectorPlayerControl.xaml`, `Views/DirectorPlayerControl.xaml.cs`, `Models/VideoPlaybackEngine.cs`
+- **Issue:** It was tedious to make a PiP window perfectly full screen in Arrange mode. 
+- **Fix Applied:** Added a standard WinUI `MenuFlyout` to the PiP Arrange mode input layer. Right-clicking any PiP now shows a context menu with "Full Screen (16:9)" and "Window (30% PIP)" presets that instantly resize and reposition the selected video.
+
+### 3. Edit Mode Video Scrubber Disconnected (Resolved)
 - **Files Modified:** `Models/VideoPlaybackEngine.cs`
 - **Issue:** Clicking the "Start", "Mid", or "End" buttons successfully set the keyframes and moved the timeline scrubber on the UI, but the video player didn't seek to show the corresponding frame. In fact, manually dragging the timeline scrubber in Edit mode didn't seek the video player either. 
 - **Fix Applied:** During a previous refactor of the track engine, the subscription to `_viewModel.OperationSeekRequested` was accidentally deleted from `VideoPlaybackEngine.cs`. Restored the `ViewModel_OperationSeekRequested` event handler so that updating the scrubber time in the ViewModel properly translates into a physical seek on the active `MediaPlayer`.

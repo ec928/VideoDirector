@@ -1309,16 +1309,6 @@ namespace VideoDirector.Views
             // for both tracks), so there's no per-track edit trigger here anymore.
             else if (e.PropertyName == nameof(DirectorViewModel.IsRecordingMotion))
             {
-                if (RecordButton.IsChecked != ViewModel.IsRecordingMotion)
-                {
-                    RecordButton.IsChecked = ViewModel.IsRecordingMotion;
-                }
-
-                if (RecordIcon != null)
-                {
-                    RecordIcon.Symbol = ViewModel.IsRecordingMotion ? Symbol.Stop : Symbol.Video;
-                }
-
                 if (ViewModel.IsRecordingMotion)
                 {
                     var op = ViewModel.SelectedClip ?? _playbackEngine?.CurrentPlayingOperation;
@@ -1346,13 +1336,7 @@ namespace VideoDirector.Views
         }
 
 
-        private void RecordButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (RecordButton.IsChecked.HasValue)
-            {
-                ViewModel.IsRecordingMotion = RecordButton.IsChecked.Value;
-            }
-        }
+
 
         private void Grid_DragOver(object? sender, DragEventArgs e)
         {

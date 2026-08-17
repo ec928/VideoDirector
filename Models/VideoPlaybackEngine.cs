@@ -53,6 +53,8 @@ namespace VideoDirector.Models
             _playerControl.OverlayBoxDragged += OnOverlayBoxDragged;
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
             _playerControl.OverlayBoxPointerPressed += OnOverlayBoxPointerPressed;
+            _playerControl.MakeFullScreenRequested += OnMakeFullScreenRequested;
+            _playerControl.MakeWindowRequested += OnMakeWindowRequested;
 
             // Start in Arrange (the default mode) — PiP input active.
             _playerControl.InputMode = Views.PlayerInputMode.ArrangePips;
@@ -1187,7 +1189,6 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
 
             SetEditModeState(overlay, _overlayPlayer[0], isOverlayEdit: true);
             StopPlayback();
-            UpdateWysiwygOverlay();
             for (int i = 1; i < MaxOverlayTracks; i++)
                 if (_activeOverlay[i] != null) ReleaseOverlaySlot(i);
 
@@ -1248,6 +1249,8 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                     _viewModel.CurrentOperationDuration = player.PlaybackSession.NaturalDuration;
                     _viewModel.CurrentOperationTime = player.PlaybackSession.Position;
                 }
+                
+                UpdateWysiwygOverlay();
             });
         }
 
@@ -1348,6 +1351,34 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         }
 
         // ---- Arrange mode: drag / wheel the PiP under the cursor (the hit slot) ----
+
+        private void OnMakeFullScreenRequested(object? sender, int slot)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[slot];
+            if (overlay != null)
+            {
+                overlay.PlacementWidth = 1.0;
+                overlay.PlacementHeight = 1.0;
+                overlay.PlacementCenterX = 0.5;
+                overlay.PlacementCenterY = 0.5;
+                _dispatcher.TryEnqueue(() => ApplyOverlayBox(slot, overlay, false));
+            }
+        }
+
+        private void OnMakeWindowRequested(object? sender, int slot)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[slot];
+            if (overlay != null)
+            {
+                overlay.PlacementWidth = 0.3;
+                overlay.PlacementHeight = 0.3;
+                overlay.PlacementCenterX = 0.72;
+                overlay.PlacementCenterY = 0.72;
+                _dispatcher.TryEnqueue(() => ApplyOverlayBox(slot, overlay, false));
+            }
+        }
 
         private void OnOverlayBoxPointerPressed(object? sender, int slot)
         {

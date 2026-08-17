@@ -1,6 +1,7 @@
 using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Windows.Foundation;
 
@@ -187,6 +188,34 @@ namespace VideoDirector.Views
             ActiveTransform.TranslateX += deltaX;
             ActiveTransform.TranslateY += deltaY;
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private int _contextSlot = -1;
+
+        private void InputLayer_RightTapped(object? sender, RightTappedRoutedEventArgs e)
+        {
+            if (InputMode != PlayerInputMode.ArrangePips) return;
+
+            var p = e.GetPosition(InputLayer);
+            _contextSlot = HitTestOverlaySlot(p);
+            
+            if (_contextSlot >= 0)
+            {
+                PipContextMenu.ShowAt(InputLayer, new FlyoutShowOptions { Position = p });
+            }
+        }
+
+        public event EventHandler<int>? MakeFullScreenRequested;
+        public event EventHandler<int>? MakeWindowRequested;
+
+        private void MakeFullScreen_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0) MakeFullScreenRequested?.Invoke(this, _contextSlot);
+        }
+
+        private void MakeWindow_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0) MakeWindowRequested?.Invoke(this, _contextSlot);
         }
 
         private void InputLayer_PointerReleased(object? sender, PointerRoutedEventArgs e)

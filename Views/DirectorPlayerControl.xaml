@@ -87,7 +87,15 @@
               PointerMoved="InputLayer_PointerMoved"
               PointerReleased="InputLayer_PointerReleased"
               PointerCanceled="InputLayer_PointerCanceled"
-              DoubleTapped="InputLayer_DoubleTapped" />
+              DoubleTapped="InputLayer_DoubleTapped"
+              RightTapped="InputLayer_RightTapped">
+            <FlyoutBase.AttachedFlyout>
+                <MenuFlyout x:Name="PipContextMenu">
+                    <MenuFlyoutItem Text="Full Screen (16:9)" Click="MakeFullScreen_Click" />
+                    <MenuFlyoutItem Text="Window (30% PIP)" Click="MakeWindow_Click" />
+                </MenuFlyout>
+            </FlyoutBase.AttachedFlyout>
+        </Grid>
 
         <!-- HUD Overlays -->
         <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="20" Spacing="16" IsHitTestVisible="False">
