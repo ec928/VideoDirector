@@ -648,14 +648,14 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                     // are geometric edge/corner bands on the InputLayer, so handles were decoration
                     // that also made chrome depend on a selection you cannot make while arranging.
                     if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
-                    v.Grid.Opacity = clip?.Opacity ?? 1.0;
+                    v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;
 
                 case OverlayRender.Video:
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     AttachOverlayVideo(track);
-                    v.Grid.Opacity = clip?.Opacity ?? 1.0;
+                    v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;
             }
         }
@@ -709,7 +709,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             // re-trigger this while the media is still opening asynchronously.
             _activeOverlay[slot] = overlay;
 
-            grid.Opacity = overlay.Opacity;
+            grid.Opacity = overlay.IsVideoHidden ? 0.0 : overlay.Opacity;
 
             bool needsNewSource = player.Source == null ||
                 !string.Equals((player.Source as MediaSource)?.Uri?.LocalPath, overlay.FilePath, StringComparison.OrdinalIgnoreCase);
@@ -921,7 +921,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             else if (_isAnimating && !_isPaused)
             {
                 player.PlaybackSession.PlaybackRate = combinedSpeed;
-                player.Volume = overlay.Volume; // overlays default muted; per-clip volume opts in
+                player.Volume = overlay.IsMuted ? 0.0 : overlay.Volume;
                 player.Play();
             }
             else
@@ -1076,7 +1076,8 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                 {
                     player.PlaybackSession.PlaybackRate = combinedSpeed;
                 }
-                if (player.Volume != overlay.Volume) player.Volume = overlay.Volume;
+                double effectiveVolume = overlay.IsMuted ? 0.0 : overlay.Volume;
+                if (player.Volume != effectiveVolume) player.Volume = effectiveVolume;
                 if (player.PlaybackSession.PlaybackState != Windows.Media.Playback.MediaPlaybackState.Playing)
                 {
                     player.Play();
@@ -1597,5 +1598,8 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         }
     }
 }
+
+
+
 
 

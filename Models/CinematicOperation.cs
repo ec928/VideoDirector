@@ -332,6 +332,27 @@ namespace VideoDirector.Models
             set => SetProperty(ref _volume, Math.Clamp(value, 0.0, 1.0));
         }
 
+        private bool _isMuted;
+        public bool IsMuted
+        {
+            get => _isMuted;
+            set => SetProperty(ref _isMuted, value);
+        }
+
+        private bool _isVideoHidden;
+        public bool IsVideoHidden
+        {
+            get => _isVideoHidden;
+            set => SetProperty(ref _isVideoHidden, value);
+        }
+
+        private bool _isLocked;
+        public bool IsLocked
+        {
+            get => _isLocked;
+            set => SetProperty(ref _isLocked, value);
+        }
+
         private BorderType _borderType = BorderType.None;
         public BorderType BorderType
         {
@@ -605,3 +626,4 @@ namespace VideoDirector.Models
         public string TransitionIconTooltip => $"Transition Out: {_transitionStyle}";
     }
 }
+

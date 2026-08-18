@@ -477,6 +477,7 @@ namespace VideoDirector.Views
             // Spotlight (#1): the in-focus clip(s) stay full strength, the rest dim. "In focus"
             // depends on mode — Arrange: all; Edit: the edited clip; Play: everything on screen now.
             double dim = BlockDim(clip);
+            if (clip != null && clip.IsVideoHidden) dim *= 0.4;
 
             var topColor = Microsoft.UI.ColorHelper.FromArgb(color.A,
                 (byte)Math.Min(255, color.R + 30),
@@ -575,6 +576,15 @@ namespace VideoDirector.Views
                 };
                 
                 sp.Children.Add(icon);
+                if (clip != null)
+                {
+                    if (clip.IsLocked)
+                        sp.Children.Add(new FontIcon { Glyph = "\uE72E", FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Margin = new Thickness(4,0,0,0) });
+                    if (clip.IsVideoHidden)
+                        sp.Children.Add(new FontIcon { Glyph = "\uED1A", FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Margin = new Thickness(4,0,0,0) });
+                    if (clip.IsMuted)
+                        sp.Children.Add(new FontIcon { Glyph = "\uE74F", FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Margin = new Thickness(4,0,0,0) });
+                }
                 sp.Children.Add(label);
                 
                 Canvas.SetLeft(sp, x + 6); // Extra breathing room on the left
@@ -622,9 +632,12 @@ namespace VideoDirector.Views
             var hit = HitClip(p);
             if (hit.clip != null)
             {
-                _dragClip = hit.clip;
-                _dragIsSpine = hit.isSpine;
-                _dragGrabOffsetSec = (p.X / _timelinePxPerSec) - hit.startSec;
+                if (!hit.clip.IsLocked)
+                {
+                    _dragClip = hit.clip;
+                    _dragIsSpine = hit.isSpine;
+                    _dragGrabOffsetSec = (p.X / _timelinePxPerSec) - hit.startSec;
+                }
             }
             else { _timelineScrubbing = true; ScrubToX(p.X); }
         }
@@ -798,6 +811,10 @@ namespace VideoDirector.Views
 
             if (_contextClip != null)
             {
+                TimelineMuteItem.IsChecked = _contextClip.IsMuted;
+                TimelineHideItem.IsChecked = _contextClip.IsVideoHidden;
+                TimelineLockItem.IsChecked = _contextClip.IsLocked;
+
                 TimelineBorderTypeNone.IsChecked = _contextClip.BorderType == Models.BorderType.None;
                 TimelineBorderTypeSolid.IsChecked = _contextClip.BorderType == Models.BorderType.Solid;
                 TimelineBorderTypeSoft.IsChecked = _contextClip.BorderType == Models.BorderType.Soft;
@@ -834,12 +851,38 @@ namespace VideoDirector.Views
 
         private void TimelineRemove_Click(object? sender, RoutedEventArgs e)
         {
-            if (_contextClip != null) RemoveClip(_contextClip, _contextIsSpine);
+            if (_contextClip != null && !_contextClip.IsLocked) RemoveClip(_contextClip, _contextIsSpine);
+        }
+
+        private void TimelineMute_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip == null) return;
+            _contextClip.IsMuted = !_contextClip.IsMuted;
+            ViewModel.RecordIfChanged();
+            BuildTimelineBar();
+            _playbackEngine?.RefreshComposite();
+        }
+
+        private void TimelineHide_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip == null) return;
+            _contextClip.IsVideoHidden = !_contextClip.IsVideoHidden;
+            ViewModel.RecordIfChanged();
+            BuildTimelineBar();
+            _playbackEngine?.RefreshComposite();
+        }
+
+        private void TimelineLock_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip == null) return;
+            _contextClip.IsLocked = !_contextClip.IsLocked;
+            ViewModel.RecordIfChanged();
+            BuildTimelineBar();
         }
 
         private void TimelineEdit_Click(object? sender, RoutedEventArgs e)
         {
-            if (_contextClip != null) SelectClip(_contextClip, _contextIsSpine);
+            if (_contextClip != null && !_contextClip.IsLocked) SelectClip(_contextClip, _contextIsSpine);
         }
 
         private void TimelineBorderType_Click(object? sender, RoutedEventArgs e)
@@ -2001,4 +2044,11 @@ namespace VideoDirector.Views
         }
     }
 }
+
+
+
+
+
+
+
 
