@@ -327,9 +327,17 @@ public async Task TogglePlayPauseAsync()
             }
         }
 
-        public void SkipNext() { }
+        public void SkipNext() 
+        { 
+            if (_mode == EditorMode.Arrange)
+                SeekCompositeToStoryTime(_viewModel.CurrentStoryTime + TimeSpan.FromMilliseconds(33.33));
+        }
 
-        public void SkipPrevious() { }
+        public void SkipPrevious() 
+        { 
+            if (_mode == EditorMode.Arrange)
+                SeekCompositeToStoryTime(_viewModel.CurrentStoryTime - TimeSpan.FromMilliseconds(33.33));
+        }
 
         
 
@@ -576,36 +584,6 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                 // through the video-activation pipeline. It used to, which is why a still only
                 // appeared after playing (a player had to be loaded first) and why reshaping could
                 // re-attach a surface and go black. Nothing here touches a MediaPlayer.
-                if (!IsActivelyPlaying)
-                {
-                    _activeOverlay[i] = desired;
-                    if (desired == null) { SetOverlayRender(i, OverlayRender.Hidden, null); continue; }
-
-                    // Shape the box from the clip's REAL aspect. Never assume a default — an
-                    // assumed 16:9 silently forces portrait clips (and portrait photos) into a
-                    // landscape box and crops the subject. If we genuinely don't know it yet,
-                    // leave it unknown: ApplyOverlayBox skips, and we render once we do know.
-                    double aspect = desired.SourceAspect;
-                    if (aspect <= 0)
-                    {
-                        // SingleItem thumbnails preserve the item's own aspect, so this is a valid
-                        // secondary source (it was not, back when we used VideosView).
-                        var thumb = desired.Thumbnail;
-                        if (thumb != null && thumb.PixelWidth > 0 && thumb.PixelHeight > 0)
-                            aspect = (double)thumb.PixelWidth / thumb.PixelHeight;
-                    }
-                    if (aspect > 0) _overlayAspect[i] = aspect;
-
-                    // If we still don't know the shape, ApplyOverlayBox would bail and leave the
-                    // box at whatever the PREVIOUS clip set — showing this still in the wrong
-                    // rectangle. Show nothing until the aspect is known instead.
-                    if (_overlayAspect[i] <= 0) { SetOverlayRender(i, OverlayRender.Hidden, null); continue; }
-
-                    SetOverlayRender(i, OverlayRender.Still, desired);
-                    ApplyOverlayBox(i, desired, false);
-                    continue;
-                }
-
                 // ---- PLAYBACK (and full-screen content edit): the live video pipeline.
                 if (_activeOverlay[i] != desired)
                 {
@@ -1082,7 +1060,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             TimeSpan actualPosition = player.PlaybackSession.Position;
             TimeSpan drift = (expectedPosition - actualPosition).Duration();
 
-            if (drift > TimeSpan.FromMilliseconds(200))
+            if (drift > TimeSpan.FromMilliseconds(200) || (!_isAnimating && drift > TimeSpan.FromMilliseconds(10)) || (_isPaused && drift > TimeSpan.FromMilliseconds(10)))
             {
                 player.PlaybackSession.Position = expectedPosition;
             }
@@ -1619,3 +1597,5 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         }
     }
 }
+
+
