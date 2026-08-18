@@ -26,6 +26,8 @@ namespace VideoDirector.Views
         private Microsoft.UI.Xaml.Shapes.Rectangle _playhead;
         private Microsoft.UI.Xaml.Shapes.Polygon _playheadKnob;
         private TextBlock _playheadTime;
+        private Microsoft.UI.Xaml.Shapes.Rectangle _loopRegionHighlight;
+        private double _timelineLoopStartX;
         // Pointer state: ruler = scrub; clip row tap = select; clip row drag = move/reorder.
         private Windows.Foundation.Point _timelinePressPoint;
         private bool _timelinePressed;
@@ -75,7 +77,7 @@ namespace VideoDirector.Views
         private void InactivityTimer_Tick(object? sender, object e)
         {
             _inactivityTimer.Stop();
-            if (!ViewModel.IsRecordingMotion && !_isPointerOverPill)
+            if (!_isPointerOverPill)
             {
                 ViewModel.IsControlsVisible = false;
             }
@@ -252,6 +254,13 @@ namespace VideoDirector.Views
             // Playhead: a bright red line the full height with a downward triangle handle in the ruler.
             var red = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xEF, 0x44, 0x44));
             var shadowStroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x80, 0x00, 0x00, 0x00));
+            _loopRegionHighlight = new Microsoft.UI.Xaml.Shapes.Rectangle { 
+                Height = h, 
+                IsHitTestVisible = false, 
+                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x40, 0xEF, 0xAA, 0x44)),
+                Visibility = Microsoft.UI.Xaml.Visibility.Collapsed
+            };
+            TimelineBar.Children.Add(_loopRegionHighlight);
             _playhead = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = 3, Height = h, IsHitTestVisible = false, Fill = red, Stroke = shadowStroke, StrokeThickness = 1 };
             TimelineBar.Children.Add(_playhead);
             _playheadKnob = new Microsoft.UI.Xaml.Shapes.Polygon { IsHitTestVisible = false, Fill = red, Stroke = shadowStroke, StrokeThickness = 1, StrokeLineJoin = Microsoft.UI.Xaml.Media.PenLineJoin.Round };
@@ -599,7 +608,16 @@ namespace VideoDirector.Views
             _dragClip = null;
             TimelineBar.CapturePointer(e.Pointer);
 
-            if (p.Y < RulerH) { _timelineScrubbing = true; ScrubToX(p.X); return; }
+            if (p.Y < RulerH) 
+            { 
+                _timelineScrubbing = true; 
+                _timelineLoopStartX = p.X;
+                ViewModel.LoopRegionStart = null;
+                ViewModel.LoopRegionEnd = null;
+                UpdatePlayhead();
+                ScrubToX(p.X); 
+                return; 
+            }
 
             var hit = HitClip(p);
             if (hit.clip != null)
@@ -619,7 +637,19 @@ namespace VideoDirector.Views
             if (!_timelinePressed) return;
             var p = _lastHoverPoint;
 
-            if (_timelineScrubbing) { ScrubToX(p.X); return; }
+            if (_timelineScrubbing) 
+            { 
+                if (Math.Abs(p.X - _timelineLoopStartX) > 4 && _timelinePressPoint.Y < RulerH)
+                {
+                    double startSec = Math.Max(0, Math.Min(_timelineLoopStartX, p.X) / _timelinePxPerSec);
+                    double endSec = Math.Max(0, Math.Max(_timelineLoopStartX, p.X) / _timelinePxPerSec);
+                    ViewModel.LoopRegionStart = TimeSpan.FromSeconds(startSec);
+                    ViewModel.LoopRegionEnd = TimeSpan.FromSeconds(endSec);
+                    ViewModel.IsLooping = true;
+                }
+                ScrubToX(p.X); 
+                return; 
+            }
             if (_dragClip == null) return;
             if (!_timelineMovingClip && Math.Abs(p.X - _timelinePressPoint.X) < 4) return;
             _timelineMovingClip = true;
@@ -1142,6 +1172,22 @@ namespace VideoDirector.Views
             Canvas.SetLeft(_playhead, x);
             if (_playheadKnob != null) Canvas.SetLeft(_playheadKnob, x - 4.5);
 
+            if (_loopRegionHighlight != null)
+            {
+                if (ViewModel.LoopRegionStart.HasValue && ViewModel.LoopRegionEnd.HasValue)
+                {
+                    double sX = ViewModel.LoopRegionStart.Value.TotalSeconds * _timelinePxPerSec;
+                    double eX = ViewModel.LoopRegionEnd.Value.TotalSeconds * _timelinePxPerSec;
+                    Canvas.SetLeft(_loopRegionHighlight, sX);
+                    _loopRegionHighlight.Width = Math.Max(1, eX - sX);
+                    _loopRegionHighlight.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                }
+                else
+                {
+                    _loopRegionHighlight.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                }
+            }
+
             if (_playheadTime != null)
             {
                 int m = (int)(sec / 60);
@@ -1373,34 +1419,7 @@ namespace VideoDirector.Views
                 _lastActiveSignature = -1;
                 BuildTimelineBar();
             }
-            // Note: entering Edit on selection is owned by SelectClip -> BeginEdit (one entry point
-            // for both tracks), so there's no per-track edit trigger here anymore.
-            else if (e.PropertyName == nameof(DirectorViewModel.IsRecordingMotion))
-            {
-                if (ViewModel.IsRecordingMotion)
-                {
-                    var op = ViewModel.SelectedClip ?? _playbackEngine?.CurrentPlayingOperation;
-                    if (op != null)
-                    {
-                        _preRecordSpeed = ViewModel.PlaybackSpeed;
-                        ViewModel.PlaybackSpeed = 0.5;
-                        _playbackEngine?.StartRecordingMotion(op);
-                    }
-                    else
-                    {
-                        ViewModel.IsRecordingMotion = false; // Cannot record without a selected or playing node
-                    }
-                }
-                else
-                {
-                    var op = ViewModel.SelectedClip ?? _playbackEngine?.CurrentPlayingOperation;
-                    if (op != null)
-                    {
-                        _playbackEngine?.StopRecordingMotion(op);
-                    }
-                    ViewModel.PlaybackSpeed = _preRecordSpeed;
-                }
-            }
+
         }
 
 
@@ -1982,3 +2001,4 @@ namespace VideoDirector.Views
         }
     }
 }
+

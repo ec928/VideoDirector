@@ -193,6 +193,20 @@ namespace VideoDirector.ViewModels
             set => SetProperty(ref _currentStoryTime, value);
         }
 
+        private TimeSpan? _loopRegionStart;
+        public TimeSpan? LoopRegionStart
+        {
+            get => _loopRegionStart;
+            set => SetProperty(ref _loopRegionStart, value);
+        }
+
+        private TimeSpan? _loopRegionEnd;
+        public TimeSpan? LoopRegionEnd
+        {
+            get => _loopRegionEnd;
+            set => SetProperty(ref _loopRegionEnd, value);
+        }
+
         private CinematicOperation _selectedClip;
         public CinematicOperation SelectedClip
         {

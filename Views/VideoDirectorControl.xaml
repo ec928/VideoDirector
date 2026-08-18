@@ -54,19 +54,7 @@
 
 
 
-        <!-- Foreground Layer: Floating Edit Badge -->
-        <Border x:Name="EditModeBadge" Background="#D9E81123" CornerRadius="8" Padding="16,8" 
-                Visibility="{x:Bind ViewModel.IsRecordingMotion, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}" 
-                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0" IsHitTestVisible="False"
-                BorderBrush="#33FFFFFF" BorderThickness="1">
-            <StackPanel Orientation="Vertical" Spacing="4">
-                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-                    <SymbolIcon Symbol="Video" Foreground="White" />
-                    <TextBlock x:Name="EditModeText" Text="Live Recording: Move Camera" Foreground="White" FontSize="16" FontWeight="SemiBold" />
-                </StackPanel>
-                <TextBlock Text="Zoom with scroll wheel. Pan by dragging. Set speed to &gt;0x to capture." Foreground="White" Opacity="0.8" HorizontalAlignment="Center" FontSize="12"/>
-            </StackPanel>
-        </Border>
+
 
         <!-- Foreground Layer: Right Side Panel (Properties). Top margin clears the Global Command
              Zone strip above it so Save/Load/Clear stay reachable while this panel is open. -->

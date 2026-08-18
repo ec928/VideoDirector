@@ -101,7 +101,7 @@ namespace VideoDirector.Models
                 {
                     // If paused when the timeline sequence changes, stop the stale playback loop.
                     // Clicking Play later will start a clean loop from the current playhead position.
-                    StopPlayback(cancelRecording: false);
+                    StopPlayback();
                     _isPaused = false;
                     _viewModel.IsPlaying = false;
                 }
@@ -169,8 +169,6 @@ public async Task TogglePlayPauseAsync()
         {
             _isPaused = true;
             _viewModel.IsPlaying = false;
-            if (_viewModel.IsRecordingMotion)
-                _dispatcher.TryEnqueue(() => _viewModel.IsRecordingMotion = false);
             
             for (int i = 0; i < MaxOverlayTracks; i++) _overlayPlayer[i]?.Pause();
 
@@ -227,7 +225,7 @@ public async Task TogglePlayPauseAsync()
             _playbackTimer.Start();
         }
 
-        public void StopPlayback(bool cancelRecording = true)
+        public void StopPlayback()
         {
             _playbackTimer?.Stop();
             
@@ -238,10 +236,6 @@ public async Task TogglePlayPauseAsync()
                 _viewModel.IsPlaying = false;
                 _isPaused = false;
                 _isAnimating = false;
-                if (cancelRecording && _viewModel.IsRecordingMotion)
-                {
-                    _dispatcher.TryEnqueue(() => _viewModel.IsRecordingMotion = false);
-                }
             }
 
             if (_mode == EditorMode.Arrange)
@@ -298,7 +292,19 @@ public async Task TogglePlayPauseAsync()
                 _viewModel.CurrentStoryTime += TimeSpan.FromSeconds(elapsed.TotalSeconds * _viewModel.PlaybackSpeed);
             }
 
-            if (_viewModel.TotalStoryTime > TimeSpan.Zero && _viewModel.CurrentStoryTime >= _viewModel.TotalStoryTime)
+            if (_viewModel.LoopRegionStart.HasValue && _viewModel.LoopRegionEnd.HasValue)
+            {
+                if (_viewModel.CurrentStoryTime >= _viewModel.LoopRegionEnd.Value)
+                {
+                    _viewModel.CurrentStoryTime = _viewModel.LoopRegionStart.Value;
+                }
+                else if (_viewModel.CurrentStoryTime < _viewModel.LoopRegionStart.Value)
+                {
+                    // If playhead was manually dragged before the loop region, let it play INTO the loop region,
+                    // or immediately snap it? Usually it snaps, or NLEs let you play into it. We'll let it play into it.
+                }
+            }
+            else if (_viewModel.TotalStoryTime > TimeSpan.Zero && _viewModel.CurrentStoryTime >= _viewModel.TotalStoryTime)
             {
                 if (_viewModel.IsLooping)
                 {
@@ -307,7 +313,7 @@ public async Task TogglePlayPauseAsync()
                 else
                 {
                     _viewModel.CurrentStoryTime = _viewModel.TotalStoryTime;
-                    StopPlayback(false);
+                    StopPlayback();
                     return;
                 }
             }
@@ -527,118 +533,6 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             if (t < TimeSpan.Zero) t = TimeSpan.Zero;
             _viewModel.CurrentStoryTime = t;
             EvaluateOverlays(t);
-        }
-
-        private DateTime _recordStartTime;
-
-        public async void StartRecordingMotion(CinematicOperation op)
-        {
-            if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) return;
-            
-            StopPlayback();
-            
-            op.RecordedPath.Clear();
-            var activePlayer = _overlayPlayer[0];
-            var activeElement = _playerControl.OverlayVisuals[0].Grid;
-            var activeTransform = _playerControl.OverlayVisuals[0].Transform;
-
-            if (activePlayer.Source == null || !string.Equals((activePlayer.Source as MediaSource)?.Uri?.LocalPath, op.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                var tcs = new TaskCompletionSource<bool>();
-                Windows.Foundation.TypedEventHandler<MediaPlayer, object> handler = (s, e) => tcs.TrySetResult(true);
-                activePlayer.MediaOpened += handler;
-                activePlayer.Source = MediaSource.CreateFromUri(new Uri(op.FilePath));
-                await Task.WhenAny(tcs.Task, Task.Delay(1500));
-                activePlayer.MediaOpened -= handler;
-            }
-
-            activePlayer.PlaybackSession.Position = op.VideoStartTime;
-            activePlayer.PlaybackSession.PlaybackRate = _viewModel.PlaybackSpeed;
-            if (_viewModel.PlaybackSpeed == 0.0)
-            {
-                activePlayer.Pause();
-            }
-            else
-            {
-                activePlayer.Play();
-                _dispatcher.TryEnqueue(() => _viewModel.IsPlaying = true);
-            }
-            
-            _recordStartTime = DateTime.Now;
-            _editClip = op;
-            _playerControl.ActiveTransform = activeTransform;
-
-            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += RecordMotion_Rendering;
-        }
-
-        public void StopRecordingMotion(CinematicOperation op)
-        {
-            if (op == null) return;
-            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RecordMotion_Rendering;
-            DistillRecordedPath(op);
-            EnterEditMode(op, EditTarget.Start);
-        }
-
-        private void RecordMotion_Rendering(object? sender, object e)
-        {
-            if (_editClip == null || _playerControl.ActiveTransform == null) return;
-            
-            var activePlayer = _overlayPlayer[0];
-            var activeTransform = _playerControl.ActiveTransform;
-            var mark = new SpatialMark((float)activeTransform.ScaleX, (float)activeTransform.TranslateX, (float)activeTransform.TranslateY);
-            
-            var realTimeElapsed = DateTime.Now - _recordStartTime;
-            var speed = _viewModel.PlaybackSpeed;
-            if (speed == 0) speed = 1.0;
-            
-            var time = TimeSpan.FromSeconds(realTimeElapsed.TotalSeconds * speed);
-            if (time < TimeSpan.Zero) time = TimeSpan.Zero;
-            _editClip.RecordedPath.Add(new TransformKeyframe(time, mark));
-            
-            _viewModel.CurrentOperationTime = _editClip.VideoStartTime + time;
-            if (activePlayer.PlaybackSession != null)
-            {
-                activePlayer.PlaybackSession.Position = _viewModel.CurrentOperationTime;
-                _viewModel.CurrentOperationDuration = activePlayer.PlaybackSession.NaturalDuration;
-            }
-
-            _dispatcher.TryEnqueue(() => 
-            {
-                UpdateTelemetryOverlay(false);
-                UpdateWysiwygOverlay();
-            });
-
-            if (time >= _editClip.OpDuration)
-            {
-                _dispatcher.TryEnqueue(() => 
-                {
-                    if (_viewModel.IsRecordingMotion)
-                        _viewModel.IsRecordingMotion = false;
-                });
-            }
-        }
-
-        private void DistillRecordedPath(CinematicOperation op)
-        {
-            if (op.RecordedPath.Count == 0)
-            {
-                _dispatcher.TryEnqueue(() => { _playerControl.TelemetryOperationInfo.Text = "Distill: RecordedPath is empty!"; });
-                return;
-            }
-            // Distillation Algorithm (Step 2)
-            // Convert raw gesture capture into smooth start/end cinematic keyframes
-            var first = op.RecordedPath.First();
-            var last = op.RecordedPath.Last();
-            var mid = op.RecordedPath[op.RecordedPath.Count / 2];
-            
-            _dispatcher.TryEnqueue(() => { _playerControl.TelemetryOperationInfo.Text = $"Distill: frames={op.RecordedPath.Count}, firstS={first.Transform.Scale:F2}, lastS={last.Transform.Scale:F2}"; });
-
-            op.StartMark = new SpatialMark(first.Transform.Scale, first.Transform.X, first.Transform.Y);
-            op.MidMark = new SpatialMark(mid.Transform.Scale, mid.Transform.X, mid.Transform.Y);
-            op.EndMark = new SpatialMark(last.Transform.Scale, last.Transform.X, last.Transform.Y);
-            op.CurveProfile = CurveProfile.DirectorsArc; // Automatic smoothing curve
-
-            UpdateWysiwygOverlay();
         }
 
         // ==================== Overlay Playback ====================
@@ -1418,9 +1312,10 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             double dur = _editClip.OpDuration.TotalSeconds;
             if (dur <= 0) dur = 1;
             double progress = (DateTime.Now - _editPreviewStart).TotalSeconds / dur;
-            if (_overlayPlayer[0]?.PlaybackSession != null)
+            if (_overlayPlayer[0]?.PlaybackSession != null && _editClip.PlaybackSpeed > 0 && !_editClip.IsStill)
             {
-                progress = (_overlayPlayer[0].PlaybackSession.Position - _editClip.VideoStartTime).TotalSeconds / dur;
+                double videoElapsed = (_overlayPlayer[0].PlaybackSession.Position - _editClip.VideoStartTime).TotalSeconds / _editClip.PlaybackSpeed;
+                progress = videoElapsed / dur;
             }
             if (progress >= 1.0)
             {
