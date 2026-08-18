@@ -20,6 +20,10 @@ Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImage
 
 **Transitions & Speed** — Optional crossfade and dip-to-black between clips, plus variable playback speed including full stills.
 
+**Trim & Sync Tools** — Interactive edge trimming, ripple editing, cross-track magnetic snapping (8px threshold), and visual audio waveforms on timeline clips.
+
+**Project Management** — JSON-based project save/load, infinite Undo/Redo history, and direct MP4 export using the Windows Media Foundation compositor.
+
 ## 🛠 Technical Stack
 
 | | |
