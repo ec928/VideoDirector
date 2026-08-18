@@ -57,7 +57,11 @@ if errorlevel 1 goto :failed
 if not exist "%OUTDIR%\VideoDirector.exe" goto :failed
 
 echo.
-echo Publish reported success. Verifying output...
+echo Publish reported success. Copying documentation...
+copy /Y "%~dp0LICENSE" "%OUTDIR%\" >nul
+copy /Y "%~dp0README.md" "%OUTDIR%\" >nul
+
+echo Verifying output...
 
 REM A part-installed .NET SDK can produce a build that compiles cleanly but
 REM crashes at startup, with framework assemblies published stripped.
