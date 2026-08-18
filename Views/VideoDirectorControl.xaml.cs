@@ -556,14 +556,6 @@ namespace VideoDirector.Views
                 };
                 
                 var textColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(TrackPalette.TextOn(color));
-                var icon = new FontIcon
-                {
-                    Glyph = "\uE714", // Video icon
-                    FontSize = 9,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = textColor,
-                    Margin = new Thickness(0, 0, 0, 0) // No artificial nudge
-                };
                 var label = new TextBlock
                 {
                     Text = clip.FileName,
@@ -575,7 +567,7 @@ namespace VideoDirector.Views
                     Margin = new Thickness(0, 0, 0, 0) // No artificial nudge
                 };
                 
-                sp.Children.Add(icon);
+                
                 if (clip != null)
                 {
                     var lockColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gold);
@@ -2041,6 +2033,7 @@ namespace VideoDirector.Views
         }
     }
 }
+
 
 
 
