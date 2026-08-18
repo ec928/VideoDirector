@@ -8,27 +8,15 @@
 
 VideoDirector is a multi-track video sequencer and compositor built in **WinUI 3 / Windows App SDK** (mouse + keyboard primary; touch-compatible). It composes multiple video and image assets into a unified time-synchronized output.
 
-### 4-Track Topology
-The sequencer is bounded to 4 tracks. They are **equal**: every track is a `TimelineTrack`
-holding an `ObservableCollection<CinematicOperation>`, and the engine addresses them
-generically. There is no spine and no overlay role — the earlier A-Roll / B-Roll split was
-removed with the unified track engine.
+### 4-Track Topology The sequencer is bounded to 4 tracks. They are **equal**: every track is a `TimelineTrack` holding an `ObservableCollection<CinematicOperation>`, and the engine addresses them generically. There is no spine and no overlay role — the earlier A-Roll / B-Roll split was removed with the unified track engine.
 
 * **Compositing is by Z-order alone**: track 0 renders at the bottom, track 3 at the top.
-* **Clips never overlap within a track**, so at most one clip per track is active at any
-  story time. `ResolveOverlaps()` shifts siblings when a clip is moved or reordered.
-* **Gaps are allowed on every track.** `TimelineTrack.IsGapless` can force clips to sit
-  perfectly adjacent — the old spine behaviour — but it is a per-track option and every
-  track is currently created with it off.
-* **Placement is normalised** (`PlacementCenterX/Y`, `PlacementWidth/Height` in 0..1 space)
-  plus opacity, so any track can act as a Picture-in-Picture layer. Tracks differ only in
-  where new clips *default* to sitting: track 1 defaults to full-screen centre, tracks 2–4
-  to smaller corner placements.
-* **Transitions and speed** (crossfade, dip to black, variable rate including speed 0 for
-  stills held over a set time) apply per clip, not per track role.
+* **Clips never overlap within a track**, so at most one clip per track is active at any story time. `ResolveOverlaps()` shifts siblings when a clip is moved or reordered.
+* **Gaps are allowed on every track.** `TimelineTrack.IsGapless` can force clips to sit perfectly adjacent — the old spine behaviour — but it is a per-track option and every track is currently created with it off.
+* **Placement is normalised** (`PlacementCenterX/Y`, `PlacementWidth/Height` in 0..1 space) plus opacity, so any track can act as a Picture-in-Picture layer. Tracks differ only in where new clips *default* to sitting: track 1 defaults to full-screen centre, tracks 2–4 to smaller corner placements.
+* **Transitions and speed** (crossfade, dip to black, variable rate including speed 0 for stills held over a set time) apply per clip, not per track role.
 
-### Unified Clip & Ken Burns Model
-Every clip on every track shares a single data schema (`CinematicOperation`). Any clip can carry an animated **Ken Burns** spatial motion—a smooth pan/zoom defined by Start, optional Mid, and End framing keyframes interpolated via easing curves. Still images advance master story time and Ken Burns spatial animation via wall-clock time rather than media player timestamps.
+### Unified Clip & Ken Burns Model Every clip on every track shares a single data schema (`CinematicOperation`). Any clip can carry an animated **Ken Burns** spatial motion—a smooth pan/zoom defined by Start, optional Mid, and End framing keyframes interpolated via easing curves. Still images advance master story time and Ken Burns spatial animation via wall-clock time rather than media player timestamps.
 
 ---
 
@@ -55,7 +43,7 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
 
 ## 3. UI Layout & Control Topography
 
-* **Timeline Toolbar (`TrackDock` Header)**: A dedicated command bar directly above the timeline separating global actions from inspector panels. 
+* **Timeline Toolbar (`TrackDock` Header)**: A dedicated command bar directly above the timeline separating global actions from inspector panels.
   * *Left Zone*: History (Undo/Redo) and Timeline Mode Tools (Snapping toggle, Ripple edit, Waveform display).
   * *Right Zone*: View zoom/fit controls, Project Operations (Save, Load, Clear), and MP4 Export.
 * **Proportional Timeline Dashboard (Bottom Dock)**: Hosts the time ruler, playhead, and 4 colored track lanes. Track labels ("Track 1", "Track 2", etc.) act as interactive load buttons that open file pickers (`LoadIntoTrack`) targeting that specific lane. Supports bidirectional cross-track drag-and-drop, ghost-follow dragging on Track 1, runtime magnetic snapping (8px threshold), and right-click context flyouts (`Duplicate`, `Remove`, `Split at playhead`, `Snapshot still`), and visual drag-to-loop regions on the time ruler.
@@ -68,9 +56,7 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
 
 This chronological ledger records all established solutions and performance optimizations. **Do not re-propose or regress these items.**
 
-> Entries below predate the unified track engine and still use the old vocabulary — "spine"
-> for track 1 and "overlay" for tracks 2–4. Those roles no longer exist (see §1); the
-> wording is left as written so the history stays accurate to when each change was made.
+> Entries below predate the unified track engine and still use the old vocabulary — "spine" for track 1 and "overlay" for tracks 2–4. Those roles no longer exist (see §1); the wording is left as written so the history stays accurate to when each change was made.
 
 ### 🎬 Timeline & Track Behavior Unification
 * **Consolidated Timeline Toolbar**: Re-homed global operations (Save/Load/Export/Undo) into a dedicated toolbar above the timeline dock, de-cluttering inspector panels.
@@ -119,14 +105,9 @@ These items represent deferred technical debt and strategic improvements to be t
 * **Problem**: Edge trimming needs consistent, formally defined behaviour on every track.
 * **Target Solution**: Define and implement explicit rules for **Ripple Trimming** (extending a clip edge pushes downstream clips on that track) versus **Roll Trimming** (extending an edge consumes empty gap space or overwrites).
 
-### D. Deep Data Schema Unification — **DONE**
-Track 1 (`TimelineNodes`) and tracks 2–4 (`OverlayTracks`) used to be distinct collection
-wrappers. They are now one `ObservableCollection<TimelineTrack>`, and `OverlayTrack.cs`
-became `TimelineTrack.cs`. No `TrackRole` discriminator was needed in the end: the roles
-were dropped rather than modelled, which is why tracks are interchangeable above.
+### D. Deep Data Schema Unification — **DONE** Track 1 (`TimelineNodes`) and tracks 2–4 (`OverlayTracks`) used to be distinct collection wrappers. They are now one `ObservableCollection<TimelineTrack>`, and `OverlayTrack.cs` became `TimelineTrack.cs`. No `TrackRole` discriminator was needed in the end: the roles were dropped rather than modelled, which is why tracks are interchangeable above.
 
-The old `TimelineNodes` and `OverlayTracks` names survive only in the project-file
-deserialiser, so that projects saved before the change still load.
+The old `TimelineNodes` and `OverlayTracks` names survive only in the project-file deserialiser, so that projects saved before the change still load.
 
 
 

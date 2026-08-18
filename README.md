@@ -1,11 +1,8 @@
 # 🎬 VideoDirector
 
-A multi-track video sequencer and compositor for Windows. Assembles video and image assets into a
-time-synchronised composite, with animated pan/zoom on any clip and up to three simultaneous
-picture-in-picture layers.
+A multi-track video sequencer and compositor for Windows. Assembles video and image assets into a time-synchronised composite, with animated pan/zoom on any clip and up to three simultaneous picture-in-picture layers.
 
-Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImageViewer), and runs
-standalone.
+Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImageViewer), and runs standalone.
 
 ## ✨ Key Features
 
@@ -42,14 +39,11 @@ Distributed as a self-contained portable app — no installation or registry cha
 2. Extract the folder anywhere.
 3. Run `VideoDirector.exe`.
 
-**Windows SmartScreen**: this is an unsigned indie build, so Defender may warn on first launch. Choose
-**More info → Run anyway**. That is normal for software not signed with a paid code-signing
-certificate; the full source is in this repository if you would rather build it yourself.
+**Windows SmartScreen**: this is an unsigned indie build, so Defender may warn on first launch. Choose **More info → Run anyway**. That is normal for software not signed with a paid code-signing certificate; the full source is in this repository if you would rather build it yourself.
 
 ## 🔨 Building from Source
 
-Requires the .NET 8 SDK and the Windows App SDK workload (Visual Studio 2022, "Windows application
-development").
+Requires the .NET 8 SDK and the Windows App SDK workload (Visual Studio 2022, "Windows application development").
 
 ```
 git clone https://github.com/ec928/VideoDirector.git
@@ -70,22 +64,16 @@ There are two builds and two folders, and nothing is written anywhere else:
 | `bin\x64\Debug\` | `dotnet build -p:Platform=x64` | the test build |
 | `bin\x64\Release\` | `publish.bat` | self-contained, loose-file, ReadyToRun — ship this |
 
-Release *is* the publish output. `dotnet publish` must build before it copies, and that build lands
-in `bin\x64\Release` regardless, so pointing the published files anywhere else only leaves a
-half-built Release folder beside the real one.
+Release *is* the publish output. `dotnet publish` must build before it copies, and that build lands in `bin\x64\Release` regardless, so pointing the published files anywhere else only leaves a half-built Release folder beside the real one.
 
-`publish.bat "D:\somewhere"` publishes elsewhere; add `nosmoke` to skip the launch check. The
-`FolderProfile.pubxml` used by the Visual Studio Publish button targets the same folder.
+`publish.bat "D:\somewhere"` publishes elsewhere; add `nosmoke` to skip the launch check. The `FolderProfile.pubxml` used by the Visual Studio Publish button targets the same folder.
 
-> Deliberately **not** published as a single file. Single-file self-extracts the entire runtime to
-> `%TEMP%` on the first launch after every publish, which measurably slows cold start.
+> Deliberately **not** published as a single file. Single-file self-extracts the entire runtime to `%TEMP%` on the first launch after every publish, which measurably slows cold start.
 
 ## 📋 Status
 
-Active development. The timeline, compositor, Ken Burns model, and mode system are implemented and in
-use; export is in progress. Expect rough edges.
+Active development. The timeline, compositor, Ken Burns model, and mode system are implemented and in use; export is in progress. Expect rough edges.
 
 ## 💬 Feedback
 
-Bugs, performance problems, and feature requests are welcome in the
-[Issues](https://github.com/ec928/VideoDirector/issues) tab.
+Bugs, performance problems, and feature requests are welcome in the [Issues](https://github.com/ec928/VideoDirector/issues) tab.
