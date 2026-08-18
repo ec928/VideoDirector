@@ -327,18 +327,6 @@ public async Task TogglePlayPauseAsync()
             }
         }
 
-        public void SkipNext() 
-        { 
-            if (_mode == EditorMode.Arrange)
-                SeekCompositeToStoryTime(_viewModel.CurrentStoryTime + TimeSpan.FromMilliseconds(33.33));
-        }
-
-        public void SkipPrevious() 
-        { 
-            if (_mode == EditorMode.Arrange)
-                SeekCompositeToStoryTime(_viewModel.CurrentStoryTime - TimeSpan.FromMilliseconds(33.33));
-        }
-
         
 
 
@@ -1598,6 +1586,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         }
     }
 }
+
 
 
 

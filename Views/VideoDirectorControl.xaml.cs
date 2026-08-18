@@ -1287,7 +1287,7 @@ namespace VideoDirector.Views
         {
             if (!ViewModel.IsEditMode)
             {
-                double stepSec = direction > 0 ? 1.0 : -1.0;
+                double stepSec = direction > 0 ? (1.0/30.0) : -(1.0/30.0);
                 double newStoryTime = Math.Clamp(ViewModel.CurrentStoryTime.TotalSeconds + stepSec, 0, ViewModel.TotalStoryDuration.TotalSeconds);
                 _playbackEngine?.SeekCompositeToStoryTime(TimeSpan.FromSeconds(newStoryTime));
                 return;
@@ -1567,12 +1567,12 @@ namespace VideoDirector.Views
 
         private void Prev_Click(object? sender, RoutedEventArgs e)
         {
-            _playbackEngine?.SkipPrevious();
+            StepFrame(-1);
         }
 
         private void Next_Click(object? sender, RoutedEventArgs e)
         {
-            _playbackEngine?.SkipNext();
+            StepFrame(1);
         }
 
         private async void FitWindow_Click(object? sender, RoutedEventArgs e)
@@ -2033,6 +2033,7 @@ namespace VideoDirector.Views
         }
     }
 }
+
 
 
 
