@@ -332,13 +332,6 @@ namespace VideoDirector.Models
             set => SetProperty(ref _volume, Math.Clamp(value, 0.0, 1.0));
         }
 
-        private bool _isMuted;
-        public bool IsMuted
-        {
-            get => _isMuted;
-            set => SetProperty(ref _isMuted, value);
-        }
-
         private bool _isVideoHidden;
         public bool IsVideoHidden
         {
@@ -626,4 +619,5 @@ namespace VideoDirector.Models
         public string TransitionIconTooltip => $"Transition Out: {_transitionStyle}";
     }
 }
+
 

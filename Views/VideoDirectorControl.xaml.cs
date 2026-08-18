@@ -578,12 +578,19 @@ namespace VideoDirector.Views
                 sp.Children.Add(icon);
                 if (clip != null)
                 {
+                    var lockColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gold);
+                    var soundColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
+                    var hideColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.LightGray);
+
                     if (clip.IsLocked)
-                        sp.Children.Add(new FontIcon { Glyph = "\uE72E", FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Margin = new Thickness(4,0,0,0) });
+                        sp.Children.Add(new FontIcon { Glyph = "\uE72E", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = lockColor, Margin = new Thickness(4,0,0,0) });
                     if (clip.IsVideoHidden)
-                        sp.Children.Add(new FontIcon { Glyph = "\uED1A", FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Margin = new Thickness(4,0,0,0) });
-                    if (clip.IsMuted)
-                        sp.Children.Add(new FontIcon { Glyph = "\uE74F", FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Margin = new Thickness(4,0,0,0) });
+                        sp.Children.Add(new FontIcon { Glyph = "\uED1A", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = hideColor, Margin = new Thickness(4,0,0,0) });
+                    
+                    if (clip.Volume == 0)
+                        sp.Children.Add(new FontIcon { Glyph = "\uE74F", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = soundColor, Margin = new Thickness(4,0,0,0) });
+                    else
+                        sp.Children.Add(new FontIcon { Glyph = "\uE995", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = soundColor, Margin = new Thickness(4,0,0,0) });
                 }
                 sp.Children.Add(label);
                 
@@ -811,7 +818,6 @@ namespace VideoDirector.Views
 
             if (_contextClip != null)
             {
-                TimelineMuteItem.IsChecked = _contextClip.IsMuted;
                 TimelineHideItem.IsChecked = _contextClip.IsVideoHidden;
                 TimelineLockItem.IsChecked = _contextClip.IsLocked;
 
@@ -852,15 +858,6 @@ namespace VideoDirector.Views
         private void TimelineRemove_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextClip != null && !_contextClip.IsLocked) RemoveClip(_contextClip, _contextIsSpine);
-        }
-
-        private void TimelineMute_Click(object? sender, RoutedEventArgs e)
-        {
-            if (_contextClip == null) return;
-            _contextClip.IsMuted = !_contextClip.IsMuted;
-            ViewModel.RecordIfChanged();
-            BuildTimelineBar();
-            _playbackEngine?.RefreshComposite();
         }
 
         private void TimelineHide_Click(object? sender, RoutedEventArgs e)
@@ -2044,6 +2041,8 @@ namespace VideoDirector.Views
         }
     }
 }
+
+
 
 
 

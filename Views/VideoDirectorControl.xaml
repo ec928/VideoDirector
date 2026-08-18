@@ -416,8 +416,7 @@
                                     <MenuFlyout Opening="TimelineContextMenu_Opening">
                                         <MenuFlyoutItem x:Name="TimelineEditItem" Text="Edit" Click="TimelineEdit_Click" />
                                         <MenuFlyoutSeparator />
-                                        <ToggleMenuFlyoutItem x:Name="TimelineMuteItem" Text="Mute Video" Click="TimelineMute_Click" />
-                                        <ToggleMenuFlyoutItem x:Name="TimelineHideItem" Text="Hide Video" Click="TimelineHide_Click" />
+                                                                                <ToggleMenuFlyoutItem x:Name="TimelineHideItem" Text="Hide Video" Click="TimelineHide_Click" />
                                         <ToggleMenuFlyoutItem x:Name="TimelineLockItem" Text="Lock Video" Click="TimelineLock_Click" />
                                         <MenuFlyoutSeparator />
                                         <MenuFlyoutItem x:Name="TimelineSplitItem" Text="Split at playhead" Click="TimelineSplit_Click" />
@@ -454,4 +453,5 @@
         </Border>
     </Grid>
 </UserControl>
+
 

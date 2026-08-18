@@ -921,7 +921,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             else if (_isAnimating && !_isPaused)
             {
                 player.PlaybackSession.PlaybackRate = combinedSpeed;
-                player.Volume = overlay.IsMuted ? 0.0 : overlay.Volume;
+                player.Volume = overlay.Volume;
                 player.Play();
             }
             else
@@ -1076,7 +1076,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                 {
                     player.PlaybackSession.PlaybackRate = combinedSpeed;
                 }
-                double effectiveVolume = overlay.IsMuted ? 0.0 : overlay.Volume;
+                double effectiveVolume = overlay.Volume;
                 if (player.Volume != effectiveVolume) player.Volume = effectiveVolume;
                 if (player.PlaybackSession.PlaybackState != Windows.Media.Playback.MediaPlaybackState.Playing)
                 {
@@ -1598,6 +1598,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         }
     }
 }
+
 
 
 
