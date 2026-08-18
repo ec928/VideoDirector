@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Saved timeline projects used for manual testing. They embed absolute paths to
+# media on the developer's machine, so they are local-only and never committed.
+Tests/
