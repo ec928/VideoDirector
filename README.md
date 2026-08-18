@@ -17,6 +17,8 @@ standalone.
 
 **Three-Mode Interaction** — Playback, Arrange, and Edit modes strictly segregate what mouse input means, so canvas manipulation never collides with timeline scrubbing or review playback.
 
+**Timeline Loop Region** — Drag horizontally across the timeline time ruler to visually select a specific section of the project to loop continuously during playback. Clicking the ruler without dragging clears it.
+
 **Stills as First-Class Clips** — Images sit on the timeline with a set duration and advance story time by wall clock rather than media timestamps, so mixed photo/video sequences stay in sync.
 
 **Transitions & Speed** — Optional crossfade and dip-to-black between clips, plus variable playback speed including full stills.
