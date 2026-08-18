@@ -46,6 +46,12 @@
          Without it a bare `dotnet publish` uses the SDK default and buries the output in
          bin\x64\Release\win-x64\publish\ — a nested copy of the folder it just built. -->
     <PublishDir>bin\$(Platform)\$(Configuration)\</PublishDir>
+  
+    <!--
+      Ship English resources only. Note this handles .NET satellite assemblies but NOT
+      WinUI's .mui files - those are Win32 MUI resources and need the target below.
+    -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -96,4 +102,41 @@
     <PublishSingleFile>False</PublishSingleFile>
     <ApplicationIcon>VideoDirector.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!--
+    WinUI emits ~86 locale folders of .mui resources into the output. About 3.6 MB, but
+    the real cost is 86 directories to scroll past every time you open the folder looking
+    for the exe. English is kept; the rest go.
+
+    Consequence: WinUI's own system strings (dialog buttons and similar) appear in English
+    on a non-English Windows. This app has no localised resources of its own, so nothing
+    else changes. Delete this target to restore every language.
+  -->
+  <Target Name="TrimLocaleResourceFolders" AfterTargets="Build;Publish">
+    <ItemGroup>
+      <_AllMui Include="$(OutDir)*\*.mui" />
+      <_KeepMui Include="$(OutDir)en*\*.mui" />
+      <_DropMui Include="@(_AllMui)" Exclude="@(_KeepMui)" />
+    </ItemGroup>
+    <Delete Files="@(_DropMui)" ContinueOnError="true" />
+    <RemoveDir Directories="@(_DropMui->'%(RootDir)%(Directory)'->Distinct())" ContinueOnError="true" />
+  </Target>
+
+
+  <!--
+    WindowsAppSDK self-contained deployment ships Windows ML (onnxruntime + DirectML,
+    ~38 MB). Its own targets only suppress these for Framework/Passthrough modes, not
+    SelfContained. This app never touches the ML APIs, so delete them from the output.
+    Deleted from $(OutDir) rather than filtered from the publish list: PublishDir is the
+    build output folder, so the build has already copied them by the time publish runs.
+    If ML APIs are ever used, delete this target.
+  -->
+  <Target Name="RemoveUnusedWindowsML" AfterTargets="Build;Publish">
+    <ItemGroup>
+      <_UnusedMl Include="$(OutDir)onnxruntime.dll" />
+      <_UnusedMl Include="$(OutDir)DirectML.dll" />
+    </ItemGroup>
+    <Delete Files="@(_UnusedMl)" ContinueOnError="true" />
+  </Target>
+
 </Project>
