@@ -26,6 +26,7 @@ REM  to %TEMP% on the first launch after every publish, which measurably slows
 REM  cold start.
 REM ============================================================================
 
+if exist "%~dp0bin\x64\Debug" rd /s /q "%~dp0bin\x64\Debug"
 set "OUTDIR=%~1"
 if "%OUTDIR%"=="" set "OUTDIR=%~dp0bin\x64\Release"
 if /i "%OUTDIR%"=="nosmoke" set "OUTDIR=%~dp0bin\x64\Release"
@@ -129,3 +130,4 @@ echo ============================================================
 echo  PUBLISH FAILED - see errors above.
 echo ============================================================
 exit /b 1
+
