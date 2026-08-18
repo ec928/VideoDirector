@@ -9,12 +9,26 @@
 VideoDirector is a multi-track video sequencer and compositor built in **WinUI 3 / Windows App SDK** (mouse + keyboard primary; touch-compatible). It composes multiple video and image assets into a unified time-synchronized output.
 
 ### 4-Track Topology
-The sequencer is bounded to 4 tracks (1 spine + 3 overlay tracks, enabling up to 3 simultaneous Picture-in-Picture layers):
-* **Track 1 — The Spine (A-Roll)**: A gapless row of clips played sequentially end-to-end. It defines the total duration of the project. Supports optional additive transitions (crossfade, dip to black) between clips, and variable playback speed (including speed 0 for still images rendered over a set time).
-* **Tracks 2, 3 & 4 — Overlays (B-Roll / PiP)**: Freely positioned time-bounded clips (gaps allowed, one active clip per track at any given timestamp). Composited over Track 1 as Picture-in-Picture (PiP) windows. Each clip maintains normalized position and dimension coordinates (`PlacementCenterX/Y`, `PlacementWidth/Height` in 0..1 space) and opacity. When reordering occurs on an overlay track, `ResolveOverlaps()` dynamically shifts sibling clips sequentially to prevent stacking collisions.
+The sequencer is bounded to 4 tracks. They are **equal**: every track is a `TimelineTrack`
+holding an `ObservableCollection<CinematicOperation>`, and the engine addresses them
+generically. There is no spine and no overlay role — the earlier A-Roll / B-Roll split was
+removed with the unified track engine.
+
+* **Compositing is by Z-order alone**: track 0 renders at the bottom, track 3 at the top.
+* **Clips never overlap within a track**, so at most one clip per track is active at any
+  story time. `ResolveOverlaps()` shifts siblings when a clip is moved or reordered.
+* **Gaps are allowed on every track.** `TimelineTrack.IsGapless` can force clips to sit
+  perfectly adjacent — the old spine behaviour — but it is a per-track option and every
+  track is currently created with it off.
+* **Placement is normalised** (`PlacementCenterX/Y`, `PlacementWidth/Height` in 0..1 space)
+  plus opacity, so any track can act as a Picture-in-Picture layer. Tracks differ only in
+  where new clips *default* to sitting: track 1 defaults to full-screen centre, tracks 2–4
+  to smaller corner placements.
+* **Transitions and speed** (crossfade, dip to black, variable rate including speed 0 for
+  stills held over a set time) apply per clip, not per track role.
 
 ### Unified Clip & Ken Burns Model
-Every clip across spine and overlay tracks shares a unified data schema (`CinematicOperation`). Any clip can carry an animated **Ken Burns** spatial motion—a smooth pan/zoom defined by Start, optional Mid, and End framing keyframes interpolated via easing curves. Still images on Track 1 advance master story time and Ken Burns spatial animation via wall-clock time rather than media player timestamps.
+Every clip on every track shares a single data schema (`CinematicOperation`). Any clip can carry an animated **Ken Burns** spatial motion—a smooth pan/zoom defined by Start, optional Mid, and End framing keyframes interpolated via easing curves. Still images advance master story time and Ken Burns spatial animation via wall-clock time rather than media player timestamps.
 
 ---
 
@@ -54,6 +68,10 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
 
 This chronological ledger records all established solutions and performance optimizations. **Do not re-propose or regress these items.**
 
+> Entries below predate the unified track engine and still use the old vocabulary — "spine"
+> for track 1 and "overlay" for tracks 2–4. Those roles no longer exist (see §1); the
+> wording is left as written so the history stays accurate to when each change was made.
+
 ### 🎬 Timeline & Track Behavior Unification
 * **Consolidated Timeline Toolbar**: Re-homed global operations (Save/Load/Export/Undo) into a dedicated toolbar above the timeline dock, de-cluttering inspector panels.
 * **Clickable Track Labels**: Enabled direct asset loading into specific track lanes via clickable track labels.
@@ -76,7 +94,7 @@ This chronological ledger records all established solutions and performance opti
 ## 5. Core Architectural Invariants & Laws
 
 1. **Holistic Design over Piecemeal Hacks**: Never apply localized fixes that break the overarching NLE mental model. All tracks must follow consistent interaction laws.
-2. **Strict Track Roles (Sequence vs. Layering)**: Track 1 (Spine) is strictly sequential and gapless. Tracks 2–4 (Overlays) are time-bounded layers that use `ResolveOverlaps()` to prevent overlapping clips on the same row.
+2. **Uniform Track Semantics**: All four tracks behave identically — time-bounded layers composited by Z-order, using `ResolveOverlaps()` to keep clips on a row from colliding. Nothing may reintroduce a privileged track: sequential, gapless behaviour is the per-track `IsGapless` option, not a role.
 3. **Modal Separation of Concern**: Editing handles, trim bars, and PiP bounding boxes must never leak into screening (PLAYBACK mode) or macro-structuring (ARRANGE mode).
 4. **GPU Surface Preservation**: Never directly manipulate live `MediaPlayerElement` XAML properties per-frame in ways that corrupt DirectX swapchains; use dedicated transforms and delta-checked placement boxes.
 5. **Commit Integrity**: Every architectural step must end in a green build and a clean git commit. Small, incremental steps ensure we are never more than one revert away from safety.
@@ -91,14 +109,19 @@ These items represent deferred technical debt and strategic improvements to be t
 * **Problem**: Reshaping or resizing a live/paused `MediaPlayerElement` video surface directly on the canvas can cause DirectX swapchain corruption (green flashing, blanking, or handle occlusion).
 * **Target Solution**: Rebuild the PiP compositing layer so that Arrange mode manipulation uses a lightweight, aspect-correct proxy bitmap or swapchain-decoupled surface during active resizing, switching back to live video rendering upon gesture completion.
 
-### B. Overlay Scrubbing Seeks (Medium Priority)
-* **Problem**: During rapid timeline scrubbing, overlay tracks currently display a static frame rather than seeking live to the scrubbed timestamp (only Track 1 seeks live during scrub).
-* **Target Solution**: Extend the live scrubbing seek loop to evaluate and seek active overlay media players per-frame during scrub gestures.
+### B. Scrubbing Seeks on Upper Tracks (Medium Priority)
+* **Problem**: During rapid timeline scrubbing, tracks above the bottom one currently display a static frame rather than seeking live to the scrubbed timestamp (only Track 1 seeks live during scrub).
+* **Target Solution**: Extend the live scrubbing seek loop to evaluate and seek every active media player per-frame during scrub gestures, not just the bottom track's.
 
-### C. Trimming Edge Mechanics Across Overlay Tracks (Medium Priority)
-* **Problem**: Edge trimming on Tracks 2–4 needs formal behavioral parity with Track 1.
-* **Target Solution**: Define and implement explicit rules for **Ripple Trimming** (extending an overlay clip edge pushes downstream clips on that track) versus **Roll Trimming** (extending an edge consumes empty gap space or overwrites).
+### C. Trimming Edge Mechanics Across Tracks (Medium Priority)
+* **Problem**: Edge trimming needs consistent, formally defined behaviour on every track.
+* **Target Solution**: Define and implement explicit rules for **Ripple Trimming** (extending a clip edge pushes downstream clips on that track) versus **Roll Trimming** (extending an edge consumes empty gap space or overwrites).
 
-### D. Deep Data Schema Unification (Long-Term Architecture)
-* **Problem**: Track 1 (`TimelineNodes`) and Tracks 2–4 (`OverlayTracks`) currently use distinct collection wrappers.
-* **Target Solution**: Refactor the underlying data models so that all tracks share a single unified `ObservableCollection<TimelineTrack>` schema, differentiated only by compositing attributes (`TrackRole.Spine` vs `TrackRole.Overlay`).
+### D. Deep Data Schema Unification — **DONE**
+Track 1 (`TimelineNodes`) and tracks 2–4 (`OverlayTracks`) used to be distinct collection
+wrappers. They are now one `ObservableCollection<TimelineTrack>`, and `OverlayTrack.cs`
+became `TimelineTrack.cs`. No `TrackRole` discriminator was needed in the end: the roles
+were dropped rather than modelled, which is why tracks are interchangeable above.
+
+The old `TimelineNodes` and `OverlayTracks` names survive only in the project-file
+deserialiser, so that projects saved before the change still load.
