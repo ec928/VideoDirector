@@ -12,7 +12,7 @@
         <Grid x:Name="TrackGrid0" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement Opacity="0.99" x:Name="TrackPlayer0" x:FieldModifier="public"
+            <MediaPlayerElement x:Name="TrackPlayer0" x:FieldModifier="public"
                                 AreTransportControlsEnabled="False" Stretch="UniformToFill"
                                 RenderTransformOrigin="0.5,0.5">
                 <MediaPlayerElement.RenderTransform>
@@ -28,7 +28,7 @@
         <Grid x:Name="TrackGrid1" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement Opacity="0.99" x:Name="TrackPlayer1" x:FieldModifier="public"
+            <MediaPlayerElement x:Name="TrackPlayer1" x:FieldModifier="public"
                                 AreTransportControlsEnabled="False" Stretch="UniformToFill"
                                 RenderTransformOrigin="0.5,0.5">
                 <MediaPlayerElement.RenderTransform>
@@ -44,7 +44,7 @@
         <Grid x:Name="TrackGrid2" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement Opacity="0.99" x:Name="TrackPlayer2" x:FieldModifier="public"
+            <MediaPlayerElement x:Name="TrackPlayer2" x:FieldModifier="public"
                                 AreTransportControlsEnabled="False" Stretch="UniformToFill"
                                 RenderTransformOrigin="0.5,0.5">
                 <MediaPlayerElement.RenderTransform>
@@ -60,7 +60,7 @@
         <Grid x:Name="TrackGrid3" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement Opacity="0.99" x:Name="TrackPlayer3" x:FieldModifier="public"
+            <MediaPlayerElement x:Name="TrackPlayer3" x:FieldModifier="public"
                                 AreTransportControlsEnabled="False" Stretch="UniformToFill" Margin="-1"
                                 RenderTransformOrigin="0.5,0.5">
                 <MediaPlayerElement.RenderTransform>
@@ -174,5 +174,4 @@
               
     </Grid>
 </UserControl>
-
 
