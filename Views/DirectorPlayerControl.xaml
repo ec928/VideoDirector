@@ -7,7 +7,7 @@
     mc:Ignorable="d"
     Background="Black">
 
-    <Grid>
+    <Grid Background="Black">
         <!-- 4 Identical Track Players -->
         <Grid x:Name="TrackGrid0" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
@@ -174,3 +174,4 @@
               
     </Grid>
 </UserControl>
+
