@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Windowing;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -42,6 +42,7 @@ namespace VideoDirector
         {
             Instance = this;
             this.InitializeComponent();
+            if (this.Content is FrameworkElement fe) fe.RequestedTheme = Microsoft.UI.Xaml.ElementTheme.Dark;
             this.SystemBackdrop = new MicaBackdrop();
 
             var hwnd = WindowNative.GetWindowHandle(this);
@@ -160,3 +161,4 @@ namespace VideoDirector
         }
     }
 }
+
