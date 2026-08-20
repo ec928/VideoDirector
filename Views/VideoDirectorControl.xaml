@@ -359,27 +359,27 @@
                         </Button>
                     </StackPanel>
 
-                    <!-- Right: Zoom, Fit, Project File operations, and Export -->
+                    <!-- Right: Project, View, and Export -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <!-- Project -->
+                        <Button Click="Clear_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="New project">
+                            <SymbolIcon Symbol="Document" />
+                        </Button>
+                        <Button Click="Load_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Load project">
+                            <SymbolIcon Symbol="OpenFile" />
+                        </Button>
+                        <Button Click="Save_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Save project">
+                            <SymbolIcon Symbol="Save" />
+                        </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <!-- View -->
                         <Button x:Name="ZoomOutTimelineButton" Click="ZoomOutTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom Out Timeline (Ctrl + -)">
                             <FontIcon Glyph="&#xE71F;" FontSize="13" />
                         </Button>
                         <Button x:Name="ZoomInTimelineButton" Click="ZoomInTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom In Timeline (Ctrl + +)">
                             <FontIcon Glyph="&#xE71E;" FontSize="13" />
                         </Button>
-                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
-                        <Button Click="FitWindow_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Auto-size window to fit background video">
-                            <SymbolIcon Symbol="FullScreen" />
-                        </Button>
-                        <Button Click="Save_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Save project">
-                            <SymbolIcon Symbol="Save" />
-                        </Button>
-                        <Button Click="Load_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Load project">
-                            <SymbolIcon Symbol="OpenFile" />
-                        </Button>
-                        <Button Click="Clear_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Clear project">
-                            <SymbolIcon Symbol="Delete" />
-                        </Button>
+
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
                         <!-- Export -->
                         <Button Click="Export_Click" Height="28" Padding="12,0" CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Background="{ThemeResource AccentFillColorDefaultBrush}" Foreground="White"
@@ -399,10 +399,12 @@
                 <Border Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" CornerRadius="4">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="58" />
+                            <ColumnDefinition Width="90" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Canvas x:Name="TimelineLabels" Grid.Column="0" Background="Transparent" />
+                        <Border Grid.Column="0" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="0,0,1,0" Background="{ThemeResource LayerFillColorDefaultBrush}">
+                            <Canvas x:Name="TimelineLabels" Background="Transparent" />
+                        </Border>
                         <ScrollViewer x:Name="TimelineScroll" Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" PointerWheelChanged="TimelineScroll_PointerWheelChanged">
                             <Canvas x:Name="TimelineBar" Height="52" HorizontalAlignment="Stretch"
                                     Background="Transparent" SizeChanged="TimelineBar_SizeChanged"

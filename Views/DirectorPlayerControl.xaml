@@ -84,11 +84,21 @@
               RightTapped="InputLayer_RightTapped">
             <FlyoutBase.AttachedFlyout>
                 <MenuFlyout x:Name="PipContextMenu">
-                    <MenuFlyoutItem Text="Edit" Click="EditClip_Click" />
+                                          <MenuFlyoutItem Text="Edit" Click="EditClip_Click" />
+                      <MenuFlyoutSeparator />
+                      <ToggleMenuFlyoutItem x:Name="PipHideItem" Text="Hide Video" Click="PipHide_Click" />
+                      <ToggleMenuFlyoutItem x:Name="PipLockItem" Text="Lock Video" Click="PipLock_Click" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Full Screen (16:9)" Click="MakeFullScreen_Click" />
-                    <MenuFlyoutItem Text="Window (30% PIP)" Click="MakeWindow_Click" />
-                    <MenuFlyoutSeparator />
+                                          <MenuFlyoutSubItem Text="Layout">
+                          <MenuFlyoutItem Text="Full Screen (16:9)" Click="MakeFullScreen_Click" />
+                          <MenuFlyoutItem Text="Window (30% PIP)" Click="MakeWindow_Click" />
+                      </MenuFlyoutSubItem>
+                      <MenuFlyoutSubItem Text="Opacity">
+                          <RadioMenuFlyoutItem x:Name="PipOpacity100" Text="100%" Click="Opacity_Click" Tag="1.0" GroupName="PipOpacity" />
+                          <RadioMenuFlyoutItem x:Name="PipOpacity75" Text="75%" Click="Opacity_Click" Tag="0.75" GroupName="PipOpacity" />
+                          <RadioMenuFlyoutItem x:Name="PipOpacity50" Text="50%" Click="Opacity_Click" Tag="0.5" GroupName="PipOpacity" />
+                          <RadioMenuFlyoutItem x:Name="PipOpacity25" Text="25%" Click="Opacity_Click" Tag="0.25" GroupName="PipOpacity" />
+                      </MenuFlyoutSubItem>
                     <MenuFlyoutSubItem Text="Border" x:Name="PipBorderMenu">
                         <RadioMenuFlyoutItem x:Name="PipBorderTypeNone" Text="Type: None" Click="BorderType_Click" Tag="None" GroupName="PipBorderType" />
                         <RadioMenuFlyoutItem x:Name="PipBorderTypeSolid" Text="Type: Solid" Click="BorderType_Click" Tag="Solid" GroupName="PipBorderType" />
@@ -174,4 +184,6 @@
               
     </Grid>
 </UserControl>
+
+
 

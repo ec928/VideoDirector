@@ -61,6 +61,10 @@ namespace VideoDirector.Models
             _playerControl.BorderTypeRequested += OnBorderTypeRequested;
             _playerControl.BorderColorRequested += OnBorderColorRequested;
             _playerControl.BorderThicknessRequested += OnBorderThicknessRequested;
+            _playerControl.OpacityRequested += OnOpacityRequested;
+            
+            _playerControl.HideRequested += OnHideRequested;
+            _playerControl.LockRequested += OnLockRequested;
             _playerControl.ContextMenuOpening += OnContextMenuOpening;
 
             // Start in Arrange (the default mode) — PiP input active.
@@ -1328,6 +1332,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 overlay.PlacementCenterX = 0.5;
                 overlay.PlacementCenterY = 0.5;
                 _dispatcher.TryEnqueue(() => ApplyOverlayBox(slot, overlay, false));
+                _viewModel.RecordIfChanged();
             }
         }
 
@@ -1342,6 +1347,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 overlay.PlacementCenterX = 0.72;
                 overlay.PlacementCenterY = 0.72;
                 _dispatcher.TryEnqueue(() => ApplyOverlayBox(slot, overlay, false));
+                _viewModel.RecordIfChanged();
             }
         }
 
@@ -1363,6 +1369,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             {
                 overlay.BorderType = args.Type;
                 _dispatcher.TryEnqueue(() => ApplyOverlayBox(args.Slot, overlay, false));
+                _viewModel.RecordIfChanged();
             }
         }
 
@@ -1374,6 +1381,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             {
                 overlay.BorderColor = args.Color;
                 _dispatcher.TryEnqueue(() => ApplyOverlayBox(args.Slot, overlay, false));
+                _viewModel.RecordIfChanged();
             }
         }
 
@@ -1385,6 +1393,41 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             {
                 overlay.BorderThickness = args.Thickness;
                 _dispatcher.TryEnqueue(() => ApplyOverlayBox(args.Slot, overlay, false));
+                _viewModel.RecordIfChanged();
+            }
+        }
+        private void OnHideRequested(object? sender, int slot)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[slot];
+            if (overlay != null)
+            {
+                overlay.IsVideoHidden = !overlay.IsVideoHidden;
+                _viewModel.RecordIfChanged();
+                _dispatcher.TryEnqueue(() => RefreshComposite());
+            }
+        }
+
+        private void OnLockRequested(object? sender, int slot)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[slot];
+            if (overlay != null)
+            {
+                overlay.IsLocked = !overlay.IsLocked;
+                _viewModel.RecordIfChanged();
+                _dispatcher.TryEnqueue(() => RefreshComposite());
+            }
+        }
+        private void OnOpacityRequested(object? sender, (int Slot, float Opacity) args)
+        {
+            if (_mode != EditorMode.Arrange) return;
+            var overlay = _activeOverlay[args.Slot];
+            if (overlay != null)
+            {
+                overlay.Opacity = args.Opacity;
+                _viewModel.RecordIfChanged();
+                _dispatcher.TryEnqueue(() => RefreshComposite());
             }
         }
 
@@ -1583,9 +1626,14 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             overlay.PlacementWidth *= f;
             overlay.PlacementHeight *= f;
             ApplyOverlayBox(e.slot, overlay, false);
-        }
+            _viewModel.RecordIfChanged();
+}
     }
 }
+
+
+
+
 
 
 

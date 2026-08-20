@@ -26,6 +26,7 @@ namespace VideoDirector.Views
         private Microsoft.UI.Xaml.Shapes.Rectangle _playhead;
         private Microsoft.UI.Xaml.Shapes.Polygon _playheadKnob;
         private TextBlock _playheadTime;
+        private Border _playheadBadge;
         private Microsoft.UI.Xaml.Shapes.Rectangle _loopRegionHighlight;
         private double _timelineLoopStartX;
         // Pointer state: ruler = scrub; clip row tap = select; clip row drag = move/reorder.
@@ -119,7 +120,7 @@ namespace VideoDirector.Views
 
         // Timeline layout: a scrub ruler on top, then track rows — all on
         // one shared px=seconds scale (§7E). Scrub on the ruler; drag clips in their rows.
-        private const double RulerH = 14, RowSpineY = 16, RowOvY = 34, BlockH = 16, RowPitch = 18;
+        private const double RulerH = 20, RowSpineY = 22, RowOvY = 40, BlockH = 16, RowPitch = 18;
 
         // Bar height grows with the number of tracks. 
         private double TimelineBarHeight =>
@@ -130,7 +131,7 @@ namespace VideoDirector.Views
             if (TimelineBar == null) return;
             TimelineBar.Children.Clear();
             _clipBlockElements.Clear();
-            _playhead = null; _playheadKnob = null;
+            _playhead = null; _playheadKnob = null; _playheadTime = null; _playheadBadge = null;
 
             TimelineBar.Height = TimelineBarHeight;   // grows with the upper-track count
             double viewportW = TimelineScroll.ActualWidth;
@@ -273,9 +274,18 @@ namespace VideoDirector.Views
             _playheadTime = new TextBlock
             {
                 FontSize = 9, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, IsHitTestVisible = false,
-                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xEF, 0x44, 0x44))
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center
             };
-            TimelineBar.Children.Add(_playheadTime);
+            _playheadBadge = new Border
+            {
+                Background = red,
+                CornerRadius = new Microsoft.UI.Xaml.CornerRadius(3),
+                Padding = new Microsoft.UI.Xaml.Thickness(4, 1, 4, 1),
+                Child = _playheadTime,
+                IsHitTestVisible = false
+            };
+            TimelineBar.Children.Add(_playheadBadge);
 
             UpdatePlayhead();
         }
@@ -338,57 +348,61 @@ namespace VideoDirector.Views
             };
             var label = new TextBlock
             {
-                Text = text, FontSize = 10, VerticalAlignment = VerticalAlignment.Center,
+                Text = text, FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 1) // Nudge text slightly to center visually
             };
-            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             content.Children.Add(cap); content.Children.Add(label);
 
             var btn = new Button
             {
                 Content = content,
-                Padding = new Thickness(4, 0, 4, 0),
+                Padding = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center,
                 CornerRadius = new CornerRadius(4),
                 BorderThickness = new Thickness(1),
                 MinHeight = 0,
-                MinWidth = 0,
+                MinWidth = 40, Width = 40,
                 Height = 18 // Fits precisely in RowPitch (18)
             };
             ToolTipService.SetToolTip(btn, "Load a video into " + text + " (or drag & drop)");
             btn.Click += (s, e) => LoadIntoTrack(trackIndex);
 
-            var settingsMenu = new MenuFlyout();
-
-            var snapItem = new ToggleMenuFlyoutItem { Text = "Snapping", IsChecked = track.IsSnappingEnabled };
-            snapItem.Click += (s, e) => { track.IsSnappingEnabled = snapItem.IsChecked; };
-
-            var magItem = new ToggleMenuFlyoutItem { Text = "Magnetic Timeline", IsChecked = track.IsGapless };
-            magItem.Click += (s, e) => { track.IsGapless = magItem.IsChecked; };
-
-            var waveItem = new ToggleMenuFlyoutItem { Text = "Show Waveforms", IsChecked = track.ShowAudioWaveforms };
-            waveItem.Click += (s, e) => { track.ShowAudioWaveforms = waveItem.IsChecked; BuildTimelineBar(); };
-
-            settingsMenu.Items.Add(snapItem);
-            settingsMenu.Items.Add(magItem);
-            settingsMenu.Items.Add(waveItem);
-
-            var settingsBtn = new Button
+            var snapIcon = new FontIcon { Glyph = "\uE144", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0,0,0,1), Opacity = track.IsSnappingEnabled ? 1.0 : 0.3 };
+            var snapBtn = new Button
             {
-                Content = new FontIcon { Glyph = "\uE713", FontSize = 10 },
-                Padding = new Thickness(4, 0, 4, 0),
+                Content = snapIcon,
+                Padding = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center,
                 CornerRadius = new CornerRadius(4),
                 BorderThickness = new Thickness(0),
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 MinHeight = 0,
                 MinWidth = 0,
-                Height = 18,
-                Flyout = settingsMenu
+                Height = 18
             };
-            ToolTipService.SetToolTip(settingsBtn, text + " Settings");
+            ToolTipService.SetToolTip(snapBtn, text + " Snapping");
+            snapBtn.Click += (s, e) => { track.IsSnappingEnabled = !track.IsSnappingEnabled; snapIcon.Opacity = track.IsSnappingEnabled ? 1.0 : 0.3; };
+
+            var magIcon = new FontIcon { Glyph = "\uE71B", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0,0,0,1), Opacity = track.IsGapless ? 1.0 : 0.3 };
+            var magBtn = new Button
+            {
+                Content = magIcon,
+                Padding = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center,
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(0),
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                MinHeight = 0,
+                MinWidth = 0,
+                Height = 18
+            };
+            ToolTipService.SetToolTip(magBtn, text + " Magnetic Timeline");
+            magBtn.Click += (s, e) => { track.IsGapless = !track.IsGapless; magIcon.Opacity = track.IsGapless ? 1.0 : 0.3; };
 
             var wrapper = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
             wrapper.Children.Add(btn);
-            wrapper.Children.Add(settingsBtn);
+            wrapper.Children.Add(snapBtn);
+            wrapper.Children.Add(magBtn);
 
             Canvas.SetLeft(wrapper, 2);
             Canvas.SetTop(wrapper, y - 1);
@@ -571,18 +585,16 @@ namespace VideoDirector.Views
                 if (clip != null)
                 {
                     var lockColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gold);
-                    var soundColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
-                    var hideColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.LightGray);
+                    var muteColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red);
 
                     if (clip.IsLocked)
-                        sp.Children.Add(new FontIcon { Glyph = "\uE72E", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = lockColor, Margin = new Thickness(4,0,0,0) });
+                        sp.Children.Add(new FontIcon { Glyph = "\uE72E", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = lockColor, Margin = new Thickness(4,0,0,0) });
+                    
                     if (clip.IsVideoHidden)
-                        sp.Children.Add(new FontIcon { Glyph = "\uED1A", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = hideColor, Margin = new Thickness(4,0,0,0) });
+                        sp.Children.Add(new FontIcon { Glyph = "\uED1A", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Opacity = 0.5, Margin = new Thickness(4,0,0,0) });
                     
                     if (clip.Volume == 0)
-                        sp.Children.Add(new FontIcon { Glyph = "\uE74F", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = soundColor, Margin = new Thickness(4,0,0,0) });
-                    else
-                        sp.Children.Add(new FontIcon { Glyph = "\uE995", FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Foreground = soundColor, Margin = new Thickness(4,0,0,0) });
+                        sp.Children.Add(new FontIcon { Glyph = "\uE74F", FontSize = 14, VerticalAlignment = VerticalAlignment.Center, Foreground = muteColor, Margin = new Thickness(4,0,0,0) });
                 }
                 sp.Children.Add(label);
                 
@@ -874,6 +886,42 @@ namespace VideoDirector.Views
             if (_contextClip != null && !_contextClip.IsLocked) SelectClip(_contextClip, _contextIsSpine);
         }
 
+        private void TimelineOpacity_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip != null && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (float.TryParse(tag, System.Globalization.CultureInfo.InvariantCulture, out float opacity))
+                    _contextClip.Opacity = opacity;
+                ViewModel.RecordIfChanged();
+                _playbackEngine?.RefreshComposite();
+            }
+        }
+
+        private void TimelineLayoutFull_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip != null)
+            {
+                _contextClip.PlacementWidth = 1.0;
+                _contextClip.PlacementHeight = 1.0;
+                _contextClip.PlacementCenterX = 0.5;
+                _contextClip.PlacementCenterY = 0.5;
+                ViewModel.RecordIfChanged();
+                _playbackEngine?.RefreshComposite();
+            }
+        }
+
+        private void TimelineLayoutWindow_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextClip != null)
+            {
+                _contextClip.PlacementWidth = 0.3;
+                _contextClip.PlacementHeight = 0.3;
+                _contextClip.PlacementCenterX = 0.72;
+                _contextClip.PlacementCenterY = 0.72;
+                ViewModel.RecordIfChanged();
+                _playbackEngine?.RefreshComposite();
+            }
+        }
         private void TimelineBorderType_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextClip != null && sender is FrameworkElement fe && fe.Tag is string tag)
@@ -881,6 +929,7 @@ namespace VideoDirector.Views
                 if (Enum.TryParse(tag, out Models.BorderType type))
                     _contextClip.BorderType = type;
                 _playbackEngine?.RefreshComposite();
+                ViewModel.RecordIfChanged();
             }
         }
 
@@ -896,6 +945,7 @@ namespace VideoDirector.Views
                 else if (tag == "Green") _contextClip.BorderColor = Microsoft.UI.Colors.LimeGreen;
                 else if (tag == "DarkGrey") _contextClip.BorderColor = Microsoft.UI.Colors.DarkGray;
                 _playbackEngine?.RefreshComposite();
+                ViewModel.RecordIfChanged();
             }
         }
 
@@ -906,6 +956,7 @@ namespace VideoDirector.Views
                 if (double.TryParse(tag, out double t))
                     _contextClip.BorderThickness = t;
                 _playbackEngine?.RefreshComposite();
+                ViewModel.RecordIfChanged();
             }
         }
 
@@ -1220,16 +1271,19 @@ namespace VideoDirector.Views
                 }
             }
 
-            if (_playheadTime != null)
+            if (_playheadTime != null && _playheadBadge != null)
             {
                 int m = (int)(sec / 60);
                 _playheadTime.Text = m > 0 ? $"{m}:{sec - m * 60:00.0}" : $"{sec:0.0}s";
-                // Sit just right of the playhead, flipping to the left near the right edge.
+                
                 double w = TimelineBar?.ActualWidth ?? 0;
-                double tx = x + 4;
-                if (tx > w - 40) tx = x - 40;
-                Canvas.SetLeft(_playheadTime, System.Math.Max(0, tx));
-                Canvas.SetTop(_playheadTime, RulerH + 1);
+                double tx = x + 6;
+                // If we get close to the right edge, flip the badge to the left of the playhead.
+                // 35px is roughly the max width of the badge.
+                if (tx > w - 35) tx = x - (_playheadBadge.ActualWidth > 0 ? _playheadBadge.ActualWidth : 35) - 4;
+                
+                Canvas.SetLeft(_playheadBadge, System.Math.Max(0, tx));
+                Canvas.SetTop(_playheadBadge, 2); // Sit nicely centered inside the taller 20px ruler area
             }
         }
 
@@ -1575,82 +1629,6 @@ namespace VideoDirector.Views
             StepFrame(1);
         }
 
-        private async void FitWindow_Click(object? sender, RoutedEventArgs e)
-        {
-            if (_timelineZoomFactor > 1.0)
-            {
-                _timelineZoomFactor = 1.0;
-                BuildTimelineBar();
-            }
-            double targetAspect = 16.0 / 9.0;
-            var mpA = (Windows.Media.Playback.MediaPlayer)null;
-            var mpB = (Windows.Media.Playback.MediaPlayer)null;
-            
-            // Get the true video aspect ratio directly from the file container
-            // This bypasses Windows Media Foundation padding (e.g. 1918x804 padded to 1920x816)
-            CinematicOperation activeClip = null;
-            if (ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
-            {
-                activeClip = ViewModel.Tracks[0].Clips[0]; // just grab the first one for baseline
-            }
-            if (activeClip != null && !string.IsNullOrEmpty(activeClip.FilePath))
-            {
-                try
-                {
-                    var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(activeClip.FilePath);
-                    var props = await file.Properties.GetVideoPropertiesAsync();
-                    if (props != null && props.Width > 0 && props.Height > 0)
-                    {
-                        targetAspect = (double)props.Width / props.Height;
-                    }
-                }
-                catch { }
-            }
-
-            // Fallback to WMF dimensions if file properties failed
-            if (targetAspect == 16.0 / 9.0)
-            {
-                var activePlayer = (Windows.Media.Playback.MediaPlayer)null;
-                if (activePlayer != null && activePlayer.PlaybackSession != null)
-                {
-                    uint vw = activePlayer.PlaybackSession.NaturalVideoWidth;
-                    uint vh = activePlayer.PlaybackSession.NaturalVideoHeight;
-                    if (vw > 0 && vh > 0)
-                    {
-                        targetAspect = (double)vw / vh;
-                    }
-                }
-            }
-
-            double w = PlayerControl.ActualWidth;
-            double h = PlayerControl.ActualHeight;
-            if (w <= 0 || h <= 0) return;
-
-            var appWindow = MainWindow.Instance.AppWindow;
-            if (appWindow == null) return;
-
-            double scale = this.XamlRoot?.RasterizationScale ?? 1.0;
-
-            // Calculate chrome (timeline dock, etc.) from the exact physical client size
-            double physicalClientW = appWindow.ClientSize.Width;
-            double physicalClientH = appWindow.ClientSize.Height;
-            double logicalClientW = physicalClientW / scale;
-            double logicalClientH = physicalClientH / scale;
-
-            double chromeW = logicalClientW - w;
-            double chromeH = logicalClientH - h;
-
-            // USER RULE: Baseline the window against the CURRENT horizontal width.
-            // Horizontal does not change. Shrink the vertical height to remove empty space.
-            double newClientLogicalWidth = w + chromeW;
-            double newClientLogicalHeight = (w / targetAspect) + chromeH;
-
-            // Floor the height to ensure we don't get a 1px gap from rounding up
-            int winWidthPhysical = (int)System.Math.Round(newClientLogicalWidth * scale);
-            int winHeightPhysical = (int)System.Math.Floor(newClientLogicalHeight * scale);
-
-            appWindow.ResizeClient(new Windows.Graphics.SizeInt32(winWidthPhysical, winHeightPhysical));
-        }
 
         private async void Save_Click(object? sender, RoutedEventArgs e)
         {
@@ -2033,6 +2011,28 @@ namespace VideoDirector.Views
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

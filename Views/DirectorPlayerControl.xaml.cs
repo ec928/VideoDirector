@@ -261,6 +261,27 @@ namespace VideoDirector.Views
             }
         }
 
+        public event EventHandler<int> HideRequested;
+        public event EventHandler<int> LockRequested;
+
+        private void PipHide_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0) HideRequested?.Invoke(this, _contextSlot);
+        }
+
+        private void PipLock_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0) LockRequested?.Invoke(this, _contextSlot);
+        }
+        public event EventHandler<(int slot, float opacity)> OpacityRequested;
+        private void Opacity_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_contextSlot >= 0 && sender is FrameworkElement fe && fe.Tag is string tag)
+            {
+                if (float.TryParse(tag, System.Globalization.CultureInfo.InvariantCulture, out float opacity))
+                    OpacityRequested?.Invoke(this, (_contextSlot, opacity));
+            }
+        }
         public void UpdateBorderMenuState(Models.BorderType type, Windows.UI.Color color, double thickness)
         {
             PipBorderTypeNone.IsChecked = type == Models.BorderType.None;
@@ -400,3 +421,8 @@ namespace VideoDirector.Views
         }
     }
 }
+
+
+
+
+
