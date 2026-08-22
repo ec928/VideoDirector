@@ -77,10 +77,35 @@ namespace VideoDirector.Views
         private void InactivityTimer_Tick(object? sender, object e)
         {
             _inactivityTimer.Stop();
-            if (!_isPointerOverPill && ViewModel.IsPlaying)
+
+            // Cinematic mode hides the chrome whether or not anything is rolling: the point is to
+            // look at the picture, and a paused frame is still a frame you want unobstructed.
+            // Outside it the old rule stands — chrome only gets out of the way during playback,
+            // because while editing it is what you are reaching for.
+            if (!_isPointerOverPill && (ViewModel.IsPlaying || ViewModel.IsCinematicMode))
             {
                 ViewModel.IsControlsVisible = false;
             }
+        }
+
+        // Cinematic mode owns the window presenter as well as the chrome. Guarded because the
+        // presenter call throws if the window is mid-teardown, and a failed toggle must not take
+        // the app down with it.
+        private void ApplyCinematicPresenter(bool cinematic)
+        {
+            try
+            {
+                var appWindow = MainWindow.Instance?.AppWindow;
+                if (appWindow == null) return;
+
+                bool isFullScreen = appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
+                if (cinematic == isFullScreen) return;
+
+                appWindow.SetPresenter(cinematic
+                    ? Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen
+                    : Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped);
+            }
+            catch { }
         }
 
         private void VideoDirectorControl_Loaded(object? sender, RoutedEventArgs e)
@@ -95,6 +120,9 @@ namespace VideoDirector.Views
 
             ViewModel.Tracks.CollectionChanged += (s, ev) => { HookOverlayTrackClips(); BuildTimelineBar(); _playbackEngine?.RefreshComposite(); };
             ViewModel.ClipPropertyChanged += (s, ev) => { _playbackEngine?.RefreshComposite(); };
+            // An image clip is a still with no frame to seek to - bake its bitmap now so the
+            // first activation renders from it instead of failing a MediaSource open first.
+            ViewModel.ClipAdded += (s, clip) => { if (clip is { IsStill: true }) _playbackEngine?.PrebakeStillFrame(clip); };
             HookOverlayTrackClips();
             BuildTimelineBar();
         }
@@ -1499,8 +1527,33 @@ namespace VideoDirector.Views
             e.Handled = true;
         }
 
+        // The one list of what can be dropped. The two drop handlers each carried their own
+        // hardcoded set covering .mp4/.mkv/.avi/.jpg/.png, so .jpeg, .gif, .bmp, .webp, .tif,
+        // .mov and .wmv were offered by the file picker and silently refused on drop.
+        private static bool IsSupportedMedia(string ext)
+        {
+            foreach (var e in SupportedMediaExtensions)
+                if (string.Equals(e, ext, System.StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        private static readonly string[] SupportedMediaExtensions =
+        {
+            ".mp4", ".mkv", ".avi", ".mov", ".wmv",
+            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"
+        };
+
         private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
+            if (e.PropertyName == nameof(DirectorViewModel.IsCinematicMode))
+            {
+                ApplyCinematicPresenter(ViewModel.IsCinematicMode);
+                // Restart the countdown so entering cinematic mode fades the pill on the
+                // same 5s the rest of the app uses, without needing a pointer move first.
+                _inactivityTimer.Stop();
+                _inactivityTimer.Start();
+                return;
+            }
             if (e.PropertyName == nameof(DirectorViewModel.CurrentStoryTime))
             {
                 UpdatePlayhead();
@@ -1585,7 +1638,7 @@ namespace VideoDirector.Views
                 var paths = new System.Collections.Generic.List<string>();
                 foreach (var item in items)
                 {
-                    if (item is Windows.Storage.StorageFile file && (file.FileType == ".mp4" || file.FileType == ".mkv" || file.FileType == ".avi" || file.FileType == ".jpg" || file.FileType == ".png"))
+                    if (item is Windows.Storage.StorageFile file && IsSupportedMedia(file.FileType))
                     {
                         paths.Add(item.Path);
                     }
@@ -1933,6 +1986,9 @@ namespace VideoDirector.Views
         private void EscapeAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
                                                Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
         {
+            // Cinematic first: it is the outermost state, and it is the one with no visible way
+            // out once the pill has faded. Esc must always be able to get you back to the editor.
+            if (ViewModel.IsCinematicMode) { ViewModel.IsCinematicMode = false; args.Handled = true; return; }
             if (ViewModel.IsEditMode) { ExitEditMode(); args.Handled = true; }
         }
 
@@ -2064,7 +2120,7 @@ namespace VideoDirector.Views
                 var items = await e.DataView.GetStorageItemsAsync();
                 foreach (var item in items)
                 {
-                    if (item is Windows.Storage.StorageFile file && (file.FileType == ".mp4" || file.FileType == ".mkv" || file.FileType == ".avi" || file.FileType == ".jpg" || file.FileType == ".png"))
+                    if (item is Windows.Storage.StorageFile file && IsSupportedMedia(file.FileType))
                     {
                         await ViewModel.AddOverlayAsync(item.Path, startTime, trackIndex);
                     }

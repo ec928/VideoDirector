@@ -89,6 +89,36 @@ namespace VideoDirector.ViewModels
 
         public bool IsDockVisible => IsStoryboardVisible && !_isPlaying;
 
+        // CINEMATIC MODE — screening, with nothing on screen but the picture.
+        //
+        // The chrome is already dismissible: IsControlsVisible drives both the transport pill and
+        // the track dock, and the inactivity timer already lowers it. What this adds is (a) the
+        // inspector goes too, (b) the dock stays down even when the pointer wakes the pill, so a
+        // mouse twitch does not throw the timeline back over the picture, and (c) the auto-hide
+        // applies while paused, not only while rolling — you should be able to pause on a frame and
+        // still be looking at just the frame.
+        private bool _isCinematicMode;
+        public bool IsCinematicMode
+        {
+            get => _isCinematicMode;
+            set
+            {
+                if (SetProperty(ref _isCinematicMode, value))
+                {
+                    OnPropertyChanged(nameof(IsStoryboardVisible));
+                    OnPropertyChanged(nameof(IsDockVisible));
+                    OnPropertyChanged(nameof(IsTrackDockVisible));
+                    // Show the pill on the way in and on the way out: entering, so the exit control
+                    // is visible rather than having to be hunted for; leaving, so the editor does
+                    // not come back with its transport already faded out.
+                    IsControlsVisible = true;
+                }
+            }
+        }
+
+        // The dock follows the pill EXCEPT in cinematic mode, where it stays down for good.
+        public bool IsTrackDockVisible => !_isCinematicMode && _isControlsVisible;
+
         private bool _isLooping = true;
         public bool IsLooping
         {
@@ -128,13 +158,17 @@ namespace VideoDirector.ViewModels
             }
         }
 
-        public bool IsStoryboardVisible => !_isPlaying && (_isStoryboardPinned || HasSelection);
+        public bool IsStoryboardVisible => !_isCinematicMode && !_isPlaying && (_isStoryboardPinned || HasSelection);
 
         private bool _isControlsVisible = true;
         public bool IsControlsVisible
         {
             get => _isControlsVisible;
-            set => SetProperty(ref _isControlsVisible, value);
+            set
+            {
+                if (SetProperty(ref _isControlsVisible, value))
+                    OnPropertyChanged(nameof(IsTrackDockVisible));
+            }
         }
 
         private void UpdateTelemetryVisibility()
@@ -501,6 +535,12 @@ namespace VideoDirector.ViewModels
             return Tracks[0].Clips[index].StartTime;
         }
 
+        // Raised once a clip is in a track. The view wires this to the still-frame prebake:
+        // an image is a still, and without a baked bitmap its first activation goes down the
+        // video path - MediaSource tries to open a .jpg, fails, and the picture only appears
+        // once the decode lands and nudges the composite. Baking on add skips that entirely.
+        public event EventHandler<CinematicOperation>? ClipAdded;
+
         public async Task AddOverlayAsync(string filePath, TimeSpan startTime, int trackIndex = 0)
         {
             TimeSpan duration = TimeSpan.FromSeconds(5);
@@ -564,6 +604,7 @@ namespace VideoDirector.ViewModels
                 PlacementHeight = TrackDefaults[trackIndex].h
             };
             track.Clips.Add(overlay);
+            ClipAdded?.Invoke(this, overlay);
             RecordIfChanged();
             // Deliberately does NOT select the new clip: selecting an overlay enters Edit mode,
             // and in Edit mode Play previews that one clip instead of the composite (so the global

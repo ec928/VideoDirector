@@ -330,6 +330,10 @@
                         <ToggleButton x:Name="AutoPlayButton" IsChecked="{x:Bind ViewModel.IsAutoPlayEnabled, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Toggle Auto-Play" Padding="0">
                             <FontIcon Glyph="&#xE173;" FontSize="14" />
                         </ToggleButton>
+                        <ToggleButton x:Name="CinematicButton" IsChecked="{x:Bind ViewModel.IsCinematicMode, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" Padding="0"
+                                      ToolTipService.ToolTip="Cinematic mode - full screen, no editor chrome (Esc to exit)">
+                            <FontIcon Glyph="&#xE740;" FontSize="14" />
+                        </ToggleButton>
                         <Button x:Name="ResetClipButton" Click="ResetClip_Click" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Reset Clip Modifications" Padding="0"
                                 Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
                                 IsEnabled="{x:Bind ViewModel.SelectedClip.HasModifications, Mode=OneWay, FallbackValue=False}">
@@ -376,7 +380,7 @@
         <!-- Bottom Track Dock: horizontal arrangement lanes (one per track).
              Auto-hides during playback if no mouse movement. -->
         <Border Grid.Row="1" x:Name="TrackDock"
-                Visibility="{x:Bind ViewModel.IsControlsVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                Visibility="{x:Bind ViewModel.IsTrackDockVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                 BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
                 Padding="8,6"
