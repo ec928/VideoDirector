@@ -201,8 +201,8 @@
                     <TextBlock x:Name="TelemetryClipTime" x:FieldModifier="public" Foreground="White" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryVideoSize" x:FieldModifier="public" Foreground="Yellow" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryOperationInfo" x:FieldModifier="public" Foreground="White" FontFamily="Consolas" />
-                    <!-- TEMPORARY (Ken Burns black-edge diagnosis): box vs content vs pan allowance.
-                         Remove this line and its writer in UpdateTelemetryOverlay once verified. -->
+                    <!-- Geometry HUD: box on screen, motion transform, and the region of the SOURCE
+                         frame it samples. Written by WriteGeometryTelemetry, throttled to ~10Hz. -->
                     <TextBlock x:Name="TelemetryGeometry" x:FieldModifier="public" Foreground="Orange" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryStartMarkInfo" x:FieldModifier="public" Foreground="Cyan" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryMidMarkInfo" x:FieldModifier="public" Foreground="DeepSkyBlue" FontFamily="Consolas" />
