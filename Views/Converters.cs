@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using System;
+using System.Globalization;
 using System.Linq;
 
 namespace VideoDirector.Views
@@ -207,16 +208,37 @@ namespace VideoDirector.Views
             return "00:00.0";
         }
 
+        // Parsed in the format Convert() WRITES, which is MM:SS.f — not TimeSpan's own.
+        //
+        // TimeSpan.Parse reads "00:10" as hh:mm, i.e. TEN MINUTES, and it succeeds, so the MM:SS
+        // fallback below never ran. Typing a ten second duration silently produced six hundred.
+        // "00:10.0" happened to work only because a fraction is illegal after hh:mm, so that one
+        // failed the first parse and fell through to the branch that was right all along.
+        //
+        // Colon count picks the meaning, so the general parse is reached only for shapes this
+        // control never writes:
+        //   "10"        -> 10 seconds   (a bare number is the obvious thing to type)
+        //   "00:10"     -> 10 seconds   (MM:SS, as displayed)
+        //   "60:32.9"   -> 1h 0m 32.9s  (minutes are not capped at 59; the source timecodes here
+        //                                routinely exceed an hour and are shown that way)
+        //   "01:00:32"  -> HH:MM:SS
         public object ConvertBack(object value, Type targetType, object parameter, string language)
         {
-            if (value is string s && !string.IsNullOrWhiteSpace(s))
+            if (value is string raw && !string.IsNullOrWhiteSpace(raw))
             {
-                if (TimeSpan.TryParse(s, out TimeSpan result))
-                    return result;
+                string s = raw.Trim();
+                int colons = s.Count(c => c == ':');
 
-                // Try fallback format by prepending "00:" to parse MM:SS.f
-                if (s.Count(c => c == ':') == 1 && TimeSpan.TryParse("00:" + s, out TimeSpan fallbackResult))
-                    return fallbackResult;
+                if (colons == 0 &&
+                    double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds))
+                    return TimeSpan.FromSeconds(Math.Max(0, seconds));
+
+                if (colons == 1 &&
+                    TimeSpan.TryParse("00:" + s, CultureInfo.InvariantCulture, out TimeSpan mmss))
+                    return mmss;
+
+                if (TimeSpan.TryParse(s, CultureInfo.InvariantCulture, out TimeSpan result))
+                    return result;
             }
             return TimeSpan.Zero;
         }

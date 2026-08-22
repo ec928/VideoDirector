@@ -151,7 +151,15 @@
 
                                         <!-- Duration -->
                                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Duration" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedClip.OpDuration, Mode=TwoWay, Converter={StaticResource TimeSpanToStringConverter}}" ToolTipService.ToolTip="Trimmed Duration (MM:SS.f)" />
+                                        <!-- Seconds, not a timecode. Start and End are positions INTO the source and
+                                             read naturally as MM:SS.f; a duration is a scalar, and typing "10" for ten
+                                             seconds should not require knowing a format. Spin buttons and arrow keys
+                                             nudge it, matching the Transition length control below. -->
+                                        <NumberBox Grid.Row="2" Grid.Column="1" local:NumberBoxExtensions.FractionDigits="1"
+                                                   Value="{Binding SelectedClip.OpDuration, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
+                                                   SmallChange="0.1" LargeChange="1" Minimum="0.1"
+                                                   SpinButtonPlacementMode="Compact"
+                                                   ToolTipService.ToolTip="Clip duration in seconds" />
 
                                         <!-- Speed -->
                                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Speed" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
