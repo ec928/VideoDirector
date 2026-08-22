@@ -110,22 +110,14 @@ namespace VideoDirector.Models
             {
                 OnTimelineSequenceChanged();
             }
-            else if (e.PropertyName == nameof(DirectorViewModel.CurrentStoryTime))
+            else if (e.PropertyName == nameof(DirectorViewModel.CurrentStoryTime)
+                  || e.PropertyName == nameof(DirectorViewModel.SelectedClip)
+                  || e.PropertyName == nameof(DirectorViewModel.HasSelection)
+                  || e.PropertyName == nameof(DirectorViewModel.IsEditMode)
+                  || e.PropertyName == nameof(DirectorViewModel.IsPlaying))
             {
-                // MOVING THE PLAYHEAD MUST RE-EVALUATE WHAT IS ON SCREEN.
-                //
-                // Nothing did. SeekCompositeToStoryTime evaluates because it calls
-                // EvaluateOverlays itself, but SelectClip just assigns CurrentStoryTime - so
-                // selecting a clip jumped the playhead to its start while the composite carried
-                // on showing the clip that was already loaded. With two videos either side it
-                // looked like a lag; with an image after a video it was unmistakable, because the
-                // video simply stayed up.
-                //
-                // Skipped while the render loop is driving: that already evaluates every frame,
-                // and it writes CurrentStoryTime itself, so reacting here would double the work
-                // sixty times a second.
-                if (_mode == EditorMode.Arrange && !_isAnimating && !_evaluatingComposite)
-                    EvaluateOverlays(_viewModel.CurrentStoryTime);
+                // Every input the composite depends on. See Invalidate.
+                Invalidate();
             }
         }
 
@@ -894,6 +886,52 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
         // The generic per-track evaluation (§7B). One loop body, indexed by track — no slot
         // branches. Each track is strict (its clips never overlap), so at most ONE clip is active
         // per track, which is why track i can own exactly one player/surface.
+        // ==================== Composite invalidation ====================
+        //
+        // WHAT IS ON SCREEN IS A FUNCTION OF STATE, NOT A CONSEQUENCE OF REMEMBERING.
+        //
+        // Re-resolving the composite used to require a call — RefreshComposite from a dozen places,
+        // SeekCompositeToStoryTime, or the playback loop. Every path that changed what SHOULD be on
+        // screen had to remember to make one, and SelectClip did not: it set SelectedClip and
+        // CurrentStoryTime and returned, so selecting a clip moved the playhead and the inspector
+        // while the compositor kept showing the clip that was already loaded. The failure is silent
+        // — a stale picture, not an error — and the next path added would have repeated it.
+        //
+        // Now every input that determines the composite just marks it dirty, and one place acts on
+        // that. Nothing has to remember anything.
+        //
+        // Note it is INPUTS that invalidate, not values. Keying this off CurrentStoryTime changing
+        // was not enough on its own: SetProperty suppresses the notification when the value is
+        // unchanged, and selecting a clip whose start equals the playhead assigns an unchanged
+        // value. Selection invalidates because the selection changed, full stop.
+        private bool _compositeDirty;
+        private bool _compositeFlushScheduled;
+
+        public void Invalidate()
+        {
+            _compositeDirty = true;
+            if (_compositeFlushScheduled) return;
+
+            // Coalesced: a gesture that invalidates twenty times costs one evaluation.
+            _compositeFlushScheduled = true;
+            _dispatcher.TryEnqueue(FlushComposite);
+        }
+
+        private void FlushComposite()
+        {
+            _compositeFlushScheduled = false;
+            if (!_compositeDirty) return;
+            _compositeDirty = false;
+
+            // Same guards RefreshComposite always had: Edit mode manages its own surfaces, and
+            // while rolling the playback loop already evaluates every frame. Paused counts as
+            // Arrange, so a refresh still lands.
+            if (IsActivelyPlaying) return;
+            if (_mode != EditorMode.Arrange) return;
+
+            EvaluateOverlays(_viewModel.CurrentStoryTime);
+        }
+
         // Guards the CurrentStoryTime handler above from re-entering while an evaluation is
         // already in flight.
         private bool _evaluatingComposite;
@@ -911,12 +949,6 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
 
         private void EvaluateOverlaysCore(TimeSpan currentStoryTime)
         {
-            // The geometry readout refreshes from the one place every path that can change
-            // geometry passes through, so scrubbing updates it and not just playback. Called
-            // directly: this is already the UI thread, and enqueueing a callback per frame was
-            // pure overhead. WriteGeometryTelemetry throttles itself.
-            WriteGeometryTelemetry();
-
             // EDIT MODE OWNS THE SCREEN. It shows exactly ONE clip full-screen, and it manages the
             // overlay surfaces itself (HideAllOverlays / EnterOverlayEditMode). If we ran here we
             // would paint the other tracks' stills over the clip being edited — three videos
@@ -969,6 +1001,15 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                 }
                 else SetOverlayRender(i, OverlayRender.Hidden, null);
             }
+
+            // AFTER the slots have been resolved, never before.
+            //
+            // This call used to sit at the top of the method, so the HUD reported the slot contents
+            // from the PREVIOUS evaluation against the CURRENT story time. In Arrange there is no
+            // per-frame loop, so that is one whole selection behind: select a clip and the readout
+            // names the clip that was showing before it, with an into-clip time that cannot exist.
+            // Two rounds of diagnosis were spent on numbers this ordering invented.
+            WriteGeometryTelemetry();
         }
 
         // ---- §7A: how an upper-track clip is rendered. Exactly one of these, set explicitly. ----
@@ -1061,12 +1102,10 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
 
         // Re-render the Arrange composite from the model (e.g. after a clip is added, removed, or
         // moved in time). Cheap and video-free — it takes the still path in EvaluateOverlays.
-        public void RefreshComposite()
-        {
-            if (IsActivelyPlaying) return;
-            if (_mode != EditorMode.Arrange) return;   // never redraw the composite over Edit mode
-            EvaluateOverlays(_viewModel.CurrentStoryTime);
-        }
+        // Kept as the name a dozen call sites already use. It no longer forces an immediate
+        // evaluation — it marks the composite dirty and the flush coalesces. Correctness no longer
+        // depends on these calls existing at all; they are now belt to Invalidate's braces.
+        public void RefreshComposite() => Invalidate();
 
         // Bake a still's frame up front (e.g. the moment a Snapshot clip is created) so it is
         // ready before the playhead ever reaches it, rather than on first activation.
