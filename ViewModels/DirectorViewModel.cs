@@ -256,16 +256,37 @@ namespace VideoDirector.ViewModels
 
         // SelectedTimelineNode and SelectedOverlay were used for splitting properties.
         // We map them roughly for backwards compatibility with UI bindings, though we should unify them.
+        // Role-filtered views of SelectedClip. Assigning null DESELECTS - it used to be swallowed
+        // by an `if (value != null)` guard, which made ExitEditMode's
+        //
+        //     ViewModel.SelectedTimelineNode = null;
+        //     ViewModel.SelectedOverlay = null;
+        //
+        // a no-op despite the comment above it saying it clears the selection. Nothing else in
+        // normal use clears one, so HasSelection went true on the first click and stayed true for
+        // the rest of the session: the inspector could never be dismissed, and the panel-pin toggle
+        // - whose only job is to keep it open when nothing is selected - had nothing left to do.
+        //
+        // Null clears only when the CURRENT selection belongs to that role, so setting one view to
+        // null cannot silently drop a selection the other view owns.
         public CinematicOperation SelectedTimelineNode
         {
             get => (IsTrack1Selected) ? _selectedClip : null;
-            set { if (value != null) SelectedClip = value; }
+            set
+            {
+                if (value != null) SelectedClip = value;
+                else if (IsTrack1Selected) SelectedClip = null;
+            }
         }
 
         public CinematicOperation SelectedOverlay
         {
             get => (!IsTrack1Selected && _selectedClip != null) ? _selectedClip : null;
-            set { if (value != null) SelectedClip = value; }
+            set
+            {
+                if (value != null) SelectedClip = value;
+                else if (_selectedClip != null && !IsTrack1Selected) SelectedClip = null;
+            }
         }
 
         public bool HasSelection => _selectedClip != null;

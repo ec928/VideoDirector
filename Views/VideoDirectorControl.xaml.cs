@@ -678,7 +678,16 @@ namespace VideoDirector.Views
                     _dragGrabOffsetSec = (p.X / _timelinePxPerSec) - hit.startSec;
                 }
             }
-            else { _timelineScrubbing = true; ScrubToX(p.X); }
+            else
+            {
+                // Empty lane: scrub, and drop the selection. Every NLE deselects on a click into
+                // empty timeline, and until the null-assignment above was fixed there was no way
+                // to deselect at all. The ruler is deliberately excluded (handled earlier) -
+                // scrubbing the time ruler should not disturb what you have selected.
+                ViewModel.SelectedClip = null;
+                _timelineScrubbing = true;
+                ScrubToX(p.X);
+            }
         }
 
         private void TimelineBar_PointerMoved(object? sender, PointerRoutedEventArgs e)
@@ -2207,7 +2216,12 @@ namespace VideoDirector.Views
             // Cinematic first: it is the outermost state, and it is the one with no visible way
             // out once the pill has faded. Esc must always be able to get you back to the editor.
             if (ViewModel.IsCinematicMode) { ViewModel.IsCinematicMode = false; args.Handled = true; return; }
-            if (ViewModel.IsEditMode) { ExitEditMode(); args.Handled = true; }
+            if (ViewModel.IsEditMode) { ExitEditMode(); args.Handled = true; return; }
+
+            // Outermost first, innermost last: with nothing else to leave, Esc drops the selection
+            // and with it the inspector. A keyboard route matters here because the panel covers the
+            // right of the canvas and the only other way out is finding empty timeline to click.
+            if (ViewModel.SelectedClip != null) { ViewModel.SelectedClip = null; args.Handled = true; }
         }
 
         // Space = play/pause. Ignored while typing so it doesn't hijack text entry.
