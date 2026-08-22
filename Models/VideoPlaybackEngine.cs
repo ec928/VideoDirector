@@ -1835,30 +1835,35 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             _editPreviewClock.Restart();
 
             // A clip rendering from a baked bitmap has no open source to seek or roll — the marks
-            // animate off the wall clock below and nothing else is needed. Testing PlaybackSpeed
-            // alone missed this: an image is a still by EXTENSION and keeps speed 1, so it took
-            // the play path and asked a player with no source to seek.
+            // animate off the wall clock in EditPreview_Rendering and nothing else is needed.
+            // Testing PlaybackSpeed alone missed this: an image is a still by EXTENSION and keeps
+            // speed 1, so it took the play path and asked a player with no source to seek.
+            //
+            // This must NOT return early. It did, and the return jumped the two lines below —
+            // the render subscription and IsPlaying — so previewing an image started a clock that
+            // nothing read and appeared to do nothing at all.
             if (RenderModeFor(_editClip) == OverlayRender.Still)
             {
                 _overlayPlayer[0].Pause();
-                return;
-            }
-
-            _overlayPlayer[0].PlaybackSession.Position = _editClip.VideoStartTime;
-
-            // Respect the clip's own speed. Speed 0 = a STILL: freeze the frame; the Ken Burns
-            // marks still animate over OpDuration below. (Was hardcoded to 1.0 + Play, so a
-            // speed-0 clip wrongly ran at full speed.)
-            double clipSpeed = _editClip.PlaybackSpeed;
-            _overlayPlayer[0].Volume = _editClip.Volume;
-            if (clipSpeed > 0)
-            {
-                _overlayPlayer[0].PlaybackSession.PlaybackRate = clipSpeed;
-                _overlayPlayer[0].Play();
             }
             else
             {
-                _overlayPlayer[0].Pause();
+                _overlayPlayer[0].PlaybackSession.Position = _editClip.VideoStartTime;
+
+                // Respect the clip's own speed. Speed 0 = a STILL: freeze the frame; the Ken Burns
+                // marks still animate over OpDuration below. (Was hardcoded to 1.0 + Play, so a
+                // speed-0 clip wrongly ran at full speed.)
+                double clipSpeed = _editClip.PlaybackSpeed;
+                _overlayPlayer[0].Volume = _editClip.Volume;
+                if (clipSpeed > 0)
+                {
+                    _overlayPlayer[0].PlaybackSession.PlaybackRate = clipSpeed;
+                    _overlayPlayer[0].Play();
+                }
+                else
+                {
+                    _overlayPlayer[0].Pause();
+                }
             }
             CompositionTarget.Rendering += EditPreview_Rendering;
             _viewModel.IsPlaying = true;
@@ -1908,7 +1913,11 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             // Drive the per-clip scrubber off the real decode position so it tracks the preview.
             // (Assigning CurrentOperationTime — not …Seconds — only notifies the slider; it does
             // not fire a seek back into the player, so there's no feedback loop.)
-            if (_overlayPlayer[0]?.PlaybackSession != null)
+            // A bitmap still has no decode position to follow — its progress IS the wall clock, so
+            // drive the scrubber from that or it sits at zero for the whole preview.
+            if (RenderModeFor(_editClip) == OverlayRender.Still)
+                _viewModel.CurrentOperationTime = TimeSpan.FromSeconds(Math.Clamp(progress, 0.0, 1.0) * dur);
+            else if (_overlayPlayer[0]?.PlaybackSession != null)
                 _viewModel.CurrentOperationTime = _overlayPlayer[0].PlaybackSession.Position;
 
             // Keep the telemetry HUD live while previewing in Edit — the composite render loop that

@@ -37,10 +37,24 @@ namespace VideoDirector.Models
             {
                 if (_playbackSpeed <= 0) return true;
                 if (string.IsNullOrWhiteSpace(_filePath)) return true;
-                var ext = System.IO.Path.GetExtension(_filePath);
-                return Array.Exists(ImageExtensions, e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase));
+                return IsImagePath(_filePath);
             }
         }
+
+        private static bool IsImagePath(string path)
+        {
+            var ext = System.IO.Path.GetExtension(path);
+            return Array.Exists(ImageExtensions, e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // "Has no advancing source window", which is what the TIMING code actually needs to know.
+        //
+        // Deliberately narrower than IsStill: that one also returns true for a blank path, and the
+        // timing setters run during deserialisation before FilePath has landed. Keying trim and
+        // duration off IsStill would therefore treat every clip as a still for part of a load.
+        [JsonIgnore]
+        private bool HasNoSourceWindow =>
+            _playbackSpeed <= 0 || (!string.IsNullOrWhiteSpace(_filePath) && IsImagePath(_filePath));
 
         private BitmapImage? _thumbnail;
         [JsonIgnore]
@@ -242,9 +256,10 @@ namespace VideoDirector.Models
             double src = _sourceDuration.TotalSeconds > 0 ? _sourceDuration.TotalSeconds : double.PositiveInfinity;
             double start = Math.Clamp(startSec, 0, src);
 
-            if (_playbackSpeed <= 0)
+            if (HasNoSourceWindow)
             {
-                // Freeze frame mode. End time must exactly match Start time.
+                // Freeze frame mode. End time must exactly match Start time. Images land here too:
+                // they have no source window to trim, so start and end are the same instant.
                 double endHold = start;
                 if (Math.Abs(start - _videoStartTime.TotalSeconds) > 1e-9)
                 {
@@ -292,7 +307,11 @@ namespace VideoDirector.Models
 
         private void RecomputeOpDurationFromTrim()
         {
-            if (_playbackSpeed <= 0) return; // still: OpDuration is an independent hold time
+            // Same trap as ApplyDurationEdit: an image is a still on speed 1, and computing its
+            // duration from the source window ((end - start) / speed) overwrote whatever hold the
+            // user had just typed with the 5s the window happened to carry. A still's OpDuration is
+            // an independent hold time whatever its speed says.
+            if (HasNoSourceWindow) return;
             double dur = (_videoEndTime - _videoStartTime).TotalSeconds / _playbackSpeed;
             if (dur < MinClipSeconds) dur = MinClipSeconds;
             if (Math.Abs(dur - _opDuration.TotalSeconds) > 1e-9)
@@ -304,13 +323,18 @@ namespace VideoDirector.Models
 
         // Editing the timeline Duration re-trims the OUT point (In and Speed fixed): "make this
         // 10s long" pulls exactly 10s x speed of source from the In point. This is what makes a
-        // precise segment extractable from a very long source by typing a number. For a still
-        // (speed 0) there is no source window, so Duration is set directly as the hold time.
+        // precise segment extractable from a very long source by typing a number. A still has no
+        // source window at all, so Duration is set directly as the hold time.
+        //
+        // The still test is IsStill, NOT speed 0. An IMAGE is a still by extension and keeps speed
+        // 1, so it used to take the video branch: the new end was clamped to SourceDuration, which
+        // AddOverlayAsync had filled with the 5-second default for a file that has no duration.
+        // Typing any longer hold was silently clamped straight back to 5s.
         private void ApplyDurationEdit(double durationSec)
         {
             double d = Math.Max(MinClipSeconds, durationSec);
 
-            if (_playbackSpeed <= 0)
+            if (HasNoSourceWindow)
             {
                 if (Math.Abs(d - _opDuration.TotalSeconds) > 1e-9)
                 {
