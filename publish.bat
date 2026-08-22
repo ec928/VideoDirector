@@ -25,6 +25,10 @@ REM
 REM  Release IS the publish output: dotnet publish has to build before it copies,
 REM  and that build lands in bin\Release anyway.
 REM
+REM  Deliberately NO -p:Platform=x64: the architecture comes from the RID (-r win-x64),
+REM  and setting the MSBuild Platform property only moves the BUILD INTERMEDIATES into
+REM  bin\x64\Release - a duplicate tree beside the real output that nothing consumes.
+REM
 REM  Deliberately NOT single-file: single-file self-extracts the whole runtime
 REM  to %TEMP% on the first launch after every publish, which measurably slows
 REM  cold start.
@@ -49,7 +53,6 @@ REM into the directory name ("...publish   -p:PublishProfile=   --nologo").
 dotnet publish "%PROJ%" ^
   -c Release ^
   -r win-x64 ^
-  -p:Platform=x64 ^
   -p:SelfContained=true ^
   -p:PublishSingleFile=false ^
   -p:PublishTrimmed=false ^
