@@ -1001,6 +1001,19 @@ namespace VideoDirector.Views
 
         // A full clone of a clip's editable state. SourceDuration and PlaybackSpeed must precede
         // the trim: the trim setters clamp against the source length and derive OpDuration from speed.
+        // A faithful copy of everything that makes the clip look and behave as it does.
+        //
+        // ORDER MATTERS, and OpDuration must come last. It never used to be copied at all, which
+        // was invisible for an ordinary video: RecomputeOpDurationFromTrim derives the duration
+        // from the trim window, so the copy landed on the right length by accident. A clip with no
+        // source window has nothing to derive from - a freeze frame has VideoStartTime ==
+        // VideoEndTime, and an image has no timeline in the file at all - so the duplicate came out
+        // at the TimeSpan.Zero default. That is a clip no instant falls inside, so duplicating an
+        // image produced nothing visible at all, and duplicating a freeze frame produced a clip
+        // whose duration box showed its 0.1s minimum.
+        //
+        // Setting it after PlaybackSpeed and the trim times is what makes the setter treat it as a
+        // hold time rather than re-trimming a window - the same ordering SnapshotClip relies on.
         private static CinematicOperation CloneClip(CinematicOperation clip) => new CinematicOperation
         {
             FilePath = clip.FilePath,
@@ -1011,6 +1024,11 @@ namespace VideoDirector.Views
             VideoEndTime = clip.VideoEndTime,
             CurveProfile = clip.CurveProfile,
             StartMark = new SpatialMark(clip.StartMark.Scale, clip.StartMark.X, clip.StartMark.Y),
+            // Mid is optional and was being dropped, so duplicating a three-keyframe move silently
+            // flattened it to a straight Start -> End.
+            MidMark = clip.MidMark == null
+                ? null
+                : new SpatialMark(clip.MidMark.Scale, clip.MidMark.X, clip.MidMark.Y),
             EndMark = new SpatialMark(clip.EndMark.Scale, clip.EndMark.X, clip.EndMark.Y),
             TransitionDuration = clip.TransitionDuration,
             TransitionStyle = clip.TransitionStyle,
@@ -1020,7 +1038,16 @@ namespace VideoDirector.Views
             PlacementHeight = clip.PlacementHeight,
             PlacementCenterX = clip.PlacementCenterX,
             PlacementCenterY = clip.PlacementCenterY,
-            Thumbnail = clip.Thumbnail
+            // Styling is part of what you see, so a copy that loses it is not a copy.
+            BorderType = clip.BorderType,
+            BorderColor = clip.BorderColor,
+            BorderThickness = clip.BorderThickness,
+            // Hidden travels: it is a property of the clip. Locked deliberately does not - it is a
+            // guard against moving THAT clip, and a fresh copy you cannot drag is a copy you cannot
+            // put where you wanted it.
+            IsVideoHidden = clip.IsVideoHidden,
+            Thumbnail = clip.Thumbnail,
+            OpDuration = clip.OpDuration
         };
 
         // Insert a new clip right after `after` on the same track (spine order, or the overlay
