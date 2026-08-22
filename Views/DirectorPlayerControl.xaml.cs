@@ -26,8 +26,16 @@ namespace VideoDirector.Views
     {
         public Microsoft.UI.Xaml.Controls.Grid Grid;
         public Microsoft.UI.Xaml.Controls.MediaPlayerElement Video;
+        // The whole frame, drawn oversized by UniformToFill and clipped by the grid. The surplus
+        // outside the box is the rest of the picture — which is what makes zooming out reveal more
+        // of it rather than exposing background.
         public Microsoft.UI.Xaml.Controls.Image Still;
         public Microsoft.UI.Xaml.Media.CompositeTransform Transform;
+        // The still surface's own transform. Separate from Transform (which belongs to the video
+        // element) so the two surfaces never share state, and declared in XAML alongside
+        // RenderTransformOrigin="0.5,0.5" so the pivot is RELATIVE to the element — an Image with
+        // UniformToFill overflows its slot, and an absolute pivot would not be its centre.
+        public Microsoft.UI.Xaml.Media.CompositeTransform StillTransform;
         public Microsoft.UI.Xaml.Controls.Grid Frame;
     }
 
@@ -67,10 +75,10 @@ namespace VideoDirector.Views
 
             OverlayVisuals = new[]
             {
-                new OverlayVisual { Grid = TrackGrid0, Video = TrackPlayer0, Still = TrackImage0, Transform = TrackTransform0, Frame = TrackFrame0 },
-                new OverlayVisual { Grid = TrackGrid1, Video = TrackPlayer1, Still = TrackImage1, Transform = TrackTransform1, Frame = TrackFrame1 },
-                new OverlayVisual { Grid = TrackGrid2, Video = TrackPlayer2, Still = TrackImage2, Transform = TrackTransform2, Frame = TrackFrame2 },
-                new OverlayVisual { Grid = TrackGrid3, Video = TrackPlayer3, Still = TrackImage3, Transform = TrackTransform3, Frame = TrackFrame3 },
+                new OverlayVisual { Grid = TrackGrid0, Video = TrackPlayer0, Still = TrackImage0, StillTransform = StillTransform0, Transform = TrackTransform0, Frame = TrackFrame0 },
+                new OverlayVisual { Grid = TrackGrid1, Video = TrackPlayer1, Still = TrackImage1, StillTransform = StillTransform1, Transform = TrackTransform1, Frame = TrackFrame1 },
+                new OverlayVisual { Grid = TrackGrid2, Video = TrackPlayer2, Still = TrackImage2, StillTransform = StillTransform2, Transform = TrackTransform2, Frame = TrackFrame2 },
+                new OverlayVisual { Grid = TrackGrid3, Video = TrackPlayer3, Still = TrackImage3, StillTransform = StillTransform3, Transform = TrackTransform3, Frame = TrackFrame3 },
             };
 
             for (int i = 0; i < OverlayVisuals.Length; i++)
@@ -202,6 +210,7 @@ namespace VideoDirector.Views
             
             if (_contextSlot >= 0)
             {
+                OverlayBoxPointerPressed?.Invoke(this, _contextSlot);
                 ContextMenuOpening?.Invoke(this, _contextSlot);
                 PipContextMenu.ShowAt(InputLayer, new FlyoutShowOptions { Position = p });
             }

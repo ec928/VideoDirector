@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>annotations</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>VideoDirector.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Linked, not project-referenced: VideoDirector is a WinUI app and cannot load headlessly.
+       These two files are deliberately free of Microsoft.UI / Windows types so the compositor's
+       geometry can be tested with no UI, no decoder and no display. -->
+  <ItemGroup>
+    <Compile Include="..\Models\ClipGeometry.cs" Link="Linked\ClipGeometry.cs" />
+    <Compile Include="..\Models\Enums.cs" Link="Linked\Enums.cs" />
+  </ItemGroup>
+
+  <!-- The frozen golden fixture is committed and lives here. The live project files under Tests\
+       are gitignored scratch, so tests that read one skip when it is absent. -->
+  <ItemGroup>
+    <None Include="Fixtures\kenburns-baseline.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Tests\0-Test6.json" Link="Live\0-Test6.json" CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\Tests\0-Test6.json')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

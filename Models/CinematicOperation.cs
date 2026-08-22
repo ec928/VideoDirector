@@ -50,6 +50,44 @@ namespace VideoDirector.Models
             set => SetProperty(ref _thumbnail, value);
         }
 
+        // ---- Baked still frame (see StillFrameFactory) ----
+        //
+        // The frozen frame decoded at the SOURCE's native resolution, for clips held as stills
+        // (Speed 0, or an image file). Rendering a still from this instead of from a parked
+        // MediaPlayerElement is what lets a slow Ken Burns push-in resample against real source
+        // pixels rather than against a swapchain already flattened to the on-screen box size.
+        //
+        // Not serialised: it is derived state, rebuilt on demand from FilePath + VideoStartTime.
+        private BitmapImage? _stillFrame;
+        [JsonIgnore]
+        public BitmapImage? StillFrame
+        {
+            get => _stillFrame;
+            set => SetProperty(ref _stillFrame, value);
+        }
+
+        // What the cached frame was baked from. Retrimming the clip or repointing it at another
+        // file changes StillFrameId, which invalidates the bake instead of leaving a stale frame
+        // on screen.
+        [JsonIgnore]
+        public string StillFrameKey { get; set; }
+
+        [JsonIgnore]
+        public string StillFrameId => _filePath + "|" + _videoStartTime.Ticks;
+
+        // Set while a bake is in flight, so repeated activations of the same clip don't queue up
+        // several decodes of the same frame.
+        [JsonIgnore]
+        public bool StillFramePending { get; set; }
+
+        // True for clips loaded from a pre-normalisation project (SchemaVersion 0), whose mark
+        // translates are raw pane pixels rather than fractions of the video fit. Cleared the first
+        // time the clip is drawn, when the pane size is known for certain — see
+        // VideoPlaybackEngine.EnsureMarksNormalized. Never serialised: a saved project is always
+        // written in the current schema.
+        [JsonIgnore]
+        public bool MarksAreLegacyPixels { get; set; }
+
         [JsonIgnore]
         public bool HasModifications => 
             StartMark.Scale != 1.0f || StartMark.X != 0 || StartMark.Y != 0 ||
@@ -153,12 +191,42 @@ namespace VideoDirector.Models
             get => _playbackSpeed;
             set
             {
+                double oldSpeed = _playbackSpeed;
                 if (SetProperty(ref _playbackSpeed, value < 0 ? 0 : value))
                 {
                     if (!_isUpdatingTiming)
                     {
                         _isUpdatingTiming = true;
-                        try { RecomputeOpDurationFromTrim(); }
+                        try 
+                        {
+                            if (_playbackSpeed <= 0)
+                            {
+                                _videoEndTime = _videoStartTime;
+                                OnPropertyChanged(nameof(VideoEndTime));
+                            }
+                            else if (oldSpeed <= 0)
+                            {
+                                // Transitioning FROM still to motion. Recompute VideoEndTime to maintain OpDuration.
+                                double src = _sourceDuration.TotalSeconds > 0 ? _sourceDuration.TotalSeconds : double.PositiveInfinity;
+                                double desiredEnd = _videoStartTime.TotalSeconds + _opDuration.TotalSeconds * _playbackSpeed;
+                                double end = Math.Clamp(desiredEnd, _videoStartTime.TotalSeconds + MinClipSeconds, src);
+                                _videoEndTime = TimeSpan.FromSeconds(end);
+                                OnPropertyChanged(nameof(VideoEndTime));
+                                
+                                // Reflect any capping back to OpDuration
+                                double actual = (end - _videoStartTime.TotalSeconds) / _playbackSpeed;
+                                if (actual < MinClipSeconds) actual = MinClipSeconds;
+                                if (Math.Abs(actual - _opDuration.TotalSeconds) > 1e-9)
+                                {
+                                    _opDuration = TimeSpan.FromSeconds(actual);
+                                    OnPropertyChanged(nameof(OpDuration));
+                                }
+                            }
+                            else
+                            {
+                                RecomputeOpDurationFromTrim(); 
+                            }
+                        }
                         finally { _isUpdatingTiming = false; }
                     }
                     OnPropertyChanged(nameof(HasModifications));
@@ -173,8 +241,27 @@ namespace VideoDirector.Models
         {
             double src = _sourceDuration.TotalSeconds > 0 ? _sourceDuration.TotalSeconds : double.PositiveInfinity;
             double start = Math.Clamp(startSec, 0, src);
-            double end = Math.Clamp(endSec, 0, src);
 
+            if (_playbackSpeed <= 0)
+            {
+                // Freeze frame mode. End time must exactly match Start time.
+                double endHold = start;
+                if (Math.Abs(start - _videoStartTime.TotalSeconds) > 1e-9)
+                {
+                    _videoStartTime = TimeSpan.FromSeconds(start);
+                    OnPropertyChanged(nameof(VideoStartTime));
+                }
+                if (Math.Abs(endHold - _videoEndTime.TotalSeconds) > 1e-9)
+                {
+                    _videoEndTime = TimeSpan.FromSeconds(endHold);
+                    OnPropertyChanged(nameof(VideoEndTime));
+                }
+                // OpDuration (timeline duration) remains untouched because it's a hold time.
+                OnPropertyChanged(nameof(HasModifications));
+                return;
+            }
+
+            double end = Math.Clamp(endSec, 0, src);
             if (end - start < MinClipSeconds)
             {
                 if (changedStart)
@@ -350,7 +437,21 @@ namespace VideoDirector.Models
         public BorderType BorderType
         {
             get => _borderType;
-            set => SetProperty(ref _borderType, value);
+            set
+            {
+                if (SetProperty(ref _borderType, value))
+                    OnPropertyChanged(nameof(BorderTypeIndex));
+            }
+        }
+
+        public int BorderTypeIndex
+        {
+            get => (int)_borderType;
+            set
+            {
+                if (Enum.IsDefined(typeof(BorderType), value))
+                    BorderType = (BorderType)value;
+            }
         }
 
         private Windows.UI.Color _borderColor = Microsoft.UI.Colors.White;

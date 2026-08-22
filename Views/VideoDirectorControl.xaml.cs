@@ -78,7 +78,7 @@ namespace VideoDirector.Views
         private void InactivityTimer_Tick(object? sender, object e)
         {
             _inactivityTimer.Stop();
-            if (!_isPointerOverPill)
+            if (!_isPointerOverPill && ViewModel.IsPlaying)
             {
                 ViewModel.IsControlsVisible = false;
             }
@@ -95,6 +95,7 @@ namespace VideoDirector.Views
             ViewModel.EditTargetChanged += ViewModel_EditTargetChanged;
 
             ViewModel.Tracks.CollectionChanged += (s, ev) => { HookOverlayTrackClips(); BuildTimelineBar(); _playbackEngine?.RefreshComposite(); };
+            ViewModel.ClipPropertyChanged += (s, ev) => { _playbackEngine?.RefreshComposite(); };
             HookOverlayTrackClips();
             BuildTimelineBar();
         }
@@ -757,6 +758,17 @@ namespace VideoDirector.Views
             return insert;
         }
 
+        private void TimelineBar_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        {
+            var p = e.GetPosition(TimelineBar);
+            var hit = HitClip(p);
+            if (hit.clip != null && !ViewModel.IsPlaying)
+            {
+                SelectClip(hit.clip, hit.isSpine);
+                _playbackEngine?.BeginEdit(ViewModel.SelectedClip, ViewModel.CurrentEditTarget);
+            }
+        }
+
         private void TimelineBar_PointerReleased(object? sender, PointerRoutedEventArgs e)
         {
             // This fires for the RIGHT button too. If we never started a left-press, do nothing —
@@ -1056,6 +1068,10 @@ namespace VideoDirector.Views
             };
 
             InsertAfter(clip, isSpine, snap, clip.StartTime.TotalSeconds + clip.OpDuration.TotalSeconds);
+
+            // Decode the frozen frame at source resolution now, so the push-in has real pixels to
+            // resample from the first time this clip is played rather than after a warm-up.
+            _playbackEngine?.PrebakeStillFrame(snap);
         }
 
         // Where to cut/freeze within a clip's source window, as a 0..1 fraction: the playhead if it
@@ -1194,11 +1210,9 @@ namespace VideoDirector.Views
             }
             else ViewModel.SelectedOverlay = clip;
 
-            // One entry point for both tracks — selecting a clip (while not playing) edits it.
             if (!ViewModel.IsPlaying)
             {
                 ViewModel.CurrentStoryTime = clip.StartTime;
-                _playbackEngine?.BeginEdit(ViewModel.SelectedClip, ViewModel.CurrentEditTarget);
             }
         }
 
@@ -1352,7 +1366,18 @@ namespace VideoDirector.Views
 
             double fps = 30.0;
             double frameDuration = 1.0 / fps;
-            double target = Math.Clamp(ViewModel.CurrentOperationTimeSeconds + direction * frameDuration, op.VideoStartTime.TotalSeconds, op.VideoEndTime.TotalSeconds);
+            
+            double minTime = op.VideoStartTime.TotalSeconds;
+            double maxTime = op.VideoEndTime.TotalSeconds;
+            
+            if (op.PlaybackSpeed <= 0)
+            {
+                // For freeze frames, allow the playhead to roam the entire source to pick a frame
+                minTime = 0;
+                maxTime = op.SourceDurationSeconds > 0 ? op.SourceDurationSeconds : double.PositiveInfinity;
+            }
+            
+            double target = Math.Clamp(ViewModel.CurrentOperationTimeSeconds + direction * frameDuration, minTime, maxTime);
             ViewModel.CurrentOperationTimeSeconds = target;
         }
 
@@ -1387,15 +1412,50 @@ namespace VideoDirector.Views
             BuildTimelineBar();
         }
 
+        // Where the preview should sit while a mark is being set. A mark frames the picture; it
+        // does not choose which frame — so the preview stays inside the clip's own SOURCE window,
+        // and a still (which has exactly one frame) does not move at all.
+        //
+        // Returning null means "do not seek", and for a still that is essential rather than
+        // merely tidy: CurrentOperationTimeSeconds doubles as the still's frame-picker and
+        // rewrites VideoStartTime whenever PlaybackSpeed <= 0. Seeking a still from here would
+        // silently re-freeze it on a different frame of the movie.
+        private static double? MarkPreviewSeconds(CinematicOperation op, VideoDirector.ViewModels.EditTarget target)
+        {
+            if (op == null || op.IsStill) return null;
+
+            double start = op.VideoStartTime.TotalSeconds;
+            double end = op.VideoEndTime.TotalSeconds;
+            if (end <= start) return null;
+
+            double t = target switch
+            {
+                // Midpoint of the SOURCE window. The old form (VideoStartTime + OpDuration/2) used
+                // the TIMELINE hold, which for a still is unrelated to the source: a 10s snapshot
+                // jumped the preview five seconds deeper into the movie, and — via the frame-picker
+                // above — re-froze the clip there.
+                VideoDirector.ViewModels.EditTarget.Mid => start + (end - start) / 2.0,
+                VideoDirector.ViewModels.EditTarget.End => end - 0.1,
+                _ => start
+            };
+            return Math.Clamp(t, start, end);
+        }
+
+        private void SeekForMark(CinematicOperation op, VideoDirector.ViewModels.EditTarget target)
+        {
+            var seconds = MarkPreviewSeconds(op, target);
+            if (seconds.HasValue) ViewModel.CurrentOperationTimeSeconds = seconds.Value;
+        }
+
         private void SetStart_Click(object? sender, RoutedEventArgs e)
         {
             var op = ViewModel.SelectedClip;
             var transform = PlayerControl.ActiveTransform;
-            if (op != null && transform != null)
+            if (op != null && transform != null && _playbackEngine != null)
             {
-                op.StartMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
+                op.StartMark = _playbackEngine.CaptureMark(op, transform);
                 _playbackEngine?.UpdateWysiwygOverlay();
-                ViewModel.CurrentOperationTimeSeconds = op.VideoStartTime.TotalSeconds;
+                SeekForMark(op, VideoDirector.ViewModels.EditTarget.Start);
                 _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.Start);
             }
         }
@@ -1404,11 +1464,11 @@ namespace VideoDirector.Views
         {
             var op = ViewModel.SelectedClip;
             var transform = PlayerControl.ActiveTransform;
-            if (op != null && transform != null)
+            if (op != null && transform != null && _playbackEngine != null)
             {
-                op.MidMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
+                op.MidMark = _playbackEngine.CaptureMark(op, transform);
                 _playbackEngine?.UpdateWysiwygOverlay();
-                ViewModel.CurrentOperationTimeSeconds = op.VideoStartTime.TotalSeconds + (op.OpDuration.TotalSeconds / 2.0);
+                SeekForMark(op, VideoDirector.ViewModels.EditTarget.Mid);
                 _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.Mid);
             }
         }
@@ -1417,14 +1477,11 @@ namespace VideoDirector.Views
         {
             var op = ViewModel.SelectedClip;
             var transform = PlayerControl.ActiveTransform;
-            if (op != null && transform != null)
+            if (op != null && transform != null && _playbackEngine != null)
             {
-                op.EndMark = new SpatialMark((float)transform.ScaleX, (float)transform.TranslateX, (float)transform.TranslateY);
+                op.EndMark = _playbackEngine.CaptureMark(op, transform);
                 _playbackEngine?.UpdateWysiwygOverlay();
-                
-                double endTarget = op.VideoEndTime.TotalSeconds;
-                if (endTarget > 0.1) endTarget -= 0.1;
-                ViewModel.CurrentOperationTimeSeconds = endTarget;
+                SeekForMark(op, VideoDirector.ViewModels.EditTarget.End);
 
                 // Force the decoder to update the paused frame by switching edit targets
                 _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.End);
@@ -1644,6 +1701,9 @@ namespace VideoDirector.Views
             StorageFile file = await savePicker.PickSaveFileAsync();
             if (file != null)
             {
+                // Any clip still holding pre-normalisation pixel marks has to be converted before
+                // the file claims the current schema.
+                _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
                 await ViewModel.SaveAsync(file);
             }
         }
@@ -1663,6 +1723,9 @@ namespace VideoDirector.Views
             if (file != null)
             {
                 await ViewModel.LoadAsync(file);
+                // Convert a pre-normalisation project up front rather than clip-by-clip on first
+                // draw, so marks never sit in two conventions at once.
+                _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
                 if (ViewModel.IsAutoPlayEnabled && ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
                 {
                     _ = _playbackEngine?.StartPlaybackAsync(0);
@@ -1824,13 +1887,21 @@ namespace VideoDirector.Views
             if (slot >= 0)
             {
                 var clip = _playbackEngine?.GetActiveOverlay(slot);
-                if (clip != null) SelectClip(clip, isSpine: false);
+                if (clip != null)
+                {
+                    SelectClip(clip, isSpine: false);
+                    _playbackEngine?.BeginEdit(clip, ViewModel.CurrentEditTarget);
+                }
             }
             else if (ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
             {
                 int idx = ViewModel.GetTimelineIndexForStoryTime(ViewModel.CurrentStoryTime);
                 if (idx >= 0 && idx < ViewModel.Tracks[0].Clips.Count)
-                    SelectClip(ViewModel.Tracks[0].Clips[idx], isSpine: true);
+                {
+                    var clip = ViewModel.Tracks[0].Clips[idx];
+                    SelectClip(clip, isSpine: true);
+                    _playbackEngine?.BeginEdit(clip, ViewModel.CurrentEditTarget);
+                }
             }
         }
 

@@ -12,14 +12,21 @@
         <Grid x:Name="TrackGrid0" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement x:Name="TrackPlayer0" x:FieldModifier="public"
-                                AreTransportControlsEnabled="False" Stretch="UniformToFill"
-                                RenderTransformOrigin="0.5,0.5">
-                <MediaPlayerElement.RenderTransform>
-                    <CompositeTransform x:Name="TrackTransform0" x:FieldModifier="public" />
-                </MediaPlayerElement.RenderTransform>
-            </MediaPlayerElement>
-            <Image x:Name="TrackImage0" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed" />
+            <Canvas x:Name="TrackSurfaces0" x:FieldModifier="public" IsHitTestVisible="False">
+                <MediaPlayerElement x:Name="TrackPlayer0" x:FieldModifier="public"
+                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
+                                    RenderTransformOrigin="0.5,0.5">
+                    <MediaPlayerElement.RenderTransform>
+                        <CompositeTransform x:Name="TrackTransform0" x:FieldModifier="public" />
+                    </MediaPlayerElement.RenderTransform>
+                </MediaPlayerElement>
+                <Image x:Name="TrackImage0" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
+                       RenderTransformOrigin="0.5,0.5">
+                    <Image.RenderTransform>
+                        <CompositeTransform x:Name="StillTransform0" x:FieldModifier="public" />
+                    </Image.RenderTransform>
+                </Image>
+            </Canvas>
             <Grid x:Name="TrackFrame0" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
                 <Border BorderBrush="#99FFFFFF" BorderThickness="1" />
             </Grid>
@@ -28,14 +35,21 @@
         <Grid x:Name="TrackGrid1" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement x:Name="TrackPlayer1" x:FieldModifier="public"
-                                AreTransportControlsEnabled="False" Stretch="UniformToFill"
-                                RenderTransformOrigin="0.5,0.5">
-                <MediaPlayerElement.RenderTransform>
-                    <CompositeTransform x:Name="TrackTransform1" x:FieldModifier="public" />
-                </MediaPlayerElement.RenderTransform>
-            </MediaPlayerElement>
-            <Image x:Name="TrackImage1" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed" />
+            <Canvas x:Name="TrackSurfaces1" x:FieldModifier="public" IsHitTestVisible="False">
+                <MediaPlayerElement x:Name="TrackPlayer1" x:FieldModifier="public"
+                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
+                                    RenderTransformOrigin="0.5,0.5">
+                    <MediaPlayerElement.RenderTransform>
+                        <CompositeTransform x:Name="TrackTransform1" x:FieldModifier="public" />
+                    </MediaPlayerElement.RenderTransform>
+                </MediaPlayerElement>
+                <Image x:Name="TrackImage1" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
+                       RenderTransformOrigin="0.5,0.5">
+                    <Image.RenderTransform>
+                        <CompositeTransform x:Name="StillTransform1" x:FieldModifier="public" />
+                    </Image.RenderTransform>
+                </Image>
+            </Canvas>
             <Grid x:Name="TrackFrame1" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
                 <Border BorderBrush="#99FFFFFF" BorderThickness="1" />
             </Grid>
@@ -44,14 +58,21 @@
         <Grid x:Name="TrackGrid2" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement x:Name="TrackPlayer2" x:FieldModifier="public"
-                                AreTransportControlsEnabled="False" Stretch="UniformToFill"
-                                RenderTransformOrigin="0.5,0.5">
-                <MediaPlayerElement.RenderTransform>
-                    <CompositeTransform x:Name="TrackTransform2" x:FieldModifier="public" />
-                </MediaPlayerElement.RenderTransform>
-            </MediaPlayerElement>
-            <Image x:Name="TrackImage2" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed" />
+            <Canvas x:Name="TrackSurfaces2" x:FieldModifier="public" IsHitTestVisible="False">
+                <MediaPlayerElement x:Name="TrackPlayer2" x:FieldModifier="public"
+                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
+                                    RenderTransformOrigin="0.5,0.5">
+                    <MediaPlayerElement.RenderTransform>
+                        <CompositeTransform x:Name="TrackTransform2" x:FieldModifier="public" />
+                    </MediaPlayerElement.RenderTransform>
+                </MediaPlayerElement>
+                <Image x:Name="TrackImage2" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
+                       RenderTransformOrigin="0.5,0.5">
+                    <Image.RenderTransform>
+                        <CompositeTransform x:Name="StillTransform2" x:FieldModifier="public" />
+                    </Image.RenderTransform>
+                </Image>
+            </Canvas>
             <Grid x:Name="TrackFrame2" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
                 <Border BorderBrush="#99FFFFFF" BorderThickness="1" />
             </Grid>
@@ -60,14 +81,21 @@
         <Grid x:Name="TrackGrid3" x:FieldModifier="public"
               Opacity="0" IsHitTestVisible="False"
               HorizontalAlignment="Left" VerticalAlignment="Top">
-            <MediaPlayerElement x:Name="TrackPlayer3" x:FieldModifier="public"
-                                AreTransportControlsEnabled="False" Stretch="UniformToFill" Margin="-1"
-                                RenderTransformOrigin="0.5,0.5">
-                <MediaPlayerElement.RenderTransform>
-                    <CompositeTransform x:Name="TrackTransform3" x:FieldModifier="public" />
-                </MediaPlayerElement.RenderTransform>
-            </MediaPlayerElement>
-            <Image x:Name="TrackImage3" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed" />
+            <Canvas x:Name="TrackSurfaces3" x:FieldModifier="public" IsHitTestVisible="False">
+                <MediaPlayerElement x:Name="TrackPlayer3" x:FieldModifier="public"
+                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
+                                    RenderTransformOrigin="0.5,0.5">
+                    <MediaPlayerElement.RenderTransform>
+                        <CompositeTransform x:Name="TrackTransform3" x:FieldModifier="public" />
+                    </MediaPlayerElement.RenderTransform>
+                </MediaPlayerElement>
+                <Image x:Name="TrackImage3" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
+                       RenderTransformOrigin="0.5,0.5">
+                    <Image.RenderTransform>
+                        <CompositeTransform x:Name="StillTransform3" x:FieldModifier="public" />
+                    </Image.RenderTransform>
+                </Image>
+            </Canvas>
             <Grid x:Name="TrackFrame3" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
                 <Border BorderBrush="#99FFFFFF" BorderThickness="1" />
             </Grid>
@@ -173,6 +201,9 @@
                     <TextBlock x:Name="TelemetryClipTime" x:FieldModifier="public" Foreground="White" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryVideoSize" x:FieldModifier="public" Foreground="Yellow" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryOperationInfo" x:FieldModifier="public" Foreground="White" FontFamily="Consolas" />
+                    <!-- TEMPORARY (Ken Burns black-edge diagnosis): box vs content vs pan allowance.
+                         Remove this line and its writer in UpdateTelemetryOverlay once verified. -->
+                    <TextBlock x:Name="TelemetryGeometry" x:FieldModifier="public" Foreground="Orange" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryStartMarkInfo" x:FieldModifier="public" Foreground="Cyan" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryMidMarkInfo" x:FieldModifier="public" Foreground="DeepSkyBlue" FontFamily="Consolas" />
                     <TextBlock x:Name="TelemetryEndMarkInfo" x:FieldModifier="public" Foreground="RoyalBlue" FontFamily="Consolas" />

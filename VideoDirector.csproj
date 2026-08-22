@@ -139,4 +139,17 @@
     <Delete Files="@(_UnusedMl)" ContinueOnError="true" />
   </Target>
 
+  <!-- The test project is built separately (VideoDirector.Tests\VideoDirector.Tests.csproj).
+       Without this the app's **/*.cs glob compiles the tests into the app and fails on xunit.
+       Tests\ holds gitignored working projects and no sources, but is excluded for the same
+       reason should any ever land there. -->
+  <ItemGroup>
+    <Compile Remove="VideoDirector.Tests\**" />
+    <None Remove="VideoDirector.Tests\**" />
+    <Page Remove="VideoDirector.Tests\**" />
+    <Compile Remove="Tests\**" />
+    <None Remove="Tests\**" />
+    <Page Remove="Tests\**" />
+  </ItemGroup>
+
 </Project>

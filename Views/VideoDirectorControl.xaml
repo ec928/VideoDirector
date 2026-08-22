@@ -18,6 +18,7 @@
             <local:EmptyToVisConverter x:Key="EmptyToVisConverter" />
             <local:NullToVisConverter x:Key="NullToVisConverter" />
             <local:NullToBoolConverter x:Key="NullToBoolConverter" />
+            <local:ColorToBrushConverter x:Key="ColorToBrushConverter" />
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -102,7 +103,8 @@
 
                             <StackPanel Spacing="2">
                                 <!-- 1. Zoom & Motion Controls (Contains Zoom/Motion & PiP) -->
-                                <Expander Header="Zoom &amp; Motion Controls" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="4,4,0,0" ToolTipService.ToolTip="Scroll/drag the video to frame it, then set Start / Mid / End. Same on every track.">
+                                <Expander Header="Zoom &amp; Motion Controls" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="4,4,0,0" ToolTipService.ToolTip="Scroll/drag the video to frame it, then set Start / Mid / End. Same on every track."
+                                          Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
                                     <StackPanel Spacing="8">
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
@@ -182,9 +184,49 @@
                                     </Grid>
                                 </Expander>
 
+                                <!-- Borders & Effects (Overlays only) -->
+                                <Expander Header="Borders &amp; Effects" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0"
+                                          IsEnabled="{Binding IsOverlaySelected}" Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
+                                    <StackPanel Spacing="12">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
+                                            
+                                            <StackPanel Grid.Column="0" Spacing="4">
+                                                <TextBlock Text="Style" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <ComboBox SelectedIndex="{Binding SelectedClip.BorderTypeIndex, Mode=TwoWay, FallbackValue=0}" HorizontalAlignment="Stretch" ToolTipService.ToolTip="Border Style">
+                                                    <x:String>None</x:String>
+                                                    <x:String>Solid Border</x:String>
+                                                    <x:String>Soft Border</x:String>
+                                                    <x:String>Film Strip</x:String>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="1" Spacing="4">
+                                                <TextBlock Text="Size" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <NumberBox local:NumberBoxExtensions.FractionDigits="0" Value="{Binding SelectedClip.BorderThickness, Mode=TwoWay, FallbackValue=4.0}"
+                                                           SmallChange="1" LargeChange="4" Minimum="0" Maximum="50" SpinButtonPlacementMode="Compact" ToolTipService.ToolTip="Thickness/Spread" />
+                                            </StackPanel>
+                                            
+                                            <StackPanel Grid.Column="2" Spacing="4">
+                                                <TextBlock Text="Color" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <DropDownButton HorizontalAlignment="Stretch" Padding="0">
+                                                    <DropDownButton.Content>
+                                                        <Rectangle Width="24" Height="14" RadiusX="2" RadiusY="2" Fill="{Binding SelectedClip.BorderColor, Converter={StaticResource ColorToBrushConverter}}" />
+                                                    </DropDownButton.Content>
+                                                    <DropDownButton.Flyout>
+                                                        <Flyout>
+                                                            <ColorPicker Color="{Binding SelectedClip.BorderColor, Mode=TwoWay}" IsColorChannelTextInputVisible="False" IsHexInputVisible="False" IsAlphaEnabled="False" />
+                                                        </Flyout>
+                                                    </DropDownButton.Flyout>
+                                                </DropDownButton>
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Expander>
+
                                 <!-- 4. Transitions (Track 1 only) -->
                                 <Expander Header="Transitions" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0,0,4,4"
-                                          IsEnabled="{Binding IsTrack1Selected}" ToolTipService.ToolTip="Transitions are currently only supported on Track 1.">
+                                          IsEnabled="{Binding IsTrack1Selected}" ToolTipService.ToolTip="Transitions are currently only supported on Track 1." Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
                                     <StackPanel Spacing="4">
                                         <TextBlock Text="Transition Style / Length (s)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         <Grid ColumnSpacing="8">
@@ -332,10 +374,9 @@
         </Border>
 
         <!-- Bottom Track Dock: horizontal arrangement lanes (one per track).
-             Auto-hides during playback (IsDockVisible) so the video gets the full canvas. -->
-        <!-- Always visible now (it is just the compact timeline strip since the tile lanes were
-             removed) so the playhead is watchable during playback too. -->
+             Auto-hides during playback if no mouse movement. -->
         <Border Grid.Row="1" x:Name="TrackDock"
+                Visibility="{x:Bind ViewModel.IsControlsVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                 BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
                 Padding="8,6"
@@ -410,7 +451,8 @@
                                     Background="Transparent" SizeChanged="TimelineBar_SizeChanged"
                                     PointerPressed="TimelineBar_PointerPressed"
                                     PointerMoved="TimelineBar_PointerMoved"
-                                    PointerReleased="TimelineBar_PointerReleased">
+                                    PointerReleased="TimelineBar_PointerReleased"
+                                    DoubleTapped="TimelineBar_DoubleTapped">
                                 <!-- A real ContextFlyout: the platform shows this on right-click /
                                      menu key / long-press, rather than us hand-rolling it from a
                                      pointer event (which never fired reliably). -->

@@ -1,0 +1,149 @@
+{
+  "SchemaVersion": 1,
+  "TimelineNodes": [],
+  "OverlayTracks": [],
+  "Tracks": [
+    {
+      "Clips": [
+        {
+          "FilePath": "C:\\Users\\chan_\\Downloads\\Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "FileName": "Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "VideoStartTime": "01:00:32.9019249",
+          "VideoEndTime": "01:00:43.1026030",
+          "SourceDuration": "02:11:55.6470000",
+          "OpDuration": "00:00:10.2006781",
+          "PlaybackSpeed": 1,
+          "StartTime": "00:00:00",
+          "Opacity": 1,
+          "Volume": 1,
+          "IsVideoHidden": false,
+          "IsLocked": false,
+          "BorderType": 0,
+          "BorderTypeIndex": 0,
+          "BorderColor": {
+            "A": 255,
+            "R": 255,
+            "G": 255,
+            "B": 255
+          },
+          "BorderThickness": 4,
+          "SourceAspect": 2.3855721393034828,
+          "PlacementWidth": 0.28478839149846463,
+          "PlacementHeight": 0.8444785290108625,
+          "PlacementCenterX": 0.39597999291716757,
+          "PlacementCenterY": 0.42702396598040426,
+          "StartMark": {
+            "Scale": 1.0691643,
+            "X": -0.36706853,
+            "Y": -0.3069897
+          },
+          "MidMark": {
+            "Scale": 0.94121695,
+            "X": 0.30204034,
+            "Y": 0.10923788
+          },
+          "EndMark": {
+            "Scale": 1.5023768,
+            "X": 0.43635648,
+            "Y": 0.19975382
+          },
+          "RecordedPath": [],
+          "CurveProfile": 0,
+          "IsExpanded": false,
+          "CurveProfileIndex": 0,
+          "TransitionDuration": "00:00:00",
+          "TransitionStyle": 0,
+          "TransitionStyleIndex": 0,
+          "TransitionIconGlyph": "\uE8C6",
+          "TransitionIconTooltip": "Transition Out: HardSnap"
+        },
+        {
+          "FilePath": "C:\\Users\\chan_\\Downloads\\Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "FileName": "Star.Wars.The.Mandalorian.And.Grogu.2026.1080p.DCPRiP.x264-FS.mkv",
+          "VideoStartTime": "01:00:37.7022639",
+          "VideoEndTime": "01:00:37.7022639",
+          "SourceDuration": "02:11:55.6470000",
+          "OpDuration": "00:00:10",
+          "PlaybackSpeed": 0,
+          "StartTime": "00:00:10.2006781",
+          "Opacity": 1,
+          "Volume": 1,
+          "IsVideoHidden": false,
+          "IsLocked": false,
+          "BorderType": 0,
+          "BorderTypeIndex": 0,
+          "BorderColor": {
+            "A": 255,
+            "R": 255,
+            "G": 255,
+            "B": 255
+          },
+          "BorderThickness": 4,
+          "SourceAspect": 2.3855721393034828,
+          "PlacementWidth": 0.28478839149846463,
+          "PlacementHeight": 0.8444785290108625,
+          "PlacementCenterX": 0.39597999291716757,
+          "PlacementCenterY": 0.42702396598040426,
+          "StartMark": {
+            "Scale": 1,
+            "X": 0,
+            "Y": 0
+          },
+          "MidMark": {
+            "Scale": 0.7513148,
+            "X": 0.18409866,
+            "Y": -0.04868518
+          },
+          "EndMark": {
+            "Scale": 1.6105101,
+            "X": -0.39710876,
+            "Y": 0.28399664
+          },
+          "RecordedPath": [],
+          "CurveProfile": 0,
+          "IsExpanded": false,
+          "CurveProfileIndex": 0,
+          "TransitionDuration": "00:00:00",
+          "TransitionStyle": 0,
+          "TransitionStyleIndex": 0,
+          "TransitionIconGlyph": "\uE8C6",
+          "TransitionIconTooltip": "Transition Out: HardSnap"
+        }
+      ],
+      "DefaultCenterX": 0.5,
+      "DefaultCenterY": 0.5,
+      "Name": "Track 1",
+      "IsGapless": false,
+      "IsSnappingEnabled": true,
+      "ShowAudioWaveforms": false
+    },
+    {
+      "Clips": [],
+      "DefaultCenterX": 0.72,
+      "DefaultCenterY": 0.72,
+      "Name": "Track 2",
+      "IsGapless": false,
+      "IsSnappingEnabled": true,
+      "ShowAudioWaveforms": false
+    },
+    {
+      "Clips": [],
+      "DefaultCenterX": 0.28,
+      "DefaultCenterY": 0.72,
+      "Name": "Track 3",
+      "IsGapless": false,
+      "IsSnappingEnabled": true,
+      "ShowAudioWaveforms": false
+    },
+    {
+      "Clips": [],
+      "DefaultCenterX": 0.72,
+      "DefaultCenterY": 0.28,
+      "Name": "Track 4",
+      "IsGapless": false,
+      "IsSnappingEnabled": true,
+      "ShowAudioWaveforms": false
+    }
+  ],
+  "OverlayClips": []
+}

@@ -14,11 +14,24 @@ namespace VideoDirector.Models
     public class VideoPlaybackEngine
     {
         private readonly Views.DirectorPlayerControl _playerControl;
-        private Microsoft.UI.Xaml.DispatcherTimer _playbackTimer;
-        private DateTime _lastTickTime;
+        private bool _isPlaybackLoopRunning;
+        private TimeSpan _lastTickTime = TimeSpan.Zero;
+        private readonly System.Diagnostics.Stopwatch _editPreviewClock = new();
         private readonly MediaPlayer[] _overlayPlayer = new MediaPlayer[MaxOverlayTracks];
         private readonly CinematicOperation[] _activeOverlay = new CinematicOperation[MaxOverlayTracks];
         private readonly double[] _overlayAspect = new double[MaxOverlayTracks];
+
+        // The aspect each slot's CONTENT surface was last sized against. Content sizing used to be
+        // guarded on the box dimensions alone, so a clip that happened to land on the same box size
+        // as the outgoing one inherited the outgoing one's contentW/contentH — wrong aspect, and
+        // UniformToFill goes back to discarding picture. Sizing is keyed on this as well.
+        private readonly double[] _overlayContentAspect = new double[MaxOverlayTracks];
+
+        // Whether this slot's still surface currently carries any framing at all (animated or
+        // parked). Lets the video path skip a reset it doesn't need — SetOverlayRender runs every
+        // frame, and an unconditional reset would touch four visuals per tick for nothing.
+        private readonly bool[] _stillMotionOwned = new bool[MaxOverlayTracks];
+
         private bool _isEditingOverlay = false;
         private TimeSpan _storyTimeAtClipStart = TimeSpan.Zero;
         private CinematicOperation _editClip;
@@ -123,9 +136,8 @@ namespace VideoDirector.Models
                 }
             }
         }
-private void ViewModel_PlaybackSpeedChanged(object? sender, double speed)
+        private void ViewModel_PlaybackSpeedChanged(object? sender, double speed)
         {
-            if (_playbackTimer != null) _playbackTimer.Interval = TimeSpan.FromMilliseconds(16);
             if (_isPaused) return;
 
             for (int i = 0; i < MaxOverlayTracks; i++)
@@ -155,9 +167,9 @@ public void SeekActiveOperation(TimeSpan position)
         // A paused MediaPlayer that was just seeked or freshly attached (the overlay edit surface is
         // attached on demand) often shows no frame until it plays. StepForwardOneFrame forces the
         // current frame to decode and display while staying paused — otherwise: blank preview.
-public async Task TogglePlayPauseAsync()
+        public async Task TogglePlayPauseAsync()
         {
-            if (_playbackTimer == null || !_playbackTimer.IsEnabled)
+            if (!_isPlaybackLoopRunning)
             {
                 await StartPlaybackAsync();
                 return;
@@ -186,7 +198,7 @@ public async Task TogglePlayPauseAsync()
         private void ResumePlayback()
         {
             _isPaused = false;
-            _lastTickTime = DateTime.Now;
+            _lastTickTime = TimeSpan.Zero;
             _viewModel.IsPlaying = true;
             
             if (_viewModel.PlaybackSpeed > 0)
@@ -219,19 +231,21 @@ public async Task TogglePlayPauseAsync()
             
             for (int i = 0; i < MaxOverlayTracks; i++) _activeOverlay[i] = null;
 
-            if (_playbackTimer == null)
+            if (!_isPlaybackLoopRunning)
             {
-                _playbackTimer = new Microsoft.UI.Xaml.DispatcherTimer();
-                _playbackTimer.Interval = TimeSpan.FromMilliseconds(16); // ~60fps
-                _playbackTimer.Tick += PlaybackTimer_Tick;
+                _isPlaybackLoopRunning = true;
+                Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += PlaybackTimer_Tick;
             }
-            _lastTickTime = DateTime.Now;
-            _playbackTimer.Start();
+            _lastTickTime = TimeSpan.Zero;
         }
 
         public void StopPlayback()
         {
-            _playbackTimer?.Stop();
+            if (_isPlaybackLoopRunning)
+            {
+                _isPlaybackLoopRunning = false;
+                Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= PlaybackTimer_Tick;
+            }
             
             HideAllOverlays();
             
@@ -252,7 +266,8 @@ public async Task TogglePlayPauseAsync()
         {
             if (_isPaused) return;
 
-            var now = DateTime.Now;
+            var now = ((Microsoft.UI.Xaml.Media.RenderingEventArgs)e).RenderingTime;
+            if (_lastTickTime == TimeSpan.Zero) _lastTickTime = now;
             var elapsed = now - _lastTickTime;
             _lastTickTime = now;
             
@@ -283,10 +298,20 @@ public async Task TogglePlayPauseAsync()
                 double videoElapsed = (mainPlayer.PlaybackSession.Position - mainOp.VideoStartTime).TotalSeconds / clipSpeed;
                 if (videoElapsed >= 0 && videoElapsed <= mainOp.OpDuration.TotalSeconds + 0.5)
                 {
-                    // Drive the master timeline clock directly from the Track 1 hardware decoder.
-                    // This prevents the UI thread (which can drop frames during heavy Ken Burns zooming)
-                    // from running ahead and forcing stuttering drift-correction seeks.
-                    _viewModel.CurrentStoryTime = mainOp.StartTime + TimeSpan.FromSeconds(videoElapsed);
+                    double targetStoryTime = (mainOp.StartTime + TimeSpan.FromSeconds(videoElapsed)).TotalSeconds;
+                    double currentStoryTime = _viewModel.CurrentStoryTime.TotalSeconds;
+                    double newStoryTime = currentStoryTime + elapsed.TotalSeconds * _viewModel.PlaybackSpeed;
+                    
+                    // Soft PLL: smoothly pull the wall clock towards the hardware decoder to prevent long-term drift
+                    // without adopting its discrete, jittery Position updates.
+                    double drift = targetStoryTime - newStoryTime;
+                    if (Math.Abs(drift) > 0.05)
+                    {
+                        // Maximum slew rate: 2ms per frame (~120ms per sec) to completely eliminate visual jitter
+                        newStoryTime += Math.Clamp(drift * 0.1, -0.002, 0.002);
+                    }
+                    
+                    _viewModel.CurrentStoryTime = TimeSpan.FromSeconds(newStoryTime);
                     drivenByHardware = true;
                 }
             }
@@ -324,9 +349,9 @@ public async Task TogglePlayPauseAsync()
 
             EvaluateOverlays(_viewModel.CurrentStoryTime);
             
-            if ((now - _lastTelemetryUpdate).TotalMilliseconds >= 100)
+            if ((DateTime.Now - _lastTelemetryUpdate).TotalMilliseconds >= 100)
             {
-                _lastTelemetryUpdate = now;
+                _lastTelemetryUpdate = DateTime.Now;
                 UpdateTelemetryOverlay();
             }
         }
@@ -371,44 +396,57 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
                     _playerControl.TelemetryVideoSize.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                 }
                 
+                WriteGeometryTelemetry();
+
                 if (activeTransform != null) {
                     _playerControl.TelemetryOperationInfo.Text = $"Zoom/Pan  : Z:{activeTransform.ScaleX:F2} X:{activeTransform.TranslateX:F0} Y:{activeTransform.TranslateY:F0}";
                 }
                 
-                if (activeOp != null && activeOp.StartMark != null && activeOp.EndMark != null && _playerControl.ActualWidth > 0) {
-                    double W = _playerControl.ActualWidth;
-                    double H = _playerControl.ActualHeight;
-                    
+                if (activeOp != null && activeOp.StartMark != null && activeOp.EndMark != null
+                    && TryGetMarkSpace(activeOp, out double W, out double H)) {
+                    // The video FIT, not the whole pane: that is the space marks live in, and the
+                    // boxes reported here are meant to match the ones the editor draws.
+                    EnsureMarksNormalized(activeOp);
+
+                    // ...and "match" means the PiP-shaped crop window, not the full frame. This
+                    // reported W:1212 for a box the editor drew at W:409, which reads as a framing
+                    // that overhangs the picture when it does not. Same derivation as
+                    // UpdateWysiwygOverlay, so the two now agree.
+                    double videoAspectT = W / H;
+                    double pipAspectT = videoAspectT * (activeOp.PlacementWidth / activeOp.PlacementHeight);
+                    double bwT = pipAspectT > videoAspectT ? W : H * pipAspectT;
+                    double bhT = pipAspectT > videoAspectT ? W / pipAspectT : H;
+
                     double Sc = activeTransform != null ? activeTransform.ScaleX : 1.0;
                     double txc = activeTransform != null ? activeTransform.TranslateX : 0.0;
                     double tyc = activeTransform != null ? activeTransform.TranslateY : 0.0;
 
                     double St_s = activeOp.StartMark.Scale;
-                    double txt_s = activeOp.StartMark.X;
-                    double tyt_s = activeOp.StartMark.Y;
-                    double startLeft = (-W / 2 - txt_s) * (Sc / St_s) + W / 2 + txc;
-                    double startTop = (-H / 2 - tyt_s) * (Sc / St_s) + H / 2 + tyc;
-                    double startWidth = W * (Sc / St_s);
-                    double startHeight = H * (Sc / St_s);
+                    double txt_s = activeOp.StartMark.X * W;
+                    double tyt_s = activeOp.StartMark.Y * H;
+                    double startLeft = (-bwT / 2 - txt_s) * (Sc / St_s) + W / 2 + txc;
+                    double startTop = (-bhT / 2 - tyt_s) * (Sc / St_s) + H / 2 + tyc;
+                    double startWidth = bwT * (Sc / St_s);
+                    double startHeight = bhT * (Sc / St_s);
 
                     double St_e = activeOp.EndMark.Scale;
-                    double txt_e = activeOp.EndMark.X;
-                    double tyt_e = activeOp.EndMark.Y;
-                    double endLeft = (-W / 2 - txt_e) * (Sc / St_e) + W / 2 + txc;
-                    double endTop = (-H / 2 - tyt_e) * (Sc / St_e) + H / 2 + tyc;
-                    double endWidth = W * (Sc / St_e);
-                    double endHeight = H * (Sc / St_e);
+                    double txt_e = activeOp.EndMark.X * W;
+                    double tyt_e = activeOp.EndMark.Y * H;
+                    double endLeft = (-bwT / 2 - txt_e) * (Sc / St_e) + W / 2 + txc;
+                    double endTop = (-bhT / 2 - tyt_e) * (Sc / St_e) + H / 2 + tyc;
+                    double endWidth = bwT * (Sc / St_e);
+                    double endHeight = bhT * (Sc / St_e);
 
                     _playerControl.TelemetryStartMarkInfo.Text = $"Start Box : L:{startLeft:F0} T:{startTop:F0} W:{startWidth:F0} H:{startHeight:F0} (Z:{activeOp.StartMark.Scale:F2})";
                     
                     if (activeOp.MidMark != null) {
                         double St_m = activeOp.MidMark.Scale;
-                        double txt_m = activeOp.MidMark.X;
-                        double tyt_m = activeOp.MidMark.Y;
-                        double midLeft = (-W / 2 - txt_m) * (Sc / St_m) + W / 2 + txc;
-                        double midTop = (-H / 2 - tyt_m) * (Sc / St_m) + H / 2 + tyc;
-                        double midWidth = W * (Sc / St_m);
-                        double midHeight = H * (Sc / St_m);
+                        double txt_m = activeOp.MidMark.X * W;
+                        double tyt_m = activeOp.MidMark.Y * H;
+                        double midLeft = (-bwT / 2 - txt_m) * (Sc / St_m) + W / 2 + txc;
+                        double midTop = (-bhT / 2 - tyt_m) * (Sc / St_m) + H / 2 + tyc;
+                        double midWidth = bwT * (Sc / St_m);
+                        double midHeight = bhT * (Sc / St_m);
                         _playerControl.TelemetryMidMarkInfo.Text   = $"MidBox   : L:{midLeft:F0} T:{midTop:F0} W:{midWidth:F0} H:{midHeight:F0} (Z:{activeOp.MidMark.Scale:F2})";
                         _playerControl.TelemetryMidMarkInfo.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
                     } else {
@@ -431,6 +469,238 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             }
         }
 
+        // ==================== Geometry HUD ====================
+        //
+        // The four numbers that decide what you actually see: where the box is on screen, where the
+        // playhead is, what the motion transform is doing, and which part of the SOURCE frame that
+        // combination ends up sampling. The last one is the point - it is the only line that tells
+        // you whether black on screen is a framing you authored or a bug, and it is what took this
+        // long to work out the first time round.
+        //
+        // Throttled to ~10Hz and skipped entirely when the HUD is hidden, so it costs nothing in
+        // the render loop. Every value is read from the live visual tree rather than recomputed, so
+        // it reports what the app IS doing, not what it intends to do.
+        private DateTime _lastGeometryUpdate = DateTime.MinValue;
+
+        private static string Secs(double s) => $"{s:00.00}";
+
+        private void WriteGeometryTelemetry()
+        {
+            var line = _playerControl.TelemetryGeometry;
+            if (line == null) return;
+
+            if (!_viewModel.IsTelemetryVisible)
+            {
+                line.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                return;
+            }
+
+            var now = DateTime.Now;
+            if ((now - _lastGeometryUpdate).TotalMilliseconds < 100) return;
+            _lastGeometryUpdate = now;
+
+            var sb = new System.Text.StringBuilder();
+
+            for (int slot = 0; slot < MaxOverlayTracks; slot++)
+            {
+                var op = _activeOverlay[slot];
+                if (op == null) continue;
+
+                var vis = _playerControl.OverlayVisuals[slot];
+                bool still = vis.Still != null && vis.Still.Visibility == Microsoft.UI.Xaml.Visibility.Visible;
+                var surface = still ? (Microsoft.UI.Xaml.FrameworkElement)vis.Still
+                                    : (Microsoft.UI.Xaml.FrameworkElement)vis.Video;
+                var t = still ? vis.StillTransform : vis.Transform;
+
+                double aspect = AspectOf(op, slot);
+                if (aspect <= 0 || !TryGetMarkSpace(op, out double fitW, out double fitH))
+                {
+                    sb.AppendLine($"T{slot + 1}  waiting for source size");
+                    continue;
+                }
+
+                bool editMode = _mode == EditorMode.Edit;
+                double vpW = _playerControl.ActualWidth, vpH = _playerControl.ActualHeight;
+
+                // Same functions the compositor uses, not a parallel copy - a readout that
+                // recomputes its own geometry can agree with itself while disagreeing with what was
+                // drawn, which is precisely how a HUD ends up lying.
+                var box = ClipGeometry.Box(fitW, fitH, vpW, vpH,
+                                           op.PlacementWidth, op.PlacementHeight,
+                                           op.PlacementCenterX, op.PlacementCenterY, editMode);
+                double boxW = box.W, boxH = box.H, left = box.X, top = box.Y;
+
+                double contentW = surface != null && !double.IsNaN(surface.Width) ? surface.Width : boxW;
+                double contentH = surface != null && !double.IsNaN(surface.Height) ? surface.Height : boxH;
+
+                double S = t?.ScaleX ?? 1, tx = t?.TranslateX ?? 0, ty = t?.TranslateY ?? 0;
+                if (S <= 0) S = 1;
+
+                // Source pixel dimensions, so the sampled region reads in the units the footage is
+                // actually in rather than in pane pixels.
+                double srcW = 0, srcH = 0;
+                var session = _overlayPlayer[slot]?.PlaybackSession;
+                if (!still && session != null && session.NaturalVideoWidth > 0)
+                {
+                    srcW = session.NaturalVideoWidth; srcH = session.NaturalVideoHeight;
+                }
+                else if (op.StillFrame != null && op.StillFrame.PixelWidth > 0)
+                {
+                    srcW = op.StillFrame.PixelWidth; srcH = op.StillFrame.PixelHeight;
+                }
+                if (srcW <= 0 || srcH <= 0) { srcH = 1080; srcW = 1080 * aspect; }
+
+                // The visible window expressed on the source frame. The content surface holds the
+                // WHOLE frame drawn at contentW x contentH, so scaling that ratio converts a
+                // pane-pixel window into source pixels.
+                var seen = ClipGeometry.SampledSource(contentW, contentH, boxW, boxH, S, tx, ty, srcW, srcH);
+                double x0 = seen.X, x1 = seen.Right, y0 = seen.Y, y1 = seen.Bottom;
+
+                var over = new System.Collections.Generic.List<string>();
+                if (x0 < -0.5) over.Add($"{-x0 * (boxW / (x1 - x0)):F0}px left");
+                if (y0 < -0.5) over.Add($"{-y0 * (boxH / (y1 - y0)):F0}px top");
+                if (x1 > srcW + 0.5) over.Add($"{(x1 - srcW) * (boxW / (x1 - x0)):F0}px right");
+                if (y1 > srcH + 0.5) over.Add($"{(y1 - srcH) * (boxH / (y1 - y0)):F0}px bottom");
+
+                double into = Math.Max(0, (_viewModel.CurrentStoryTime - op.StartTime).TotalSeconds);
+                double dur = op.OpDuration.TotalSeconds;
+                var srcPos = op.VideoStartTime + TimeSpan.FromSeconds(into * Math.Max(0, op.PlaybackSpeed));
+
+                sb.AppendLine($"T{slot + 1} {(still ? "still" : "video")}  {System.IO.Path.GetFileName(op.FilePath)}");
+                sb.AppendLine($"   time    {Secs(_viewModel.CurrentStoryTime.TotalSeconds)}s of {Secs(_viewModel.TotalStoryDuration.TotalSeconds)}s" +
+                              $"   into clip {Secs(into)}s of {Secs(dur)}s" +
+                              $"   source {srcPos:hh\\:mm\\:ss\\.ff}");
+                sb.AppendLine($"   box     ({left:F0},{top:F0}) to ({left + boxW:F0},{top + boxH:F0})   {boxW:F0} x {boxH:F0}" +
+                              $"   pane {vpW:F0} x {vpH:F0}");
+                sb.AppendLine($"   motion  zoom {S:F2}x   pan {tx:+0;-0;0},{ty:+0;-0;0}   surface {contentW:F0} x {contentH:F0}");
+                sb.AppendLine($"   showing source x {x0:F0}..{x1:F0} of {srcW:F0}   y {y0:F0}..{y1:F0} of {srcH:F0}" +
+                              (over.Count == 0 ? "   (all inside)" : "   BLACK: " + string.Join(", ", over)));
+            }
+
+            if (sb.Length == 0)
+            {
+                line.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                return;
+            }
+
+            line.Text = sb.ToString().TrimEnd();
+            line.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+        }
+
+        // ==================== Mark coordinate space ====================
+        //
+        // A mark's X/Y are fractions of the video's FIT rectangle — the area the video occupies in
+        // the player pane at Scale 1, which is exactly the box Edit mode frames against. Every
+        // read multiplies by this; every write divides by it. Keeping the conversion in one place
+        // is what makes a mark mean the same thing at any window size.
+        // THE aspect for a clip, in one place. Everything that derives a fit rectangle must come
+        // through here or the geometry silently forks.
+        //
+        // It used to fork three ways: TryGetMarkSpace preferred op.SourceAspect and fell back to
+        // 16:9, ApplyOverlayBox read only _overlayAspect[slot] and bailed, and the WYSIWYG rect
+        // code read only _overlayAspect[0] and fell back to 16:9 without ever consulting the clip.
+        // On a 2.39:1 source that last fallback drew and dragged the Start/Mid/End rects against a
+        // 1.78 fit — 34% out — so a rect placed visibly INSIDE the picture wrote a mark outside it,
+        // and the clip rendered with black down the edge. Same clip, three different ideas of how
+        // big it is.
+        //
+        // The clip's own SourceAspect leads because it is persisted in the project and therefore
+        // known at load, long before a decoder has opened; _overlayAspect is the live backstop for
+        // clips saved before that field existed. Returns 0 for genuinely unknown — callers must
+        // decide what to do about it rather than be handed a plausible-looking lie.
+        private double AspectOf(CinematicOperation op, int slot)
+        {
+            double aspect = op?.SourceAspect ?? 0;
+            if (aspect <= 0 && slot >= 0 && slot < MaxOverlayTracks) aspect = _overlayAspect[slot];
+            return aspect > 0 ? aspect : 0;
+        }
+
+        public bool TryGetMarkSpace(CinematicOperation op, out double fitW, out double fitH)
+        {
+            fitW = 0; fitH = 0;
+
+            double vpW = _playerControl.ActualWidth;
+            double vpH = _playerControl.ActualHeight;
+            if (vpW <= 0 || vpH <= 0) return false;
+
+            // No 16:9 guess. Reporting false lets the caller hold off for a frame; inventing an
+            // aspect produced a fit rect that disagreed with the one the surface was sized to, and
+            // marks interpreted in the wrong space are exactly how framing lands off-picture.
+            double aspect = AspectOf(op, 0);
+            if (aspect <= 0) return false;
+
+            var fit = ClipGeometry.Fit(aspect, vpW, vpH);
+            fitW = fit.W; fitH = fit.H;
+            return true;
+        }
+
+        // Turn the live edit transform into a mark. The transform is in pane pixels; the mark is
+        // stored normalised, so reopening the project at a different window size reproduces the
+        // framing rather than shifting it.
+        public SpatialMark CaptureMark(CinematicOperation op, Microsoft.UI.Xaml.Media.CompositeTransform t)
+        {
+            if (t == null) return new SpatialMark(1f, 0, 0);
+
+            EnsureMarksNormalized(op);
+            if (!TryGetMarkSpace(op, out double fitW, out double fitH) || fitW <= 0 || fitH <= 0)
+                return new SpatialMark((float)t.ScaleX, 0, 0);
+
+            return new SpatialMark((float)t.ScaleX,
+                                   (float)(t.TranslateX / fitW),
+                                   (float)(t.TranslateY / fitH));
+        }
+
+        // Convert a legacy clip's marks from raw pane pixels to fractions of the fit.
+        //
+        // Done here — on first draw — rather than at load, because this is the first moment the
+        // pane size is known for certain; at load the control may not have been measured yet, and
+        // normalising against a zero-width pane would destroy the marks. Idempotent and cheap: one
+        // bool test once the clip has been converted.
+        //
+        // The conversion itself is lossless: dividing by the fit here and multiplying by the same
+        // fit at render round-trips exactly, so normalising costs nothing.
+        //
+        // It does NOT follow that a legacy project renders unchanged. Translate used to be scaled
+        // per-axis by (PlacementWidth, PlacementHeight) and is now scaled uniformly by
+        // max(width, height) — see KenBurnsMotion.PanScale. On a square or wide PiP those agree; on
+        // a TALL one they do not, and such clips will reframe. That is the point: the old result
+        // did not match what the editor drew.
+        public void EnsureMarksNormalized(CinematicOperation op)
+        {
+            if (op == null || !op.MarksAreLegacyPixels) return;
+            if (!TryGetMarkSpace(op, out double fitW, out double fitH) || fitW <= 0 || fitH <= 0) return;
+
+            Norm(op.StartMark);
+            Norm(op.MidMark);
+            Norm(op.EndMark);
+            op.MarksAreLegacyPixels = false;
+
+            void Norm(SpatialMark m)
+            {
+                if (m == null) return;
+                m.X = (float)(m.X / fitW);
+                m.Y = (float)(m.Y / fitH);
+            }
+        }
+
+        // Sweep every clip, not just the ones currently on screen. EnsureMarksNormalized alone
+        // converts a clip the first time it is drawn, which leaves a project that is loaded and
+        // immediately saved holding pixel marks under a schema that promises fractions. Called on
+        // load and again before save, both points where the pane is certain to be measured.
+        public void NormalizeAllMarks(System.Collections.Generic.IEnumerable<TimelineTrack> tracks)
+        {
+            if (tracks == null) return;
+            foreach (var track in tracks)
+            {
+                if (track?.Clips == null) continue;
+                foreach (var clip in track.Clips)
+                {
+                    EnsureMarksNormalized(clip);
+
+                }
+            }
+        }
+
         public void UpdateWysiwygOverlay()
         {
             // The Ken Burns edit rectangles belong to Edit mode only, and to the CURRENT SUBJECT
@@ -447,6 +717,8 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             var transform = _playerControl.ActiveTransform;
             if (op == null || transform == null) return;
 
+            EnsureMarksNormalized(op);
+
             _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
             UpdateTelemetryOverlay(true);
 
@@ -454,8 +726,19 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             double vpH = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
 
             // In Edit mode, the clip being edited is always isolated into slot 0.
-            double aspect = _overlayAspect[0];
-            if (aspect <= 0) aspect = 16.0 / 9.0;
+            //
+            // This read _overlayAspect[0] alone and fell back to 16:9, never consulting the clip.
+            // The rects are the OUTPUT frames drawn over the picture, so a fit rect that disagrees
+            // with the picture's puts them somewhere they do not belong: on a 2.39:1 source the
+            // 1.78 fallback is 34% out, and a rect dropped visibly inside the frame writes a mark
+            // outside it. Hide them rather than draw them in the wrong place — an absent rect is
+            // obviously absent, a misplaced one looks authoritative.
+            double aspect = AspectOf(op, 0);
+            if (aspect <= 0)
+            {
+                _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                return;
+            }
 
             // Compute the true physical bounds of the video on the screen in Edit mode (scale 1.0)
             double W, H;
@@ -496,8 +779,9 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
                 double tyc = transform.TranslateY;
 
                 double St = targetMark.Scale;
-                double txt = targetMark.X;
-                double tyt = targetMark.Y;
+                // Marks are fractions of the fit (W x H here) — back to pixels to draw them.
+                double txt = targetMark.X * W;
+                double tyt = targetMark.Y * H;
 
                 if (St <= 0) St = 1;
 
@@ -560,6 +844,12 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
         // per track, which is why track i can own exactly one player/surface.
         private void EvaluateOverlays(TimeSpan currentStoryTime)
         {
+            // The geometry readout refreshes from the one place every path that can change
+            // geometry passes through, so scrubbing updates it and not just playback. Called
+            // directly: this is already the UI thread, and enqueueing a callback per frame was
+            // pure overhead. WriteGeometryTelemetry throttles itself.
+            WriteGeometryTelemetry();
+
             // EDIT MODE OWNS THE SCREEN. It shows exactly ONE clip full-screen, and it manages the
             // overlay surfaces itself (HideAllOverlays / EnterOverlayEditMode). If we ran here we
             // would paint the other tracks' stills over the clip being edited — three videos
@@ -590,8 +880,12 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
 
                 if (_activeOverlay[i] != null)
                 {
-                    ApplyOverlayTransform(i, _activeOverlay[i], currentStoryTime);
-                    SetOverlayRender(i, OverlayRender.Video, _activeOverlay[i]);
+                    // A still with a baked frame renders as a bitmap; everything else is video.
+                    // The render mode is decided once, here, and passed down — the transform path
+                    // differs between the two and must not have to guess which surface is live.
+                    var mode = RenderModeFor(_activeOverlay[i]);
+                    SetOverlayRender(i, mode, _activeOverlay[i]);
+                    ApplyOverlayTransform(i, _activeOverlay[i], currentStoryTime, mode);
                 }
                 else SetOverlayRender(i, OverlayRender.Hidden, null);
             }
@@ -626,6 +920,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             {
                 case OverlayRender.Hidden:
                     DetachOverlayVideo(track);
+                    ClearStillMotion(track);
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     v.Still.Source = null;
                     if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
@@ -634,16 +929,26 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
 
                 case OverlayRender.Still:
                     DetachOverlayVideo(track);              // the invariant
-                    v.Still.Source = clip?.Thumbnail;
+                    // The frame baked at SOURCE resolution, not the shell thumbnail: the whole
+                    // point is that the compositor still has real pixels to sample as the
+                    // push-in magnifies. See StillFrameFactory.
+                    // Reference-compared so the every-frame call doesn't re-assign the source.
+                    if (!ReferenceEquals(v.Still.Source, clip?.StillFrame))
+                        v.Still.Source = clip?.StillFrame;
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
                     // A frame marks every arrangeable PiP. No drawn handles: reshape grab-zones
                     // are geometric edge/corner bands on the InputLayer, so handles were decoration
                     // that also made chrome depend on a selection you cannot make while arranging.
-                    if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                    // Nothing is arrangeable mid-playback, so the frame stays off while rolling.
+                    if (v.Frame != null)
+                        v.Frame.Visibility = IsActivelyPlaying
+                            ? Microsoft.UI.Xaml.Visibility.Collapsed
+                            : Microsoft.UI.Xaml.Visibility.Visible;
                     v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;
 
                 case OverlayRender.Video:
+                    ClearStillMotion(track);
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     AttachOverlayVideo(track);
@@ -679,6 +984,10 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             EvaluateOverlays(_viewModel.CurrentStoryTime);
         }
 
+        // Bake a still's frame up front (e.g. the moment a Snapshot clip is created) so it is
+        // ready before the playhead ever reaches it, rather than on first activation.
+        public void PrebakeStillFrame(CinematicOperation op) => _ = EnsureStillFrameAsync(op);
+
         // The overlay clip currently shown in a given track's box (null if none) — used by
         // double-tap-to-edit to know which clip a PiP represents.
         public CinematicOperation GetActiveOverlay(int track)
@@ -702,6 +1011,21 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             _activeOverlay[slot] = overlay;
 
             grid.Opacity = overlay.IsVideoHidden ? 0.0 : overlay.Opacity;
+
+            // Stills render from a frame baked at source resolution rather than from a parked
+            // video surface. Idempotent, so kicking it off on every activation is free once done.
+            if (overlay.IsStill) _ = EnsureStillFrameAsync(overlay);
+
+            // A still whose frame is already baked needs no decoder at all — skip the media open
+            // outright. That also keeps it out of the Opening/Buffering clock stall in the tick,
+            // which would otherwise freeze story time for every track while this one loads.
+            if (overlay.IsStill && overlay.StillFrame != null && overlay.SourceAspect > 0)
+            {
+                player.Pause();
+                _overlayAspect[slot] = overlay.SourceAspect;
+                ApplyOverlayBox(slot, overlay, false);
+                return;
+            }
 
             bool needsNewSource = player.Source == null ||
                 !string.Equals((player.Source as MediaSource)?.Uri?.LocalPath, overlay.FilePath, StringComparison.OrdinalIgnoreCase);
@@ -770,13 +1094,22 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
         // (placement bypassed) so content is framed full-size, identical to Track 1; at
         // playback it is the corner PiP. The grid clips its content so zoomed-in framing can't
         // spill outside the box.
-        private void ApplyOverlayBox(int slot, CinematicOperation overlay, bool editMode)
+        // Returns TRUE when the box was actually established. It reads _overlayAspect[slot] alone,
+        // which is only filled from an OPEN decoder (CacheOverlayAspect), while the slot is marked
+        // active the instant activation starts. In that window this bailed and left the grid at the
+        // previous clip's size — or unsized — yet ApplyOverlayTransform went straight on to write a
+        // full zoom/pan onto it, because its own fit came from op.SourceAspect and succeeded. A
+        // transform computed for one rectangle applied to another: picture flung off the box, black
+        // where the framing was well inside the frame. Hence both the shared resolver (SourceAspect
+        // is in the project file, so the box can be built before any decoder opens) and the bool,
+        // so a caller can never transform geometry that was never laid out.
+        private bool ApplyOverlayBox(int slot, CinematicOperation overlay, bool editMode)
         {
             var grid = _playerControl.OverlayVisuals[slot].Grid;
-            double aspect = _overlayAspect[slot];
+            double aspect = AspectOf(overlay, slot);
             double vpW = _playerControl.ActualWidth;
             double vpH = _playerControl.ActualHeight;
-            if (aspect <= 0 || vpW <= 0 || vpH <= 0) return;
+            if (aspect <= 0 || vpW <= 0 || vpH <= 0) return false;
 
             // Video fit to viewport (contained), preserving aspect — the "scale 1" reference.
             double fitW, fitH;
@@ -785,15 +1118,10 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
 
             // Edit mode: box fills the video fit (framing at full size). Arrange: independent
             // width/height so the PiP can be reshaped; the video crop-fills (UniformToFill).
-            double sw = editMode ? 1.0 : overlay.PlacementWidth;
-            double sh = editMode ? 1.0 : overlay.PlacementHeight;
-            double cx = editMode ? 0.5 : overlay.PlacementCenterX;
-            double cy = editMode ? 0.5 : overlay.PlacementCenterY;
-
-            double boxW = fitW * sw;
-            double boxH = fitH * sh;
-            double left = cx * vpW - boxW / 2;
-            double top = cy * vpH - boxH / 2;
+            var box = ClipGeometry.Box(fitW, fitH, vpW, vpH,
+                                       overlay.PlacementWidth, overlay.PlacementHeight,
+                                       overlay.PlacementCenterX, overlay.PlacementCenterY, editMode);
+            double boxW = box.W, boxH = box.H, left = box.X, top = box.Y;
 
             // NOTE (§7A): this method does GEOMETRY ONLY. Deciding still-vs-video used to live here
             // and silently never fired — the render mode is now set explicitly by SetOverlayRender
@@ -803,17 +1131,80 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             {
                 grid.Margin = new Microsoft.UI.Xaml.Thickness(left, top, 0, 0);
             }
-            // Only resize + reallocate the clip when the box dimensions actually change
-            // (avoids per-frame allocation during playback).
-            if (grid.Width != boxW || grid.Height != boxH)
+            // Only resize + reallocate the BOX when its dimensions actually change (avoids
+            // per-frame allocation of the clip geometry during playback).
+            if (grid.Width != boxW || grid.Height != boxH || _overlayContentAspect[slot] != aspect)
             {
                 grid.Width = boxW;
                 grid.Height = boxH;
+                _overlayContentAspect[slot] = aspect;
                 grid.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
                 {
                     Rect = new Windows.Foundation.Rect(0, 0, boxW, boxH)
                 };
             }
+
+            // ---- The surfaces are sized to the FRAME, not to the box. ----
+            //
+            // UniformToFill into a BOX-sized element crops the frame to the box and DISCARDS
+            // the surplus: MediaPlayerElement renders into a swapchain the size of the element,
+            // and Image applies a layout clip on overflow. The RenderTransform then pans and
+            // zooms that crop — so there is no picture outside it to bring back, and the box
+            // behaves as if it were the whole video. That is the bug, and it hits video clips
+            // and stills alike because both crop before they transform.
+            //
+            // Sized to the frame's drawn extent instead, the element's aspect equals the
+            // source's, so UniformToFill discards nothing and the whole frame stays available
+            // to the transform. The grid's clip above still crops what you see, so the neutral
+            // framing is unchanged: at scale 1 with no pan, a centred frame-sized element shows
+            // exactly the same crop it always did.
+            //
+            // THIS RUNS EVERY CALL, deliberately. It used to sit inside the box guard above, which
+            // made it a ONE-SHOT: once the grid had its size that branch never ran again, so any
+            // later loss of a surface's Width was permanent. The clip then rendered with content
+            // exactly the size of its box - zero surplus - and the first pan of the Ken Burns ramp
+            // slid it almost entirely out of frame: full picture at t=0, a ~50px strip against a
+            // wall of black by the Mid mark. Re-asserting makes the size a function of the current
+            // geometry instead of a state that can be silently dropped.
+            //
+            // The write is delta-guarded, which is what keeps the old warning here honest: this
+            // method runs inside the per-frame render handler, and unconditionally writing layout
+            // properties on a child from there retriggers measure up the tree and can become a
+            // layout loop that starves the UI thread (playback freezes, scrubber goes dead).
+            // contentW/H derive deterministically from boxW/boxH and the aspect, so once the box is
+            // stable every comparison is false and not one property is touched.
+            (double contentW, double contentH) = ClipGeometry.Content(boxW, boxH, aspect);
+
+            // Centre the oversized surface on the box by hand. It used to rely on
+            // HorizontalAlignment="Center" inside the box-sized grid, and that is precisely what
+            // broke: WinUI hands an overflowing child a LAYOUT CLIP at the parent's size, and
+            // RenderTransform is applied AFTER that clip. So the frame was cropped to the 556px box
+            // first and only then panned - at pan 518 that leaves 556-518 = 38px of picture and a
+            // wall of black, which is exactly what the Mid mark rendered. The surplus the whole
+            // frame-sizing scheme exists to preserve was being thrown away one step before it was
+            // needed. Inside a Canvas nothing constrains the child, so no layout clip is issued and
+            // the transform pans a surface that still holds the entire frame; grid.Clip above then
+            // crops at RENDER time, which is a mask rather than a constraint.
+            double padX = (contentW - boxW) / 2;
+            double padY = (contentH - boxH) / 2;
+
+            var surfaces = _playerControl.OverlayVisuals[slot];
+
+            // The defect this area exists to prevent was NOT a maths error - the numbers were right
+            // while WinUI layout-clipped the surface to its parent before the RenderTransform ran,
+            // discarding the surplus one step before the pan could use it. Arithmetic tests cannot
+            // see that, so it is guarded structurally: the surfaces must live somewhere that does
+            // not constrain them. A Canvas does not; a sized Grid does.
+            System.Diagnostics.Debug.Assert(
+                surfaces.Video == null || surfaces.Video.Parent is Microsoft.UI.Xaml.Controls.Canvas,
+                "Video surface must sit in a Canvas: a sizing parent layout-clips it before the "
+                + "RenderTransform, silently discarding the pan surplus.");
+            System.Diagnostics.Debug.Assert(
+                surfaces.Still == null || surfaces.Still.Parent is Microsoft.UI.Xaml.Controls.Canvas,
+                "Still surface must sit in a Canvas (see above).");
+
+            PlaceSurface(surfaces.Video, -padX, -padY, contentW, contentH);
+            PlaceSurface(surfaces.Still, -padX, -padY, contentW, contentH);
 
             // Apply border styling
             if (overlay.BorderType == BorderType.None || editMode)
@@ -848,6 +1239,32 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                     }
                 }
             }
+
+            return true;
+        }
+
+        // Size AND position a content surface inside its Canvas, writing only on a real change.
+        //
+        // NaN-safe: an unset Width reads back as NaN and every comparison against NaN is false, so
+        // the explicit IsNaN test is what makes a surface that has LOST its size get re-sized on the
+        // next pass instead of being quietly left alone.
+        //
+        // Delta-guarding matters here: this runs inside the per-frame render handler, and
+        // unconditionally writing layout properties from there retriggers measure up the tree and
+        // can become a layout loop that starves the UI thread. Every value below derives
+        // deterministically from the box and the aspect, so once the box is stable nothing is
+        // written at all.
+        private static void PlaceSurface(Microsoft.UI.Xaml.FrameworkElement el, double left, double top,
+                                         double w, double h)
+        {
+            if (el == null) return;
+            if (double.IsNaN(el.Width) || Math.Abs(el.Width - w) > 0.5) el.Width = w;
+            if (double.IsNaN(el.Height) || Math.Abs(el.Height - h) > 0.5) el.Height = h;
+
+            if (Math.Abs(Microsoft.UI.Xaml.Controls.Canvas.GetLeft(el) - left) > 0.5)
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(el, left);
+            if (Math.Abs(Microsoft.UI.Xaml.Controls.Canvas.GetTop(el) - top) > 0.5)
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(el, top);
         }
 
         private void HideFilmStrip(Microsoft.UI.Xaml.Controls.Grid grid)
@@ -945,6 +1362,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             grid.Opacity = 0;
 
             // Reset content transform + clear the placement box so no stale size/clip lingers.
+            // (The still surface is reset by SetOverlayRender's Hidden case above.)
             var transform = _playerControl.OverlayVisuals[slot].Transform;
             transform.ScaleX = 1;
             transform.ScaleY = 1;
@@ -952,77 +1370,158 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             transform.TranslateY = 0;
             grid.ClearValue(Microsoft.UI.Xaml.FrameworkElement.WidthProperty);
             grid.ClearValue(Microsoft.UI.Xaml.FrameworkElement.HeightProperty);
+            var vis = _playerControl.OverlayVisuals[slot];
+            vis.Video?.ClearValue(Microsoft.UI.Xaml.FrameworkElement.WidthProperty);
+            vis.Video?.ClearValue(Microsoft.UI.Xaml.FrameworkElement.HeightProperty);
+            vis.Still?.ClearValue(Microsoft.UI.Xaml.FrameworkElement.WidthProperty);
+            vis.Still?.ClearValue(Microsoft.UI.Xaml.FrameworkElement.HeightProperty);
+            // The surfaces now sit in a Canvas, so their offset is state too - a released slot that
+            // kept a previous clip's Canvas.Left would draw the next one off-centre for a frame.
+            if (vis.Video != null) { Microsoft.UI.Xaml.Controls.Canvas.SetLeft(vis.Video, 0); Microsoft.UI.Xaml.Controls.Canvas.SetTop(vis.Video, 0); }
+            if (vis.Still != null) { Microsoft.UI.Xaml.Controls.Canvas.SetLeft(vis.Still, 0); Microsoft.UI.Xaml.Controls.Canvas.SetTop(vis.Still, 0); }
             grid.Clip = null;
             grid.Margin = new Microsoft.UI.Xaml.Thickness(0);
 
             _activeOverlay[slot] = null;
             _overlayAspect[slot] = 0;
+            _overlayContentAspect[slot] = 0;
         }
 
-        private void ApplyOverlayTransform(int slot, CinematicOperation overlay, TimeSpan currentStoryTime)
+        // Which surface a clip renders on. A still renders as a bitmap once its frame has been
+        // baked at source resolution; until then (and for every video) the MediaPlayerElement is
+        // still the surface, so a clip is never blank while a decode is in flight.
+        private static OverlayRender RenderModeFor(CinematicOperation clip)
+            => clip != null && clip.IsStill && clip.StillFrame != null
+                ? OverlayRender.Still
+                : OverlayRender.Video;
+
+        private void ApplyOverlayTransform(int slot, CinematicOperation overlay, TimeSpan currentStoryTime, OverlayRender mode)
         {
-            var transform = _playerControl.OverlayVisuals[slot].Transform;
+            // First draw of a legacy clip is where its marks get converted to the normalised space.
+            EnsureMarksNormalized(overlay);
+
+            // Placement box FIRST. The still's motion is centred on the box, so its size has to be
+            // settled before a centre point can be derived from it; the old order (marks, then box)
+            // seeded the first frame of a ramp against a stale size.
+            //
+            // And if the box could NOT be established, do not transform. The return value used to
+            // be absent and the box's early-out silent, so during a slot's activation window this
+            // wrote a zoom/pan sized for one rectangle onto whatever the last clip left behind.
+            // Parking at identity shows the clip un-framed for the frame or two until geometry
+            // lands, which is a neutral picture rather than a mostly-black one.
+            if (!ApplyOverlayBox(slot, overlay, false))
+            {
+                if (mode == OverlayRender.Still)
+                    KenBurnsMotion.Reset(_playerControl.OverlayVisuals[slot].StillTransform);
+                else
+                    KenBurnsMotion.Reset(_playerControl.OverlayVisuals[slot].Transform);
+                return;
+            }
 
             // Content framing interpolated over the overlay's OWN duration (Ken Burns / push-in),
             // using the same marks + curve as Track 1. Static clip = StartMark == EndMark.
             double rawProgress = overlay.OpDuration.TotalMilliseconds > 0
                 ? (currentStoryTime - overlay.StartTime).TotalMilliseconds / overlay.OpDuration.TotalMilliseconds
                 : 0;
-            ApplyMarksAtProgress(overlay, rawProgress, transform, overlay.PlacementWidth, overlay.PlacementHeight);
 
-            // Placement box (where/how big on screen), clipped so framing can't spill out.
-            ApplyOverlayBox(slot, overlay, false);
+            // Marks are fractions of the video fit; the transform wants pixels of the PiP box.
+            // fit * PanScale is that conversion — see KenBurnsMotion.PanScale for why the ratio
+            // is a single uniform number rather than one per axis.
+            //
+            // The box above succeeded, so this resolves the same aspect and cannot disagree with
+            // it. The guard is here because the return value was previously discarded: a false
+            // silently gave fitW/fitH of 0, which zeroed the translate while leaving the scale
+            // applied — a centred zoom instead of the framing that was authored.
+            if (!TryGetMarkSpace(overlay, out double fitW, out double fitH)) return;
+            double pan = KenBurnsMotion.PanScale(overlay);
+            double panX = fitW * pan;
+            double panY = fitH * pan;
+
+            if (mode == OverlayRender.Still)
+            {
+                DriveStillMotion(slot, overlay, rawProgress, panX, panY);
+                return;
+            }
+
+            // Video: the XAML transform on the MediaPlayerElement, written per frame.
+            ClearStillMotion(slot);
+            ApplyMarksAtProgress(overlay, rawProgress, _playerControl.OverlayVisuals[slot].Transform,
+                                 panX, panY);
+        }
+
+        // Hands a still's push-in to the compositor once per run instead of writing a transform
+        // every frame. Restarts only when something actually invalidates the running ramp, so a
+        // clip that plays straight through gets exactly one handover.
+        private void DriveStillMotion(int slot, CinematicOperation overlay, double rawProgress, double panX, double panY)
+        {
+            var stillT = _playerControl.OverlayVisuals[slot].StillTransform;
+
+            KenBurnsMotion.Apply(stillT, overlay, rawProgress, panX, panY);
+            _stillMotionOwned[slot] = true;
+        }
+
+        private void ClearStillMotion(int slot)
+        {
+            if (!_stillMotionOwned[slot]) return;
+
+            KenBurnsMotion.Reset(_playerControl.OverlayVisuals[slot].StillTransform);
+            _stillMotionOwned[slot] = false;
+        }
+
+        // Bakes a still's frozen frame at source resolution, once per (file, freeze point).
+        // Idempotent and fire-and-forget: the clip keeps rendering on its video surface until the
+        // frame lands, then flips to the bitmap on the next evaluation.
+        private async Task EnsureStillFrameAsync(CinematicOperation op)
+        {
+            if (op == null || !op.IsStill || string.IsNullOrWhiteSpace(op.FilePath)) return;
+
+            string key = op.StillFrameId;
+            if (op.StillFrame != null && op.StillFrameKey == key) return;
+            if (op.StillFramePending) return;
+
+            op.StillFramePending = true;
+            try
+            {
+                var frame = await StillFrameFactory.ExtractAsync(op.FilePath, op.VideoStartTime);
+                if (frame == null) return;
+
+                // The freeze point may have been retrimmed while we were decoding — only publish
+                // a frame that still matches what the clip is asking for.
+                if (op.StillFrameId != key) return;
+
+                op.StillFrame = frame;
+                op.StillFrameKey = key;
+
+                // A clip sitting under the playhead right now is showing its video surface; nudge
+                // the composite so it picks up the bitmap without waiting for the next transition.
+                _dispatcher.TryEnqueue(RefreshComposite);
+            }
+            catch
+            {
+                // Unreadable source, or no decoder for this container — the video surface stays
+                // as the fallback and the still simply behaves as it did before.
+            }
+            finally { op.StillFramePending = false; }
         }
 
         // Applies a clip's Start/Mid/End marks to a transform at the given progress (0..1),
         // eased by the clip's CurveProfile. Shared by Track 1 (UpdateSpatial) and upper-track
         // overlay content so motion behaves identically on every track.
-        private void ApplyMarksAtProgress(CinematicOperation op, double rawProgress, Microsoft.UI.Xaml.Media.CompositeTransform transform, double panScaleX = 1.0, double panScaleY = 1.0)
+        private void ApplyMarksAtProgress(CinematicOperation op, double rawProgress,
+                                          Microsoft.UI.Xaml.Media.CompositeTransform transform,
+                                          double panScaleX = 1.0, double panScaleY = 1.0)
         {
             if (op == null || transform == null) return;
-            double progress = Math.Clamp(rawProgress, 0, 1);
 
-            double easedProgress = progress;
-            if (op.CurveProfile == CurveProfile.Bezier)
-                easedProgress = progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2;
-            else if (op.CurveProfile == CurveProfile.DirectorsArc)
-                easedProgress = 1 - Math.Pow(1 - progress, 3);
+            // Delegates rather than duplicating: the still path and this one have to agree exactly,
+            // or a clip would reframe as it flipped between the bitmap and the video surface.
+            KenBurnsMotion.Evaluate(op, rawProgress, panScaleX, panScaleY,
+                                    out double scale, out double tx, out double ty);
 
-            double newScaleX, newTranslateX, newTranslateY;
-            if (op.MidMark != null)
-            {
-                if (easedProgress < 0.5)
-                {
-                    double p = easedProgress * 2;
-                    newScaleX = op.StartMark.Scale + (op.MidMark.Scale - op.StartMark.Scale) * p;
-                    newTranslateX = op.StartMark.X + (op.MidMark.X - op.StartMark.X) * p;
-                    newTranslateY = op.StartMark.Y + (op.MidMark.Y - op.StartMark.Y) * p;
-                }
-                else
-                {
-                    double p = (easedProgress - 0.5) * 2;
-                    newScaleX = op.MidMark.Scale + (op.EndMark.Scale - op.MidMark.Scale) * p;
-                    newTranslateX = op.MidMark.X + (op.EndMark.X - op.MidMark.X) * p;
-                    newTranslateY = op.MidMark.Y + (op.EndMark.Y - op.MidMark.Y) * p;
-                }
-            }
-            else
-            {
-                newScaleX = op.StartMark.Scale + (op.EndMark.Scale - op.StartMark.Scale) * easedProgress;
-                newTranslateX = op.StartMark.X + (op.EndMark.X - op.StartMark.X) * easedProgress;
-                newTranslateY = op.StartMark.Y + (op.EndMark.Y - op.StartMark.Y) * easedProgress;
-            }
-
-            newTranslateX *= panScaleX;
-            newTranslateY *= panScaleY;
-
-            if (Math.Abs(transform.ScaleX - newScaleX) > 0.0001)
-            {
-                transform.ScaleX = newScaleX;
-                transform.ScaleY = newScaleX;
-            }
-            if (Math.Abs(transform.TranslateX - newTranslateX) > 0.01) transform.TranslateX = newTranslateX;
-            if (Math.Abs(transform.TranslateY - newTranslateY) > 0.01) transform.TranslateY = newTranslateY;
+            transform.ScaleX = scale;
+            transform.ScaleY = scale;
+            transform.TranslateX = tx;
+            transform.TranslateY = ty;
         }
 
         private void ApplyOverlayDriftCorrection(int slot, CinematicOperation overlay, TimeSpan currentStoryTime)
@@ -1198,12 +1697,24 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             _dispatcher.TryEnqueue(() =>
             {
                 if (_activeOverlay[0] != overlay) return;
+                // Seed the live transform from the mark: mark X/Y are fractions of the fit, the
+                // transform is in pane pixels, and Edit mode's box IS the fit.
+                //
+                // CacheOverlayAspect moved ABOVE the seed. It ran after, so a clip with no stored
+                // SourceAspect seeded its translate against whatever the previous clip's aspect
+                // implied and only got the right one from the next frame — the framing visibly
+                // settled after the fact. The decoder is open by here, so this is the point at
+                // which the aspect is knowable.
+                EnsureMarksNormalized(overlay);
+                CacheOverlayAspect(0, player);
                 transform.ScaleX = markToEdit.Scale;
                 transform.ScaleY = markToEdit.Scale;
-                transform.TranslateX = markToEdit.X;
-                transform.TranslateY = markToEdit.Y;
+                if (TryGetMarkSpace(overlay, out double seedFitW, out double seedFitH))
+                {
+                    transform.TranslateX = markToEdit.X * seedFitW;
+                    transform.TranslateY = markToEdit.Y * seedFitH;
+                }
                 _playerControl.ActiveTransform = transform;
-                CacheOverlayAspect(0, player);
                 SetOverlayRender(0, OverlayRender.Video, overlay); 
                 ApplyOverlayBox(0, overlay, true);
                 grid.Opacity = 1.0;
@@ -1232,7 +1743,6 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         // ---- Clip-scoped Edit-mode preview (Play in Edit mode = this clip's Ken Burns only) ----
 
         private bool _editPreviewPlaying;
-        private DateTime _editPreviewStart;
 
         public void ToggleEditPreview()
         {
@@ -1244,7 +1754,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         {
             if (_editClip == null || _overlayPlayer[0]?.PlaybackSession == null) return;
             _editPreviewPlaying = true;
-            _editPreviewStart = DateTime.Now;
+            _editPreviewClock.Restart();
             _overlayPlayer[0].PlaybackSession.Position = _editClip.VideoStartTime;
 
             // Respect the clip's own speed. Speed 0 = a STILL: freeze the frame; the Ken Burns
@@ -1282,15 +1792,11 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             if (_overlayPlayer[0] != null) _overlayPlayer[0].Volume = _editClip.Volume;
             double dur = _editClip.OpDuration.TotalSeconds;
             if (dur <= 0) dur = 1;
-            double progress = (DateTime.Now - _editPreviewStart).TotalSeconds / dur;
-            if (_overlayPlayer[0]?.PlaybackSession != null && _editClip.PlaybackSpeed > 0 && !_editClip.IsStill)
-            {
-                double videoElapsed = (_overlayPlayer[0].PlaybackSession.Position - _editClip.VideoStartTime).TotalSeconds / _editClip.PlaybackSpeed;
-                progress = videoElapsed / dur;
-            }
+            double progress = _editPreviewClock.Elapsed.TotalSeconds / dur;
+            
             if (progress >= 1.0)
             {
-                _editPreviewStart = DateTime.Now; // loop the preview
+                _editPreviewClock.Restart(); // loop the preview
                 progress = 0;
                 if (_overlayPlayer[0]?.PlaybackSession != null)
                 {
@@ -1299,7 +1805,15 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                     if (_editClip.PlaybackSpeed > 0) _overlayPlayer[0].Play();
                 }
             }
-            ApplyMarksAtProgress(_editClip, Math.Clamp(progress, 0.0, 1.0), _playerControl.ActiveTransform);
+            // Edit mode frames against the whole fit (the box is not a PiP here), so the mark
+            // fractions convert with the fit itself — no PanScale.
+            EnsureMarksNormalized(_editClip);
+            // A false here means the fit is unknowable this tick; framing against the 0/0 it hands
+            // back would apply the scale with the pan zeroed — a centred zoom, not the authored
+            // framing. Skipping leaves the previous frame's framing until it resolves.
+            if (TryGetMarkSpace(_editClip, out double editFitW, out double editFitH))
+                ApplyMarksAtProgress(_editClip, Math.Clamp(progress, 0.0, 1.0), _playerControl.ActiveTransform,
+                                     editFitW, editFitH);
 
             // Drive the per-clip scrubber off the real decode position so it tracks the preview.
             // (Assigning CurrentOperationTime — not …Seconds — only notifies the slider; it does
@@ -1460,7 +1974,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
 
             // Edge/corner grab = reshape. Work in pixels: move only the grabbed edges, keep the
             // opposite edges anchored, then convert back to independent width/height + centre.
-            double aspect = _overlayAspect[e.slot];
+            double aspect = AspectOf(overlay, e.slot);
             if (aspect <= 0) return;
             double fitW, fitH;
             if (aspect >= vpW / vpH) { fitW = vpW; fitH = vpW / aspect; }
@@ -1529,6 +2043,8 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             var op = _viewModel.SelectedClip as CinematicOperation;
             if (op == null) return;
 
+            EnsureMarksNormalized(op);
+
             SpatialMark mark;
             if (e.markType == "Start") mark = op.StartMark;
             else if (e.markType == "Mid") mark = op.MidMark;
@@ -1543,8 +2059,11 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             double vpW = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
             double vpH = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
 
-            double aspect = _overlayAspect[0];
-            if (aspect <= 0) aspect = 16.0 / 9.0;
+            // Must resolve identically to the rect the user is dragging (see UpdateWysiwygOverlay).
+            // A drag converted in a different space than it was drawn in moves the mark somewhere
+            // other than where the pointer went.
+            double aspect = AspectOf(op, 0);
+            if (aspect <= 0) return;
 
             double W, H;
             if (aspect >= vpW / vpH) { W = vpW; H = vpW / aspect; }
@@ -1571,14 +2090,16 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             double tyc = transform.TranslateY;
 
             double St = mark.Scale;
-            double txt = mark.X;
-            double tyt = mark.Y;
+            // The whole of this method works in pane pixels; marks are fractions of the fit
+            // (W x H), so convert in here and back out again on write.
+            double txt = mark.X * W;
+            double tyt = mark.Y * H;
             if (St <= 0) St = 1;
 
             if (e.action == "Translate")
             {
-                mark.X -= (float)(e.dx / (Sc / St));
-                mark.Y -= (float)(e.dy / (Sc / St));
+                mark.X -= (float)(e.dx / (Sc / St) / W);
+                mark.Y -= (float)(e.dy / (Sc / St) / H);
             }
             else
             {
@@ -1608,9 +2129,10 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 cy += dcy;
 
                 mark.Scale = (float)newSt;
-                mark.X = (float)(-(cx - W / 2 - txc) / (Sc / newSt));
-                mark.Y = (float)(-(cy - H / 2 - tyc) / (Sc / newSt));
+                mark.X = (float)(-(cx - W / 2 - txc) / (Sc / newSt) / W);
+                mark.Y = (float)(-(cy - H / 2 - tyc) / (Sc / newSt) / H);
             }
+
 
             UpdateWysiwygOverlay();
         }

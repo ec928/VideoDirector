@@ -81,6 +81,8 @@ namespace VideoDirector.ViewModels
                 {
                     OnPropertyChanged(nameof(IsDockVisible));
                     OnPropertyChanged(nameof(ModeLabel));
+                    OnPropertyChanged(nameof(IsStoryboardVisible));
+                    if (!value) IsControlsVisible = true;
                 }
             }
         }
@@ -133,7 +135,7 @@ namespace VideoDirector.ViewModels
             }
         }
 
-        public bool IsStoryboardVisible => _isStoryboardPinned || _isEditMode;
+        public bool IsStoryboardVisible => !_isPlaying && (_isStoryboardPinned || HasSelection);
 
         private bool _isControlsVisible = true;
         public bool IsControlsVisible
@@ -216,6 +218,7 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _selectedClip, value))
                 {
                     OnPropertyChanged(nameof(HasSelection));
+                    OnPropertyChanged(nameof(IsStoryboardVisible));
                     OnPropertyChanged(nameof(IsTrack1Selected));
                     OnPropertyChanged(nameof(IsOverlaySelected));
                     OnPropertyChanged(nameof(SelectedTrackLabel));
@@ -319,6 +322,11 @@ namespace VideoDirector.ViewModels
                 {
                     CurrentOperationTime = TimeSpan.FromSeconds(value);
                     OperationSeekRequested?.Invoke(this, CurrentOperationTime);
+
+                    if (SelectedClip is CinematicOperation clip && clip.PlaybackSpeed <= 0)
+                    {
+                        clip.VideoStartTime = CurrentOperationTime;
+                    }
                 }
             }
         }
@@ -384,12 +392,15 @@ namespace VideoDirector.ViewModels
             while (Tracks.Count < MaxTracks) AddTrack(Tracks.Count);
         }
 
+        public event EventHandler ClipPropertyChanged;
+
         private void CinematicOperation_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
             if (e.PropertyName == nameof(CinematicOperation.OpDuration) || e.PropertyName == nameof(CinematicOperation.TransitionDuration) || e.PropertyName == nameof(CinematicOperation.StartTime))
             {
                 OnPropertyChanged(nameof(TotalStoryTime));
             }
+            ClipPropertyChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public async Task AddFilesAsync(IEnumerable<string> filePaths)
@@ -566,19 +577,53 @@ namespace VideoDirector.ViewModels
             // playhead appears frozen). Adding clips is an Arrange activity — stay in Arrange.
         }
 
-        // Serialization wrapper. 
+        // Bumped when the meaning of saved fields changes, so a load can tell an old file from a
+        // new one instead of guessing from the values.
+        //   0 (absent) — SpatialMark X/Y are raw player-pane pixels.
+        //   1          — SpatialMark X/Y are fractions of the video's fit rectangle.
+        // Version 0 files are converted on first draw; see VideoPlaybackEngine.EnsureMarksNormalized.
+        private const int CurrentSchemaVersion = 1;
+
+        // Serialization wrapper.
         private class ProjectData
         {
+            public int SchemaVersion { get; set; }   // absent in pre-versioned files => 0
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> TimelineNodes { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<TimelineTrack> OverlayTracks { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<TimelineTrack> Tracks { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> OverlayClips { get; set; } = new();
         }
 
+        // Tag every clip from a pre-normalisation file. Covers all four shapes a project can
+        // arrive in — bare node array, Tracks, and the two legacy overlay collections — because a
+        // clip that slips through would have its pixel translate multiplied by the fit again and
+        // fly off screen.
+        private static void MarkClipsLegacyIfNeeded(
+            int schemaVersion,
+            System.Collections.ObjectModel.ObservableCollection<CinematicOperation> nodes,
+            System.Collections.ObjectModel.ObservableCollection<TimelineTrack> tracks,
+            System.Collections.ObjectModel.ObservableCollection<TimelineTrack> legacyOverlayTracks,
+            System.Collections.ObjectModel.ObservableCollection<CinematicOperation> legacyOverlays)
+        {
+            if (schemaVersion >= 1) return;
+
+            void Flag(System.Collections.Generic.IEnumerable<CinematicOperation> clips)
+            {
+                if (clips == null) return;
+                foreach (var c in clips) if (c != null) c.MarksAreLegacyPixels = true;
+            }
+
+            Flag(nodes);
+            Flag(legacyOverlays);
+            if (tracks != null) foreach (var t in tracks) Flag(t?.Clips);
+            if (legacyOverlayTracks != null) foreach (var t in legacyOverlayTracks) Flag(t?.Clips);
+        }
+
         public async Task SaveAsync(Windows.Storage.StorageFile file)
         {
             var data = new ProjectData
             {
+                SchemaVersion = CurrentSchemaVersion,
                 Tracks = Tracks
             };
             var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
@@ -603,6 +648,7 @@ namespace VideoDirector.ViewModels
             System.Collections.ObjectModel.ObservableCollection<TimelineTrack> legacyOverlayTracks = null;
             System.Collections.ObjectModel.ObservableCollection<TimelineTrack> tracks = null;
             System.Collections.ObjectModel.ObservableCollection<CinematicOperation> legacyOverlays = null;
+            int schemaVersion = 0;
 
             if (trimmed.StartsWith("["))
             {
@@ -615,12 +661,17 @@ namespace VideoDirector.ViewModels
                 var data = System.Text.Json.JsonSerializer.Deserialize<ProjectData>(json, options);
                 if (data != null)
                 {
+                    schemaVersion = data.SchemaVersion;
                     nodes = data.TimelineNodes;
                     legacyOverlayTracks = data.OverlayTracks;
                     tracks = data.Tracks;
                     legacyOverlays = data.OverlayClips;
                 }
             }
+
+            // Flag pre-normalisation marks so the engine converts them on first draw, when the
+            // pane size is actually known. Doing it here would risk dividing by an unmeasured pane.
+            MarkClipsLegacyIfNeeded(schemaVersion, nodes, tracks, legacyOverlayTracks, legacyOverlays);
 
             Tracks.Clear();
             EnsureTracks();
@@ -755,7 +806,10 @@ namespace VideoDirector.ViewModels
 
         private string CaptureSnapshot()
         {
-            var data = new ProjectData { Tracks = Tracks };
+            // In-memory round trip of already-live objects, so the marks are whatever convention
+            // they are already in. RestoreSnapshot deliberately does NOT re-flag them as legacy —
+            // undo must not re-run a migration that has already happened.
+            var data = new ProjectData { SchemaVersion = CurrentSchemaVersion, Tracks = Tracks };
             return System.Text.Json.JsonSerializer.Serialize(data, _snapshotOptions);
         }
 
