@@ -940,8 +940,12 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                     // are geometric edge/corner bands on the InputLayer, so handles were decoration
                     // that also made chrome depend on a selection you cannot make while arranging.
                     // Nothing is arrangeable mid-playback, so the frame stays off while rolling.
+                    // Arrange only. A still now takes this branch in EDIT mode too (images
+                    // render from a bitmap, so Edit no longer forces the video surface), and
+                    // the arrange frame must not follow it there - a PiP outline around the
+                    // clip you are framing is exactly the modal leak §5.3 forbids.
                     if (v.Frame != null)
-                        v.Frame.Visibility = IsActivelyPlaying
+                        v.Frame.Visibility = (IsActivelyPlaying || _mode != EditorMode.Arrange)
                             ? Microsoft.UI.Xaml.Visibility.Collapsed
                             : Microsoft.UI.Xaml.Visibility.Visible;
                     v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
@@ -1654,9 +1658,30 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
 
             var player = _overlayPlayer[0];
             var grid = _playerControl.OverlayVisuals[0].Grid;
-            var transform = _playerControl.OverlayVisuals[0].Transform;
 
-            if (player.Source == null || !string.Equals((player.Source as MediaSource)?.Uri?.LocalPath, overlay.FilePath, StringComparison.OrdinalIgnoreCase))
+            // WHICH SURFACE, decided first, because it decides which transform the whole edit
+            // session drives.
+            //
+            // This used to be hardcoded to the video surface and the video transform. A speed-0
+            // VIDEO snapshot survived that: Media Foundation opens the file and parks on a frame,
+            // so the MediaPlayerElement really can show it. An IMAGE cannot be opened that way at
+            // all — StillFrameFactory exists precisely because Media Foundation will not reliably
+            // load a .jpg — so Edit mode showed an empty video surface with the bitmap hidden
+            // behind it, and the wheel and drag moved a transform on an element nobody could see.
+            // Same Ken Burns as playback now, on the same surface playback uses.
+            if (overlay.IsStill) await EnsureStillFrameAsync(overlay);
+            if (_activeOverlay[0] != overlay) return;
+
+            var mode = RenderModeFor(overlay);
+            var transform = mode == OverlayRender.Still
+                ? _playerControl.OverlayVisuals[0].StillTransform
+                : _playerControl.OverlayVisuals[0].Transform;
+
+            // A baked still needs no decoder. Opening one for an image also cost a dead 1500ms
+            // every time Edit was entered, since MediaOpened never fires and the wait always ran
+            // to its timeout.
+            if (mode != OverlayRender.Still &&
+                (player.Source == null || !string.Equals((player.Source as MediaSource)?.Uri?.LocalPath, overlay.FilePath, StringComparison.OrdinalIgnoreCase)))
             {
                 var tcs = new TaskCompletionSource<bool>();
                 Windows.Foundation.TypedEventHandler<MediaPlayer, object> handler = (s, e) => tcs.TrySetResult(true);
@@ -1690,9 +1715,16 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 markToEdit = overlay.StartMark;
             }
 
-            if (player.PlaybackSession != null) player.PlaybackSession.Position = seekPos;
-            player.Pause();
-            player.StepForwardOneFrame();
+            if (mode != OverlayRender.Still)
+            {
+                if (player.PlaybackSession != null) player.PlaybackSession.Position = seekPos;
+                player.Pause();
+                player.StepForwardOneFrame();
+            }
+            else
+            {
+                player.Pause();
+            }
 
             _dispatcher.TryEnqueue(() =>
             {
@@ -1706,7 +1738,18 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 // settled after the fact. The decoder is open by here, so this is the point at
                 // which the aspect is knowable.
                 EnsureMarksNormalized(overlay);
-                CacheOverlayAspect(0, player);
+
+                // CacheOverlayAspect reads the decoder, which a bitmap still does not have. The
+                // clip carries the aspect already (it is persisted), so take it from there.
+                if (mode == OverlayRender.Still)
+                {
+                    if (overlay.SourceAspect > 0) _overlayAspect[0] = overlay.SourceAspect;
+                }
+                else
+                {
+                    CacheOverlayAspect(0, player);
+                }
+
                 transform.ScaleX = markToEdit.Scale;
                 transform.ScaleY = markToEdit.Scale;
                 if (TryGetMarkSpace(overlay, out double seedFitW, out double seedFitH))
@@ -1715,7 +1758,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                     transform.TranslateY = markToEdit.Y * seedFitH;
                 }
                 _playerControl.ActiveTransform = transform;
-                SetOverlayRender(0, OverlayRender.Video, overlay); 
+                SetOverlayRender(0, mode, overlay); 
                 ApplyOverlayBox(0, overlay, true);
                 grid.Opacity = 1.0;
                 
@@ -1755,6 +1798,17 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             if (_editClip == null || _overlayPlayer[0]?.PlaybackSession == null) return;
             _editPreviewPlaying = true;
             _editPreviewClock.Restart();
+
+            // A clip rendering from a baked bitmap has no open source to seek or roll — the marks
+            // animate off the wall clock below and nothing else is needed. Testing PlaybackSpeed
+            // alone missed this: an image is a still by EXTENSION and keeps speed 1, so it took
+            // the play path and asked a player with no source to seek.
+            if (RenderModeFor(_editClip) == OverlayRender.Still)
+            {
+                _overlayPlayer[0].Pause();
+                return;
+            }
+
             _overlayPlayer[0].PlaybackSession.Position = _editClip.VideoStartTime;
 
             // Respect the clip's own speed. Speed 0 = a STILL: freeze the frame; the Ken Burns
@@ -1798,7 +1852,8 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             {
                 _editPreviewClock.Restart(); // loop the preview
                 progress = 0;
-                if (_overlayPlayer[0]?.PlaybackSession != null)
+                if (_overlayPlayer[0]?.PlaybackSession != null &&
+                    RenderModeFor(_editClip) != OverlayRender.Still)
                 {
                     _overlayPlayer[0].PlaybackSession.Position = _editClip.VideoStartTime;
                     // Resume if it hit end-of-media mid-loop; a still (speed 0) stays paused.
@@ -2033,8 +2088,10 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
                 SeekActiveOperation(endSeek);
             }
 
-            // Poke the decoder so the paused frame updates immediately
-            _overlayPlayer[0]?.StepForwardOneFrame();
+            // Poke the decoder so the paused frame updates immediately. A bitmap still has no
+            // decoder to poke and never changes frame, so there is nothing to do for one.
+            if (RenderModeFor(op) != OverlayRender.Still)
+                _overlayPlayer[0]?.StepForwardOneFrame();
         }
 
         private void OnWysiwygBoxManipulated(object? sender, (string markType, string action, double dx, double dy) e)
