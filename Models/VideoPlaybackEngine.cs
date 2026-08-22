@@ -1084,9 +1084,22 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
 
 
         // A MediaPlayerElement with no MediaPlayer has no video surface to render at all.
+        //
+        // AND THE PLAYER HAS TO STOP, not just be unhooked. SetMediaPlayer(null) detaches the
+        // picture; the MediaPlayer carries on decoding and, more to the point, carries on making
+        // noise. Switching from a video to a still on the same track therefore left the outgoing
+        // clip's audio playing underneath a silent image - the source is only replaced when the
+        // next VIDEO clip loads one, and a still never does.
         private void DetachOverlayVideo(int track)
         {
             var video = _playerControl.OverlayVisuals[track].Video;
+            var player = _overlayPlayer[track];
+            if (player != null && player.PlaybackSession != null &&
+                player.PlaybackSession.PlaybackState == Windows.Media.Playback.MediaPlaybackState.Playing)
+            {
+                player.Pause();
+            }
+
             if (video == null) return;
             if (video.MediaPlayer != null) video.SetMediaPlayer(null);
             video.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;

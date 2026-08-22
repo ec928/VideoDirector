@@ -537,20 +537,33 @@ namespace VideoDirector.ViewModels
             RecordIfChanged();
         }
 
-        // Finds which Track 1 clip a given absolute story time falls within. Used to resume
-        // playback from the correct clip when there's no selected timeline node to go by.
+        // Which Track 1 clip a story time falls within. Drives playback resume AND the timeline
+        // highlight, so it must agree with what the compositor puts on screen.
+        //
+        // It did not. This was a second, subtly different rule: it extended each clip's window by
+        // its TransitionDuration, and it returned the FIRST match in collection order. Either alone
+        // is enough to disagree with the compositor at a join - so the picture, the HUD and the
+        // inspector could all name the image while the timeline still highlighted the clip before
+        // it. Same rule as ResolveActiveClip now: half-open window, and of the clips covering the
+        // instant the one that STARTED LATER wins.
         public int GetTimelineIndexForStoryTime(TimeSpan storyTime)
         {
             if (Tracks.Count == 0 || Tracks[0].Clips.Count == 0) return 0;
+
+            int best = -1;
+            long bestStart = 0;
             for (int i = 0; i < Tracks[0].Clips.Count; i++)
             {
                 var clip = Tracks[0].Clips[i];
-                var end = clip.StartTime + clip.OpDuration + clip.TransitionDuration;
-                if (storyTime >= clip.StartTime && storyTime < end)
+                if (!ClipGeometry.Covers(clip.StartTime.Ticks, clip.OpDuration.Ticks, storyTime.Ticks))
+                    continue;
+                if (best < 0 || ClipGeometry.Supersedes(clip.StartTime.Ticks, bestStart))
                 {
-                    return i;
+                    best = i;
+                    bestStart = clip.StartTime.Ticks;
                 }
             }
+            if (best >= 0) return best;
             // If it falls in a gap, return the clip index just before it or the last clip
             for (int i = Tracks[0].Clips.Count - 1; i >= 0; i--)
             {
