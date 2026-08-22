@@ -401,6 +401,31 @@ namespace VideoDirector.ViewModels
         
         public event EventHandler<CinematicOperation> EditTargetChanged;
 
+        // WHICH FRAMING RECTANGLE IS SELECTED, or null for none.
+        //
+        // Deliberately separate from CurrentEditTarget. That one decides which mark Edit mode
+        // SEEDS ITS VIEW FROM, and changing it re-enters Edit — which is the wrong thing to do
+        // half way through dragging a rectangle. This is selection only: it drives the highlight
+        // and it decides whether the wheel resizes a keyframe or zooms the live view.
+        //
+        // Transient by design. Clicking empty canvas clears it and hands the wheel back to the
+        // view, so both ways of authoring a mark stay available: drag the rectangle directly, or
+        // frame the picture and press Set.
+        private EditTarget? _selectedMark;
+        public EditTarget? SelectedMark
+        {
+            get => _selectedMark;
+            set
+            {
+                if (_selectedMark == value) return;
+                _selectedMark = value;
+                OnPropertyChanged(nameof(SelectedMark));
+                OnPropertyChanged(nameof(HasMarkSelection));
+            }
+        }
+
+        public bool HasMarkSelection => _selectedMark.HasValue;
+
         public int CurrentEditTargetIndex
         {
             get => (int)_currentEditTarget;

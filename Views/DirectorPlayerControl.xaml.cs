@@ -59,6 +59,16 @@ namespace VideoDirector.Views
         public event EventHandler<(int slot, BoxGrab grab, double dx, double dy)> OverlayBoxDragged;
         public event EventHandler<(string markType, string action, double dx, double dy)> WysiwygBoxManipulated;
         public event EventHandler<string> WysiwygBoxGrabbed;
+
+        // Raised when the wheel turns while a framing rectangle is selected. The engine owns the
+        // resize maths, so the control only reports the gesture.
+        public event EventHandler<int>? SelectedMarkWheel;
+
+        // Set by the engine. The control needs it only to decide where the wheel goes.
+        public bool IsMarkSelected { get; set; }
+
+        // Raised on a press that lands on empty canvas in content mode - the deselect gesture.
+        public event EventHandler? CanvasCleared;
         public event EventHandler<(int slot, int delta)> OverlayBoxWheel;
         public event EventHandler<int>? OverlayBoxPointerPressed;
 
@@ -170,6 +180,10 @@ namespace VideoDirector.Views
                 InputLayer.CapturePointer(e.Pointer);
                 return;
             }
+
+            // Content mode: a press that reaches the input layer missed every rectangle (their
+            // tabs and handles handle their own presses), so it is a deselect.
+            CanvasCleared?.Invoke(this, EventArgs.Empty);
 
             _isDragging = true;
             _lastPointerPosition = p;
@@ -334,6 +348,15 @@ namespace VideoDirector.Views
             {
                 int slot = HitTestOverlaySlot(pt.Position);
                 if (slot >= 0) OverlayBoxWheel?.Invoke(this, (slot, delta));
+                return;
+            }
+
+            // A selected framing rectangle takes the wheel: resizing it IS the zoom for that
+            // keyframe, and resizing the live view underneath at the same time would fight it.
+            // Deselect (click empty canvas) and the wheel returns to zooming the view.
+            if (IsMarkSelected)
+            {
+                SelectedMarkWheel?.Invoke(this, delta);
                 return;
             }
 

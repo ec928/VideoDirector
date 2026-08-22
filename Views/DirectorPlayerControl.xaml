@@ -152,8 +152,11 @@
         <!-- WYSIWYG Overlay for Edit Mode (Interactive Grids) -->
         <Canvas x:Name="WysiwygCanvas" x:FieldModifier="public" IsHitTestVisible="True" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
             <!-- Start Box -->
-            <Grid x:Name="WysiwygStartRect" x:FieldModifier="public" Visibility="Collapsed">
-                <Rectangle Stroke="Cyan" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+            <Grid x:Name="WysiwygStartRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                    <ScaleTransform x:Name="WysiwygStartPop" x:FieldModifier="public" />
+                </Grid.RenderTransform>
+                <Rectangle x:Name="WysiwygStartFrame" x:FieldModifier="public" Stroke="Cyan" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
                 <Border Background="Cyan" Padding="6,2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
                         PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Start">
                      <TextBlock Text="Start Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
@@ -165,8 +168,11 @@
             </Grid>
 
             <!-- Mid Box -->
-            <Grid x:Name="WysiwygMidRect" x:FieldModifier="public" Visibility="Collapsed">
-                <Rectangle Stroke="DeepSkyBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+            <Grid x:Name="WysiwygMidRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                    <ScaleTransform x:Name="WysiwygMidPop" x:FieldModifier="public" />
+                </Grid.RenderTransform>
+                <Rectangle x:Name="WysiwygMidFrame" x:FieldModifier="public" Stroke="DeepSkyBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
                 <Border Background="DeepSkyBlue" Padding="6,2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
                         PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Mid">
                      <TextBlock Text="Mid Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
@@ -178,8 +184,11 @@
             </Grid>
 
             <!-- End Box -->
-            <Grid x:Name="WysiwygEndRect" x:FieldModifier="public" Visibility="Collapsed">
-                <Rectangle Stroke="RoyalBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+            <Grid x:Name="WysiwygEndRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                    <ScaleTransform x:Name="WysiwygEndPop" x:FieldModifier="public" />
+                </Grid.RenderTransform>
+                <Rectangle x:Name="WysiwygEndFrame" x:FieldModifier="public" Stroke="RoyalBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
                 <Border Background="RoyalBlue" Padding="6,2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
                         PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="End">
                      <TextBlock Text="End Frame" FontSize="10" Foreground="White" FontWeight="Bold"/>

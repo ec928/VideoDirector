@@ -1484,6 +1484,7 @@ namespace VideoDirector.Views
                 _playbackEngine?.UpdateWysiwygOverlay();
                 SeekForMark(op, VideoDirector.ViewModels.EditTarget.Start);
                 _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.Start);
+                _playbackEngine?.SetSelectedMark(VideoDirector.ViewModels.EditTarget.Start);
             }
         }
 
@@ -1497,6 +1498,7 @@ namespace VideoDirector.Views
                 _playbackEngine?.UpdateWysiwygOverlay();
                 SeekForMark(op, VideoDirector.ViewModels.EditTarget.Mid);
                 _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.Mid);
+                _playbackEngine?.SetSelectedMark(VideoDirector.ViewModels.EditTarget.Mid);
             }
         }
 
@@ -1512,6 +1514,7 @@ namespace VideoDirector.Views
 
                 // Force the decoder to update the paused frame by switching edit targets
                 _playbackEngine?.BeginEdit(op, VideoDirector.ViewModels.EditTarget.End);
+                _playbackEngine?.SetSelectedMark(VideoDirector.ViewModels.EditTarget.End);
             }
         }
 

@@ -66,6 +66,8 @@ namespace VideoDirector.Models
             _playerControl.OverlayBoxDragged += OnOverlayBoxDragged;
             _playerControl.WysiwygBoxManipulated += OnWysiwygBoxManipulated;
             _playerControl.WysiwygBoxGrabbed += OnWysiwygBoxGrabbed;
+            _playerControl.SelectedMarkWheel += OnSelectedMarkWheel;
+            _playerControl.CanvasCleared += (s, e) => SetSelectedMark(null);
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
             _playerControl.OverlayBoxPointerPressed += OnOverlayBoxPointerPressed;
             _playerControl.MakeFullScreenRequested += OnMakeFullScreenRequested;
@@ -710,6 +712,11 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             if (_mode != EditorMode.Edit || _viewModel.SelectedClip == null)
             {
                 _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                if (_viewModel.SelectedMark != null)
+                {
+                    _viewModel.SelectedMark = null;
+                    _playerControl.IsMarkSelected = false;
+                }
                 return;
             }
 
@@ -800,6 +807,34 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             DrawRect(_playerControl.WysiwygStartRect, op.StartMark, true);
             DrawRect(_playerControl.WysiwygMidRect, op.MidMark, true);
             DrawRect(_playerControl.WysiwygEndRect, op.EndMark, true);
+
+            // Selection styling. Solid and full strength for the selected keyframe, thin dashed and
+            // faded for the rest — the colour coding still says WHICH keyframe each one is, so the
+            // highlight only has to say which one the wheel and the inspector will act on.
+            var sel = _viewModel.SelectedMark;
+            StyleMarkRect(_playerControl.WysiwygStartRect, _playerControl.WysiwygStartFrame, sel == EditTarget.Start);
+            StyleMarkRect(_playerControl.WysiwygMidRect, _playerControl.WysiwygMidFrame, sel == EditTarget.Mid);
+            StyleMarkRect(_playerControl.WysiwygEndRect, _playerControl.WysiwygEndFrame, sel == EditTarget.End);
+        }
+
+        private static void StyleMarkRect(Microsoft.UI.Xaml.FrameworkElement rect,
+                                          Microsoft.UI.Xaml.Shapes.Rectangle frame, bool selected)
+        {
+            if (rect != null)
+            {
+                double opacity = selected ? 1.0 : 0.42;
+                if (Math.Abs(rect.Opacity - opacity) > 0.001) rect.Opacity = opacity;
+            }
+            if (frame == null) return;
+
+            double thickness = selected ? 3.0 : 1.5;
+            if (Math.Abs(frame.StrokeThickness - thickness) > 0.001) frame.StrokeThickness = thickness;
+
+            // Solid for the selected one; the dashes are what make an unselected rectangle read as
+            // a guide rather than as the thing being manipulated.
+            bool dashed = frame.StrokeDashArray != null && frame.StrokeDashArray.Count > 0;
+            if (selected && dashed) frame.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection();
+            else if (!selected && !dashed) frame.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
         }
 
         // Backfill the true source length from the opened media. Covers clips from older projects
@@ -2069,6 +2104,17 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
 
             if (_editPreviewPlaying) StopEditPreview();
 
+            // Grabbing a rectangle selects it. Without this the app had no idea which keyframe you
+            // were working on: the canvas seeked to it but left CurrentEditTarget alone, and there
+            // was no selection state at all for the highlight or the wheel to key off.
+            SetSelectedMark(markType switch
+            {
+                "Start" => EditTarget.Start,
+                "Mid" => EditTarget.Mid,
+                "End" => EditTarget.End,
+                _ => (EditTarget?)null
+            });
+
             if (markType == "Start") SeekActiveOperation(op.VideoStartTime);
             else if (markType == "Mid" && op.MidMark != null) 
             {
@@ -2092,6 +2138,78 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             // decoder to poke and never changes frame, so there is nothing to do for one.
             if (RenderModeFor(op) != OverlayRender.Still)
                 _overlayPlayer[0]?.StepForwardOneFrame();
+        }
+
+        // The single place selection changes, so the view model, the control's wheel routing and
+        // the on-screen highlight can never disagree.
+        public void SetSelectedMark(EditTarget? target)
+        {
+            if (_mode != EditorMode.Edit) target = null;
+            if (_viewModel.SelectedMark == target) return;
+
+            _viewModel.SelectedMark = target;
+            _playerControl.IsMarkSelected = target.HasValue;
+            UpdateWysiwygOverlay();
+            if (target.HasValue) PopMarkRect(target.Value);
+        }
+
+        // A single ease-out pop on selection, not a loop. A rectangle that keeps flashing while you
+        // are judging a framing is noise; one short acknowledgement then a solid, static highlight
+        // is what reads as deliberate.
+        private void PopMarkRect(EditTarget target)
+        {
+            var scale = target switch
+            {
+                EditTarget.Start => _playerControl.WysiwygStartPop,
+                EditTarget.Mid => _playerControl.WysiwygMidPop,
+                _ => _playerControl.WysiwygEndPop
+            };
+            if (scale == null) return;
+
+            var sb = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+            foreach (var prop in new[] { "ScaleX", "ScaleY" })
+            {
+                var anim = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+                {
+                    From = 1.03,
+                    To = 1.0,
+                    Duration = new Microsoft.UI.Xaml.Duration(TimeSpan.FromMilliseconds(180)),
+                    EasingFunction = new Microsoft.UI.Xaml.Media.Animation.CubicEase
+                    {
+                        EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut
+                    },
+                    EnableDependentAnimation = true
+                };
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(anim, scale);
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(anim, prop);
+                sb.Children.Add(anim);
+            }
+            try { sb.Begin(); } catch { }
+        }
+
+        // Wheel over a selected rectangle resizes THAT keyframe about its own centre. Smaller
+        // rectangle = tighter framing = higher mark scale, which is why the factor is inverted.
+        private void OnSelectedMarkWheel(object? sender, int delta)
+        {
+            if (_mode != EditorMode.Edit) return;
+            var target = _viewModel.SelectedMark;
+            if (!target.HasValue) return;
+            if (_viewModel.SelectedClip is not CinematicOperation op) return;
+
+            var mark = target.Value switch
+            {
+                EditTarget.Start => op.StartMark,
+                EditTarget.Mid => op.MidMark,
+                _ => op.EndMark
+            };
+            if (mark == null) return;
+
+            double factor = delta > 0 ? 1.08 : 1.0 / 1.08;
+            float next = (float)Math.Clamp(mark.Scale * factor, 0.1, 10.0);
+            if (Math.Abs(next - mark.Scale) < 0.0001f) return;
+
+            mark.Scale = next;
+            UpdateWysiwygOverlay();
         }
 
         private void OnWysiwygBoxManipulated(object? sender, (string markType, string action, double dx, double dy) e)
