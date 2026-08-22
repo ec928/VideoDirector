@@ -208,6 +208,70 @@ namespace VideoDirector.Tests
             }
         }
 
+        // Wheel-zoom of a framing rectangle must resize it about its own centre.
+        //
+        // A mark's offset is stored relative to its own zoom - the sampled centre comes out of
+        // tx/scale - so changing scale alone slides the framing, by an amount proportional to how
+        // far off-centre it already sat. Left-of-frame crept left, right-of-frame crept right.
+        // OnSelectedMarkWheel scales X and Y by the same ratio as the scale to hold tx/scale
+        // constant; this is that invariant.
+        [Fact]
+        public void Scaling_a_mark_with_its_offset_keeps_the_sampled_centre_fixed()
+        {
+            var c = GoldenClip();
+            var fit = ClipGeometry.Fit(Aspect, PaneW, PaneH);
+            var box = ClipGeometry.Box(fit.W, fit.H, PaneW, PaneH,
+                                       c.PlacementWidth, c.PlacementHeight,
+                                       c.PlacementCenterX, c.PlacementCenterY, false);
+            var (cw, ch) = ClipGeometry.Content(box.W, box.H, Aspect);
+            double pan = ClipGeometry.PanScale(c.PlacementWidth, c.PlacementHeight);
+
+            foreach (var (x, y) in new[] { (0.30, 0.12), (-0.25, 0.20), (0.0, 0.0), (0.45, -0.30) })
+            foreach (var scale in new[] { 0.8, 1.0, 1.6 })
+            foreach (var ratio in new[] { 1.08, 1.0 / 1.08, 2.0, 0.5 })
+            {
+                var before = ClipGeometry.SampledSource(cw, ch, box.W, box.H,
+                                                        scale, x * fit.W * pan, y * fit.H * pan,
+                                                        SrcW, SrcH);
+
+                // The wheel handler's rule: offset tracks the scale.
+                double s2 = scale * ratio;
+                var after = ClipGeometry.SampledSource(cw, ch, box.W, box.H,
+                                                       s2, x * ratio * fit.W * pan, y * ratio * fit.H * pan,
+                                                       SrcW, SrcH);
+
+                double cx0 = before.X + before.W / 2, cy0 = before.Y + before.H / 2;
+                double cx1 = after.X + after.W / 2, cy1 = after.Y + after.H / 2;
+
+                Assert.Equal(cx0, cx1, 6);
+                Assert.Equal(cy0, cy1, 6);
+
+                // and it really did resize - otherwise the test would pass on a no-op
+                Assert.True(Math.Abs(after.W - before.W) > 1e-9 || Math.Abs(ratio - 1.0) < 1e-9);
+            }
+        }
+
+        // The bug it replaced: scaling WITHOUT tracking the offset moves an off-centre rectangle.
+        [Fact]
+        public void Scaling_a_mark_alone_would_move_an_off_centre_framing()
+        {
+            var c = GoldenClip();
+            var fit = ClipGeometry.Fit(Aspect, PaneW, PaneH);
+            var box = ClipGeometry.Box(fit.W, fit.H, PaneW, PaneH,
+                                       c.PlacementWidth, c.PlacementHeight,
+                                       c.PlacementCenterX, c.PlacementCenterY, false);
+            var (cw, ch) = ClipGeometry.Content(box.W, box.H, Aspect);
+            double pan = ClipGeometry.PanScale(c.PlacementWidth, c.PlacementHeight);
+
+            double tx = 0.30 * fit.W * pan;
+            var before = ClipGeometry.SampledSource(cw, ch, box.W, box.H, 1.0, tx, 0, SrcW, SrcH);
+            var after = ClipGeometry.SampledSource(cw, ch, box.W, box.H, 1.6, tx, 0, SrcW, SrcH);
+
+            double cx0 = before.X + before.W / 2, cx1 = after.X + after.W / 2;
+            Assert.True(Math.Abs(cx1 - cx0) > 1.0,
+                "the old behaviour must actually drift, or this suite is not pinning anything");
+        }
+
         // ---------------------------------------------------------------- golden values
         //
         // Exact framing for the frozen clip: 2.39:1 source in a 0.285 x 0.844 box. These are the
