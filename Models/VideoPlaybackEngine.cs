@@ -110,6 +110,23 @@ namespace VideoDirector.Models
             {
                 OnTimelineSequenceChanged();
             }
+            else if (e.PropertyName == nameof(DirectorViewModel.CurrentStoryTime))
+            {
+                // MOVING THE PLAYHEAD MUST RE-EVALUATE WHAT IS ON SCREEN.
+                //
+                // Nothing did. SeekCompositeToStoryTime evaluates because it calls
+                // EvaluateOverlays itself, but SelectClip just assigns CurrentStoryTime - so
+                // selecting a clip jumped the playhead to its start while the composite carried
+                // on showing the clip that was already loaded. With two videos either side it
+                // looked like a lag; with an image after a video it was unmistakable, because the
+                // video simply stayed up.
+                //
+                // Skipped while the render loop is driving: that already evaluates every frame,
+                // and it writes CurrentStoryTime itself, so reacting here would double the work
+                // sixty times a second.
+                if (_mode == EditorMode.Arrange && !_isAnimating && !_evaluatingComposite)
+                    EvaluateOverlays(_viewModel.CurrentStoryTime);
+            }
         }
 
         private void OnTimelineSequenceChanged()
@@ -877,7 +894,22 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
         // The generic per-track evaluation (§7B). One loop body, indexed by track — no slot
         // branches. Each track is strict (its clips never overlap), so at most ONE clip is active
         // per track, which is why track i can own exactly one player/surface.
+        // Guards the CurrentStoryTime handler above from re-entering while an evaluation is
+        // already in flight.
+        private bool _evaluatingComposite;
+
         private void EvaluateOverlays(TimeSpan currentStoryTime)
+        {
+            if (_evaluatingComposite) return;
+            _evaluatingComposite = true;
+            try
+            {
+                EvaluateOverlaysCore(currentStoryTime);
+            }
+            finally { _evaluatingComposite = false; }
+        }
+
+        private void EvaluateOverlaysCore(TimeSpan currentStoryTime)
         {
             // The geometry readout refreshes from the one place every path that can change
             // geometry passes through, so scrubbing updates it and not just playback. Called
@@ -1556,6 +1588,14 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
 
                 op.StillFrame = frame;
                 op.StillFrameKey = key;
+
+                // Last line of defence for the aspect, and the only one that reaches clips already
+                // saved in a project. An image never opens a decoder, so CacheOverlayAspect can
+                // never backfill it the way it does for video — and a clip with no aspect lays out
+                // no box and draws nothing at all. The decoded bitmap knows its own dimensions, so
+                // take them from there whenever the clip arrived without any.
+                if (op.SourceAspect <= 0 && frame.PixelWidth > 0 && frame.PixelHeight > 0)
+                    op.SourceAspect = (double)frame.PixelWidth / frame.PixelHeight;
 
                 // A clip sitting under the playhead right now is showing its video surface; nudge
                 // the composite so it picks up the bitmap without waiting for the next transition.

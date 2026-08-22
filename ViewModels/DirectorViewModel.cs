@@ -460,6 +460,7 @@ namespace VideoDirector.ViewModels
             foreach (var path in filePaths)
             {
                 TimeSpan duration = TimeSpan.FromSeconds(10);
+                double sourceAspect = 0;
                 Microsoft.UI.Xaml.Media.Imaging.BitmapImage? thumbnail = null;
                 try
                 {
@@ -474,9 +475,19 @@ namespace VideoDirector.ViewModels
                         var imgProps = await file.Properties.GetImagePropertiesAsync();
                         if (imgProps != null && imgProps.Width > 0)
                         {
-                            duration = TimeSpan.FromSeconds(5); // Default 5s for images
+                            // An image has no duration of its own, so this IS the hold.
+                            duration = TimeSpan.FromSeconds(10);
+                            if (imgProps.Height > 0)
+                                sourceAspect = (double)imgProps.Width / imgProps.Height;
                         }
                     }
+
+                    // The aspect, which this path never read at all. Without it AspectOf returns 0,
+                    // ApplyOverlayBox refuses to lay out a box, and the clip renders nothing — the
+                    // failure was invisible for video because CacheOverlayAspect backfills it from
+                    // the decoder, and an image has no decoder to backfill from.
+                    if (sourceAspect <= 0 && props != null && props.Width > 0 && props.Height > 0)
+                        sourceAspect = (double)props.Width / props.Height;
 
                     // Get Thumbnail
                     var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, 480, Windows.Storage.FileProperties.ThumbnailOptions.UseCurrentScale);
@@ -513,6 +524,7 @@ namespace VideoDirector.ViewModels
                     SourceDuration = duration,   // full source length; trim In/Out live within it
                     OpDuration = duration,
                     VideoEndTime = duration,
+                    SourceAspect = sourceAspect,
                     StartTime = TimeSpan.FromSeconds(newStartTime),
                     TransitionDuration = TimeSpan.Zero, // Default 0s transition for the new last clip
                     Thumbnail = thumbnail,
