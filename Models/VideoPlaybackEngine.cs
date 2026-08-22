@@ -1117,11 +1117,22 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             => (track >= 0 && track < MaxOverlayTracks) ? _activeOverlay[track] : null;
 
         // Strict track ⇒ the first clip whose window contains t is the only one.
+        // The clip on screen for this track at time t.
+        //
+        // "First one that covers t" was wrong: it made collection order decide the answer whenever
+        // two clips overlapped, and a 1-tick overlap is all it took (see ClipGeometry.Covers). The
+        // clip that started LATER is the one the playhead has most recently entered, so it wins -
+        // which is also the right answer for a deliberate overlap, not just a rounding one.
         private static CinematicOperation ResolveActiveClip(TimelineTrack track, TimeSpan t)
         {
+            CinematicOperation best = null;
             foreach (var clip in track.Clips)
-                if (clip.IsActiveAt(t)) return clip;
-            return null;
+            {
+                if (!ClipGeometry.Covers(clip.StartTime.Ticks, clip.OpDuration.Ticks, t.Ticks)) continue;
+                if (best == null || ClipGeometry.Supersedes(clip.StartTime.Ticks, best.StartTime.Ticks))
+                    best = clip;
+            }
+            return best;
         }
 
         private void ActivateOverlaySlot(int slot, CinematicOperation overlay, TimeSpan currentStoryTime)

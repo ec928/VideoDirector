@@ -119,6 +119,25 @@ namespace VideoDirector.Models
             y = a.Y + (b.Y - a.Y) * t;
         }
 
+        // ==================== Which clip is on screen ====================
+        //
+        // Timeline arithmetic in TICKS, because seconds are where this went wrong.
+        //
+        // A clip's window is half-open: [start, start + duration). Two clips laid end to end
+        // therefore never both cover the join. That held right up until a boundary was computed in
+        // double seconds and assigned through TimeSpan.FromSeconds, which cost one tick - 100
+        // nanoseconds - and left an image starting one tick BEFORE the clip in front of it ended.
+        // Selecting the image put the playhead in that 1-tick overlap, both clips covered it, and
+        // the resolver returned whichever came first in the list. The wrong clip stayed on screen
+        // and every readout agreed with it, because the model really did have it active.
+        public static bool Covers(long startTicks, long durationTicks, long t)
+            => t >= startTicks && t < startTicks + durationTicks;
+
+        // When two clips both cover the instant, the one that STARTED LATER wins: that is the one
+        // the playhead has most recently entered. Order in the collection decides nothing.
+        public static bool Supersedes(long candidateStartTicks, long incumbentStartTicks)
+            => candidateStartTicks > incumbentStartTicks;
+
         // The region of the SOURCE frame the box ends up showing, in source pixels.
         //
         // This is the answer to the only question that matters when black appears: is the framing

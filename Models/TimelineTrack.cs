@@ -69,12 +69,21 @@ namespace VideoDirector.Models
 
         // Nearest start time (seconds) at which a clip of length `dur` fits WITHOUT overlapping the
         // others on this track.
+        // Lays clips out so none starts before the one in front of it ends.
+        //
+        // IN TICKS, deliberately. This used to run in double seconds and assign through
+        // StartTimeSeconds, whose setter is TimeSpan.FromSeconds - and that round trip is lossy.
+        // A boundary of 20.2006781s came back one tick short, so the following clip began 100
+        // nanoseconds BEFORE its predecessor ended. Both then covered that instant, and the wrong
+        // one rendered - with every readout agreeing, because the model really did have it active.
+        // Ticks are integers; laying a clip exactly on the previous clip's end is exact, and
+        // half-open windows then guarantee only one clip covers any instant.
         public void ResolveOverlaps()
         {
             var sorted = new System.Collections.Generic.List<CinematicOperation>(Clips);
-            sorted.Sort((a, b) => a.StartTimeSeconds.CompareTo(b.StartTimeSeconds));
-            
-            double nextValidStart = 0.0;
+            sorted.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
+
+            long nextValidStart = 0;
 
             for (int i = 0; i < sorted.Count; i++)
             {
@@ -82,14 +91,15 @@ namespace VideoDirector.Models
 
                 if (_isGapless)
                 {
-                    curr.StartTimeSeconds = nextValidStart;
+                    if (curr.StartTime.Ticks != nextValidStart)
+                        curr.StartTime = TimeSpan.FromTicks(nextValidStart);
                 }
-                else if (curr.StartTimeSeconds < nextValidStart && i > 0)
+                else if (curr.StartTime.Ticks < nextValidStart && i > 0)
                 {
-                    curr.StartTimeSeconds = nextValidStart;
+                    curr.StartTime = TimeSpan.FromTicks(nextValidStart);
                 }
-                
-                nextValidStart = curr.StartTimeSeconds + curr.OpDuration.TotalSeconds;
+
+                nextValidStart = curr.StartTime.Ticks + curr.OpDuration.Ticks;
             }
         }
 

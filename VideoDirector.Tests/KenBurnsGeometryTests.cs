@@ -272,6 +272,83 @@ namespace VideoDirector.Tests
                 "the old behaviour must actually drift, or this suite is not pinning anything");
         }
 
+        // ================= which clip is on screen =================
+        //
+        // Real numbers, from Tests/0-Test6.json. Selecting the image showed the previous clip; the
+        // model genuinely had that clip active, which is why the HUD, the canvas and the track
+        // manager all agreed with each other and all disagreed with the inspector.
+        private const long Clip1Start = 0L,          Clip1Dur = 102006781L;   // video
+        private const long Clip2Start = 102006781L,  Clip2Dur = 100000000L;   // freeze frame
+        private const long ImageStart = 202006780L,  ImageDur = 100000000L;   // the .jpg
+
+        [Fact]
+        public void The_project_really_did_overlap_by_one_tick()
+        {
+            // 100 nanoseconds, lost to a double-seconds round trip through TimeSpan.FromSeconds.
+            Assert.Equal(1L, (Clip2Start + Clip2Dur) - ImageStart);
+        }
+
+        [Fact]
+        public void At_a_clip_start_the_clip_starting_there_wins_even_when_windows_overlap()
+        {
+            long t = ImageStart;   // what SelectClip sets the playhead to
+
+            // Both cover the instant. That is the whole bug: it is not that the resolver was asked
+            // the wrong question, it is that two clips were legitimately valid answers.
+            Assert.True(ClipGeometry.Covers(Clip2Start, Clip2Dur, t));
+            Assert.True(ClipGeometry.Covers(ImageStart, ImageDur, t));
+
+            // The later start is the one the playhead has just entered, so it must win —
+            // regardless of collection order, which is what the old resolver keyed off.
+            Assert.True(ClipGeometry.Supersedes(ImageStart, Clip2Start));
+            Assert.False(ClipGeometry.Supersedes(Clip2Start, ImageStart));
+        }
+
+        [Fact]
+        public void Resolution_does_not_depend_on_collection_order()
+        {
+            var clips = new (long start, long dur, string name)[]
+            {
+                (Clip1Start, Clip1Dur, "video"),
+                (Clip2Start, Clip2Dur, "freeze"),
+                (ImageStart, ImageDur, "image"),
+            };
+
+            static string Resolve((long start, long dur, string name)[] set, long t)
+            {
+                string best = null; long bestStart = 0;
+                foreach (var c in set)
+                {
+                    if (!ClipGeometry.Covers(c.start, c.dur, t)) continue;
+                    if (best == null || ClipGeometry.Supersedes(c.start, bestStart))
+                    { best = c.name; bestStart = c.start; }
+                }
+                return best;
+            }
+
+            Assert.Equal("image", Resolve(clips, ImageStart));
+
+            // Reversed, and shuffled: same answer. The old rule returned whichever came first.
+            Assert.Equal("image", Resolve(clips.Reverse().ToArray(), ImageStart));
+            Assert.Equal("image", Resolve(new[] { clips[1], clips[2], clips[0] }, ImageStart));
+        }
+
+        [Fact]
+        public void Half_open_windows_keep_a_clean_join_unambiguous()
+        {
+            // Laid exactly end to end — the state ResolveOverlaps now produces in ticks — only one
+            // clip covers the join.
+            long aStart = 0, aDur = 102006781;
+            long bStart = aStart + aDur, bDur = 100000000;
+
+            Assert.False(ClipGeometry.Covers(aStart, aDur, bStart));
+            Assert.True(ClipGeometry.Covers(bStart, bDur, bStart));
+
+            // and the instant before the join belongs to the first clip alone
+            Assert.True(ClipGeometry.Covers(aStart, aDur, bStart - 1));
+            Assert.False(ClipGeometry.Covers(bStart, bDur, bStart - 1));
+        }
+
         // ---------------------------------------------------------------- golden values
         //
         // Exact framing for the frozen clip: 2.39:1 source in a 0.285 x 0.844 box. These are the
