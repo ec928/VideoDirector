@@ -9,27 +9,31 @@ REM  not depend on a .pubxml (the publish profiles are gitignored and local to
 REM  the author's machine).
 REM
 REM  Usage:
-REM    publish.bat                     -> publishes to .\bin\x64\Release\
+REM    publish.bat                     -> publishes to .\bin\Release\
 REM    publish.bat "D:\somewhere"      -> publishes to that folder
 REM    publish.bat "D:\somewhere" nosmoke
 REM
 REM  Two builds, two folders, nothing anywhere else:
 REM
-REM      bin\x64\Debug\     dotnet build   - the test build
-REM      bin\x64\Release\   this script    - the shippable build
+REM      bin\Debug\     dotnet build   - the test build
+REM      bin\Release\   this script    - the shippable build
+REM
+REM  These match where `dotnet build` actually puts things: the csproj sets
+REM  AppendTargetFrameworkToOutputPath and AppendRuntimeIdentifierToOutputPath
+REM  to false, so there is no TFM or RID subfolder and no bin\x64 at all.
 REM
 REM  Release IS the publish output: dotnet publish has to build before it copies,
-REM  and that build lands in bin\x64\Release anyway.
+REM  and that build lands in bin\Release anyway.
 REM
 REM  Deliberately NOT single-file: single-file self-extracts the whole runtime
 REM  to %TEMP% on the first launch after every publish, which measurably slows
 REM  cold start.
 REM ============================================================================
 
-if exist "%~dp0bin\x64\Debug" rd /s /q "%~dp0bin\x64\Debug"
+if exist "%~dp0bin\Debug" rd /s /q "%~dp0bin\Debug"
 set "OUTDIR=%~1"
-if "%OUTDIR%"=="" set "OUTDIR=%~dp0bin\x64\Release"
-if /i "%OUTDIR%"=="nosmoke" set "OUTDIR=%~dp0bin\x64\Release"
+if "%OUTDIR%"=="" set "OUTDIR=%~dp0bin\Release"
+if /i "%OUTDIR%"=="nosmoke" set "OUTDIR=%~dp0bin\Release"
 
 set "PROJ=%~dp0VideoDirector.csproj"
 

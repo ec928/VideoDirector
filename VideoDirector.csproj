@@ -27,11 +27,11 @@
     <!--
       Output layout. Two builds, two folders, nothing anywhere else:
 
-          bin\x64\Debug\VideoDirector.exe      dotnet build          - the test build
-          bin\x64\Release\VideoDirector.exe    publish.bat           - the shippable build
+          bin\Debug\VideoDirector.exe      dotnet build          - the test build
+          bin\Release\VideoDirector.exe    publish.bat           - the shippable build
 
       Release IS the publish output. `dotnet publish` has to build before it copies, and
-      that build lands in bin\x64\Release regardless; pointing PublishDir anywhere else
+      that build lands in bin\Release regardless; pointing PublishDir anywhere else
       just leaves a half-built Release folder beside the real one. So they are the same
       folder, and a Release build is by definition the self-contained portable one.
 
@@ -44,8 +44,13 @@
 
     <!-- Pinned here so EVERY publish lands in the Release folder, however it is invoked.
          Without it a bare `dotnet publish` uses the SDK default and buries the output in
-         bin\x64\Release\win-x64\publish\ — a nested copy of the folder it just built. -->
-    <PublishDir>bin\$(Platform)\$(Configuration)\</PublishDir>
+         bin\Release\win-x64\publish\ — a nested copy of the folder it just built.
+
+         No $(Platform) segment: the two Append* settings above already strip the TFM
+         and RID subfolders, so `dotnet build` lands in bin\Debug and bin\Release.
+         Including Platform here sent publish to bin\x64\Release instead — a fourth
+         folder nothing else in the project ever looked at. -->
+    <PublishDir>bin\$(Configuration)\</PublishDir>
   
     <!--
       Ship English resources only. Note this handles .NET satellite assemblies but NOT
