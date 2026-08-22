@@ -18,7 +18,6 @@ namespace VideoDirector.Views
         public DirectorViewModel ViewModel { get; } = new DirectorViewModel();
         private VideoPlaybackEngine _playbackEngine;
         private DispatcherTimer _inactivityTimer;
-        private double _preRecordSpeed = 1.0;
 
         // Proportional timeline bar (§7E/F): px-per-second scale + the playhead line & handle.
         private double _timelinePxPerSec;

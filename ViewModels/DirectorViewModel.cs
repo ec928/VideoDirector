@@ -110,13 +110,6 @@ namespace VideoDirector.ViewModels
             private set => SetProperty(ref _isTelemetryVisible, value);
         }
 
-        private bool _isRecordingMotion;
-        public bool IsRecordingMotion
-        {
-            get => _isRecordingMotion;
-            set => SetProperty(ref _isRecordingMotion, value);
-        }
-
         // The inspector/storyboard panel auto-shows while editing a clip; otherwise it shows only
         // if the user has PINNED it open. So editing always has its controls to hand, and arranging
         // stays uncluttered. The transport's storyboard toggle is the pin.
