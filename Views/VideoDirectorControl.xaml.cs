@@ -1710,6 +1710,79 @@ namespace VideoDirector.Views
         }
 
         /// <summary>
+        /// About VideoDirector: what it is, which build you are running, and how to report a
+        /// problem.
+        ///
+        /// The feedback route lives here now. It was a "?" on the transport pill, which is where
+        /// people look for help with PLAYBACK - not for a way to file a bug - and it sat among the
+        /// controls most likely to be hidden, since the pill auto-hides. About is where anyone
+        /// looks for a version number and a contact route, and the toolbar never hides.
+        /// </summary>
+        private async void About_Click(object? sender, RoutedEventArgs e)
+        {
+            var panel = new StackPanel { Spacing = 12 };
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "A multi-track video sequencer and compositor for Windows.",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Version " + AppVersion(),
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                FontSize = 12
+            });
+
+            var report = new HyperlinkButton { Content = "Report a problem or suggest a feature", Padding = new Thickness(0) };
+            report.Click += ReportProblem_Click;
+            panel.Children.Add(report);
+
+            var repo = new HyperlinkButton
+            {
+                Content = "github.com/ec928/VideoDirector",
+                NavigateUri = new Uri("https://github.com/ec928/VideoDirector"),
+                Padding = new Thickness(0)
+            };
+            panel.Children.Add(repo);
+
+            var dialog = new ContentDialog
+            {
+                Title = "About VideoDirector",
+                Content = panel,
+                CloseButtonText = "Close",
+                XamlRoot = this.XamlRoot     // required, or ContentDialog throws in WinUI 3
+            };
+
+            try { await dialog.ShowAsync(); }
+            catch (Exception ex)
+            {
+                // Another dialog already open, or no XamlRoot yet. Never worth crashing over.
+                System.Diagnostics.Debug.WriteLine($"[About] Could not show dialog: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// The informational version if the build stamped one, else the assembly version. Read from
+        /// the assembly rather than hardcoded so it cannot drift from what was actually shipped.
+        /// </summary>
+        private static string AppVersion()
+        {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            var info = System.Reflection.CustomAttributeExtensions
+                .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(asm)
+                ?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(info))
+            {
+                // Strip the +<commit> suffix the SDK appends when SourceLink is on.
+                int plus = info.IndexOf('+');
+                return plus > 0 ? info.Substring(0, plus) : info;
+            }
+            return asm.GetName().Version?.ToString() ?? "unknown";
+        }
+
+        /// <summary>
         /// Opens the project's issue tracker in the default browser. Most users reach the app
         /// through a Releases zip and never see the repository, so the feedback route has to be
         /// reachable from inside the app to be used at all.

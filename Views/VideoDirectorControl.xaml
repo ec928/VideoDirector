@@ -376,9 +376,6 @@
                             <ToggleButton x:Name="StoryboardButton" IsChecked="{x:Bind ViewModel.IsStoryboardPinned, Mode=TwoWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Pin the Properties panel open (it opens automatically while editing)">
                                 <SymbolIcon Symbol="List" />
                             </ToggleButton>
-                            <Button x:Name="ReportProblemButton" Click="ReportProblem_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Report a problem or suggest a feature (opens GitHub in your browser)">
-                                <SymbolIcon Symbol="Help" />
-                            </Button>
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
@@ -414,6 +411,13 @@
 
                     <!-- Right: Project, View, and Export -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <!-- About: also the home for feedback, which used to be a lone "?" on the
+                             transport pill - a place people look for playback help, not for a way
+                             to report a bug. -->
+                        <Button x:Name="AboutButton" Click="About_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="About VideoDirector">
+                            <FontIcon Glyph="&#xE946;" FontSize="14" />
+                        </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
                         <!-- Project -->
                         <Button Click="Clear_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="New project">
                             <SymbolIcon Symbol="Document" />
