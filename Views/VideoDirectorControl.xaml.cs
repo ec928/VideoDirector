@@ -1717,42 +1717,108 @@ namespace VideoDirector.Views
         /// people look for help with PLAYBACK - not for a way to file a bug - and it sat among the
         /// controls most likely to be hidden, since the pill auto-hides. About is where anyone
         /// looks for a version number and a contact route, and the toolbar never hides.
+        ///
+        /// Laid out to match TypoZen's About: an accent-coloured wordmark, the version beneath it
+        /// in tabular figures, a one-line description, a rule, then short titled sections of
+        /// bullets with the key term of each emphasised.
         /// </summary>
         private async void About_Click(object? sender, RoutedEventArgs e)
         {
-            var panel = new StackPanel { Spacing = 12 };
+            var body = new StackPanel { Spacing = 0 };
 
-            panel.Children.Add(new TextBlock
+            // ---- brand block
+            body.Children.Add(new TextBlock
             {
-                Text = "A multi-track video sequencer and compositor for Windows.",
-                TextWrapping = TextWrapping.Wrap
+                Text = "VideoDirector",
+                FontSize = 24,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                CharacterSpacing = -20,          // 1/1000 em; the -0.02em of the CSS
+                Foreground = ThemeBrush("AccentTextFillColorPrimaryBrush", "TextFillColorPrimaryBrush")
             });
-
-            panel.Children.Add(new TextBlock
+            body.Children.Add(new TextBlock
             {
                 Text = "Version " + AppVersion(),
-                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                FontSize = 12
+                FontSize = 12,
+                Margin = new Thickness(0, 3, 0, 0),
+                Foreground = ThemeBrush("TextFillColorSecondaryBrush", null)
+            });
+            body.Children.Add(new TextBlock
+            {
+                Text = "A multi-track video sequencer and compositor for Windows — cut, compose, "
+                     + "and animate stills and video on one timeline.",
+                FontSize = 13,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 0),
+                Foreground = ThemeBrush("TextFillColorSecondaryBrush", null)
+            });
+            body.Children.Add(new Border
+            {
+                Height = 1,
+                Margin = new Thickness(0, 14, 0, 0),
+                Background = ThemeBrush("SurfaceStrokeColorDefaultBrush", null)
             });
 
+            // ---- sections. Claims kept to what the app actually does; see the export note.
+            AddSection(body, "Compose", new[]
+            {
+                ("Four equal tracks", "composited by Z-order — no privileged “spine”, and any clip on any track can be a picture-in-picture."),
+                ("Free placement", "with independent size, position and opacity, plus solid, soft or film-strip borders."),
+                ("Stills as first-class clips", "— images hold for a set duration and advance story time by wall clock, so mixed photo and video sequences stay in sync."),
+            });
+
+            AddSection(body, "Motion", new[]
+            {
+                ("Ken Burns pan and zoom", "on any clip, video or still, from Start, optional Mid, and End framing keyframes with easing curves."),
+                ("Frame it on the canvas", "— drag the keyframe rectangles directly, or select one and scroll to resize it about its centre."),
+                ("Source-resolution stills", "so a slow push-in resamples real pixels instead of a flattened screen-sized copy."),
+            });
+
+            AddSection(body, "Edit", new[]
+            {
+                ("Three strict modes", "— Playback, Arrange and Edit — so canvas manipulation never collides with scrubbing or review."),
+                ("Trim, split, retime", "with variable speed including freeze-frames, cross-track drag, 8px magnetic snapping and unlimited undo."),
+                ("Loop a region", "by dragging across the time ruler."),
+            });
+
+            AddSection(body, "Screen and share", new[]
+            {
+                ("Cinematic mode", "— true full screen with the editor chrome fading away and returning on any mouse movement."),
+                ("Export to MP4", "at 1080p. Motion, per-clip speed and transitions are preview-only for now and are not yet baked into the render."),
+            });
+
+            // ---- footer
+            var links = new StackPanel { Spacing = 0, Margin = new Thickness(0, 14, 0, 0) };
             var report = new HyperlinkButton { Content = "Report a problem or suggest a feature", Padding = new Thickness(0) };
             report.Click += ReportProblem_Click;
-            panel.Children.Add(report);
-
-            var repo = new HyperlinkButton
+            links.Children.Add(report);
+            links.Children.Add(new HyperlinkButton
             {
                 Content = "github.com/ec928/VideoDirector",
                 NavigateUri = new Uri("https://github.com/ec928/VideoDirector"),
                 Padding = new Thickness(0)
-            };
-            panel.Children.Add(repo);
+            });
+            body.Children.Add(links);
+
+            body.Children.Add(new TextBlock
+            {
+                Text = "MIT licensed. Portable and self-contained — no installer, no registry.",
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 6, 0, 0),
+                Foreground = ThemeBrush("TextFillColorSecondaryBrush", null)
+            });
 
             var dialog = new ContentDialog
             {
                 Title = "About VideoDirector",
-                Content = panel,
+                Content = new ScrollViewer
+                {
+                    Content = body,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    MaxHeight = 460                 // the panel scrolls rather than the window growing
+                },
                 CloseButtonText = "Close",
-                XamlRoot = this.XamlRoot     // required, or ContentDialog throws in WinUI 3
+                XamlRoot = this.XamlRoot            // required, or ContentDialog throws in WinUI 3
             };
 
             try { await dialog.ShowAsync(); }
@@ -1761,6 +1827,55 @@ namespace VideoDirector.Views
                 // Another dialog already open, or no XamlRoot yet. Never worth crashing over.
                 System.Diagnostics.Debug.WriteLine($"[About] Could not show dialog: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// A titled group of bullets. Each bullet leads with its key term in the body colour and
+        /// continues in the muted one, which is what gives the list its shape at a glance.
+        /// </summary>
+        private void AddSection(Panel host, string title, (string lead, string rest)[] points)
+        {
+            host.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Margin = new Thickness(0, 16, 0, 6)
+            });
+
+            foreach (var (lead, rest) in points)
+            {
+                var line = new TextBlock
+                {
+                    FontSize = 13,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(12, 0, 0, 5),
+                    Foreground = ThemeBrush("TextFillColorSecondaryBrush", null)
+                };
+                line.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run
+                {
+                    Text = "•  " + lead,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = ThemeBrush("TextFillColorPrimaryBrush", null)
+                });
+                line.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = " " + rest });
+                host.Children.Add(line);
+            }
+        }
+
+        /// <summary>
+        /// A theme brush by key, falling back to a second key and then to null (inherit) rather
+        /// than throwing. Resource keys differ between Windows App SDK versions, and an About box
+        /// is not worth an unhandled exception.
+        /// </summary>
+        private static Microsoft.UI.Xaml.Media.Brush? ThemeBrush(string key, string? fallbackKey)
+        {
+            var res = Application.Current?.Resources;
+            if (res == null) return null;
+            if (res.TryGetValue(key, out var v) && v is Microsoft.UI.Xaml.Media.Brush b) return b;
+            if (fallbackKey != null && res.TryGetValue(fallbackKey, out var v2)
+                && v2 is Microsoft.UI.Xaml.Media.Brush b2) return b2;
+            return null;
         }
 
         /// <summary>
