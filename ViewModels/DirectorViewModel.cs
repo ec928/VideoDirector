@@ -79,15 +79,12 @@ namespace VideoDirector.ViewModels
             {
                 if (SetProperty(ref _isPlaying, value))
                 {
-                    OnPropertyChanged(nameof(IsDockVisible));
                     OnPropertyChanged(nameof(ModeLabel));
                     OnPropertyChanged(nameof(IsStoryboardVisible));
                     if (!value) IsControlsVisible = true;
                 }
             }
         }
-
-        public bool IsDockVisible => IsStoryboardVisible && !_isPlaying;
 
         // CINEMATIC MODE — screening, with nothing on screen but the picture.
         //
@@ -106,7 +103,6 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _isCinematicMode, value))
                 {
                     OnPropertyChanged(nameof(IsStoryboardVisible));
-                    OnPropertyChanged(nameof(IsDockVisible));
                     OnPropertyChanged(nameof(IsTrackDockVisible));
                     // Show the pill on the way in and on the way out: entering, so the exit control
                     // is visible rather than having to be hunted for; leaving, so the editor does
@@ -133,32 +129,39 @@ namespace VideoDirector.ViewModels
             set => SetProperty(ref _isAutoPlayEnabled, value);
         }
 
+        // Its own control, at last. This used to be driven by the panel pin, so the only way to
+        // read the geometry HUD was to pin the inspector open - two unrelated things on one button,
+        // and the tooltip mentioned only the other one.
         private bool _isTelemetryVisible = false;
         public bool IsTelemetryVisible
         {
             get => _isTelemetryVisible;
-            private set => SetProperty(ref _isTelemetryVisible, value);
+            set => SetProperty(ref _isTelemetryVisible, value);
         }
 
-        // The inspector/storyboard panel auto-shows while editing a clip; otherwise it shows only
-        // if the user has PINNED it open. So editing always has its controls to hand, and arranging
-        // stays uncluttered. The transport's storyboard toggle is the pin.
-        private bool _isStoryboardPinned;
-        public bool IsStoryboardPinned
+        // Whether the user WANTS the inspector, as distinct from whether there is anything to put
+        // in it.
+        //
+        // This was a PIN - it could only ever add visibility, because the test was
+        // (pinned || HasSelection). With a clip selected HasSelection was already true, so the
+        // button was inert exactly when you would reach for it: you could not close the panel.
+        // Now it is a straight toggle, and selection decides the panel's CONTENT rather than its
+        // existence.
+        //
+        // Defaults open so selecting a clip behaves as it always has; closing is the new part.
+        private bool _isInspectorOpen = true;
+        public bool IsInspectorOpen
         {
-            get => _isStoryboardPinned;
+            get => _isInspectorOpen;
             set
             {
-                if (SetProperty(ref _isStoryboardPinned, value))
-                {
+                if (SetProperty(ref _isInspectorOpen, value))
                     OnPropertyChanged(nameof(IsStoryboardVisible));
-                    OnPropertyChanged(nameof(IsDockVisible));
-                    UpdateTelemetryVisibility();
-                }
             }
         }
 
-        public bool IsStoryboardVisible => !_isCinematicMode && !_isPlaying && (_isStoryboardPinned || HasSelection);
+        public bool IsStoryboardVisible =>
+            !_isCinematicMode && !_isPlaying && _isInspectorOpen && HasSelection;
 
         private bool _isControlsVisible = true;
         public bool IsControlsVisible
@@ -171,12 +174,6 @@ namespace VideoDirector.ViewModels
             }
         }
 
-        private void UpdateTelemetryVisibility()
-        {
-            // Telemetry is a debug HUD — only when the panel is deliberately pinned, not on every
-            // edit (that HUD was the "wall of text" that used to clutter editing).
-            IsTelemetryVisible = _isStoryboardPinned;
-        }
 
         private double _playbackSpeed = 1.0;
         public double PlaybackSpeed
@@ -344,7 +341,6 @@ namespace VideoDirector.ViewModels
                 {
                     OnPropertyChanged(nameof(ModeLabel));
                     OnPropertyChanged(nameof(IsStoryboardVisible)); // panel follows edit mode
-                    OnPropertyChanged(nameof(IsDockVisible));
                 }
             }
         }

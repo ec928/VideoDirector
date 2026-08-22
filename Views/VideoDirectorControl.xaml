@@ -79,13 +79,6 @@
                            Visibility="Collapsed" VerticalAlignment="Center" Margin="16,10,0,10"/>
               </StackPanel>
 
-                <!-- Hint shown when nothing is selected (clip lists now live in the bottom dock). -->
-                <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" Padding="24"
-                            Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
-                    <FontIcon Glyph="&#xE7C9;" FontSize="40" Foreground="{ThemeResource TextFillColorDisabledBrush}"/>
-                    <TextBlock Text="Select a clip in the timeline below to edit it." TextWrapping="Wrap" TextAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorDisabledBrush}" />
-                </StackPanel>
-
                 <!-- Unified Inspector: one layout for every track. Binds to SelectedClip (whichever
                      track is selected); track-specific rows toggle via IsTrack1Selected /
                      IsOverlaySelected so Track 1 and Track 2+ share an identical skeleton. -->
@@ -373,8 +366,14 @@
                             <ComboBox SelectedItem="{x:Bind ViewModel.PlaybackSpeed, Mode=TwoWay}"
                                       ItemsSource="{x:Bind ViewModel.AvailableSpeeds}"
                                       Width="85" Height="28" MinHeight="28" FontSize="11" Padding="8,0" VerticalAlignment="Center" ToolTipService.ToolTip="Master playback speed (affects all tracks)" />
-                            <ToggleButton x:Name="StoryboardButton" IsChecked="{x:Bind ViewModel.IsStoryboardPinned, Mode=TwoWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Pin the Properties panel open (it opens automatically while editing)">
+                            <!-- Show/hide, not a pin. Disabled with nothing selected, because a
+                                 panel with no clip to describe has nothing to show either way -
+                                 better to say so than to look inert. -->
+                            <ToggleButton x:Name="InspectorButton" IsChecked="{x:Bind ViewModel.IsInspectorOpen, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Show or hide the Properties panel for the selected clip">
                                 <SymbolIcon Symbol="List" />
+                            </ToggleButton>
+                            <ToggleButton x:Name="TelemetryButton" IsChecked="{x:Bind ViewModel.IsTelemetryVisible, Mode=TwoWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Show the telemetry readout (box, motion, and which part of the source is on screen)">
+                                <FontIcon Glyph="&#xE9D9;" FontSize="14" />
                             </ToggleButton>
                         </StackPanel>
                     </StackPanel>
