@@ -568,7 +568,9 @@ namespace VideoDirector.ViewModels
 
         public async Task AddOverlayAsync(string filePath, TimeSpan startTime, int trackIndex = 0)
         {
-            TimeSpan duration = TimeSpan.FromSeconds(5);
+            // Images have no duration of their own, so this default IS the hold. Ten seconds is
+            // enough for a Ken Burns move to read; five was too short to see one land.
+            TimeSpan duration = TimeSpan.FromSeconds(10);
             double sourceAspect = 0;
             Microsoft.UI.Xaml.Media.Imaging.BitmapImage? thumbnail = null;
             try

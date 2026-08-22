@@ -277,7 +277,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <local:TimelineRangeSlider x:Name="ClipScrubber" Grid.Column="0"
-                                               Maximum="{Binding SelectedClip.SourceDurationSeconds, FallbackValue=1.0}"
+                                               Maximum="{Binding SelectedClip.ScrubMaxSeconds, FallbackValue=1.0}"
                                                Position="{x:Bind ViewModel.CurrentOperationTimeSeconds, Mode=TwoWay}"
                                                TrimStart="{Binding SelectedClip.VideoStartTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"
                                                TrimEnd="{Binding SelectedClip.VideoEndTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"

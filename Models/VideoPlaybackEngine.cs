@@ -918,9 +918,22 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                     // A still with a baked frame renders as a bitmap; everything else is video.
                     // The render mode is decided once, here, and passed down — the transform path
                     // differs between the two and must not have to guess which surface is live.
-                    var mode = RenderModeFor(_activeOverlay[i]);
-                    SetOverlayRender(i, mode, _activeOverlay[i]);
-                    ApplyOverlayTransform(i, _activeOverlay[i], currentStoryTime, mode);
+                    var clip = _activeOverlay[i];
+                    var mode = RenderModeFor(clip);
+
+                    // ...except that "everything else is video" is not true of an image whose bake
+                    // has not landed yet. Falling back to the video surface for one shows whatever
+                    // the previous clip left in that element — the wrong picture, confidently
+                    // presented. Nothing is the honest answer for the frame or two it takes.
+                    if (mode == OverlayRender.Video && clip.IsImage)
+                    {
+                        _ = EnsureStillFrameAsync(clip);
+                        SetOverlayRender(i, OverlayRender.Hidden, clip);
+                        continue;
+                    }
+
+                    SetOverlayRender(i, mode, clip);
+                    ApplyOverlayTransform(i, clip, currentStoryTime, mode);
                 }
                 else SetOverlayRender(i, OverlayRender.Hidden, null);
             }
@@ -1062,6 +1075,19 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             {
                 player.Pause();
                 _overlayAspect[slot] = overlay.SourceAspect;
+                ApplyOverlayBox(slot, overlay, false);
+                return;
+            }
+
+            // An IMAGE never goes near the decoder, baked or not. It used to fall through to the
+            // block below and set player.Source to a .jpg, which Media Foundation cannot open — so
+            // the element kept presenting the PREVIOUS clip's last decoded frame and the timeline
+            // appeared to show the wrong clip entirely. The bake above is already in flight; until
+            // it lands the slot simply shows nothing (see EvaluateOverlays).
+            if (overlay.IsImage)
+            {
+                player.Pause();
+                if (overlay.SourceAspect > 0) _overlayAspect[slot] = overlay.SourceAspect;
                 ApplyOverlayBox(slot, overlay, false);
                 return;
             }

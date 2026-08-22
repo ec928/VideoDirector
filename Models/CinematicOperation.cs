@@ -41,6 +41,25 @@ namespace VideoDirector.Models
             }
         }
 
+        // A still that has NO decoder path at all. Media Foundation will not open a .jpg, so an
+        // image can never render on the video surface — unlike a speed-0 video snapshot, which
+        // can, because its file really does open and park on a frame. Several paths need that
+        // distinction and were making do with IsStill or PlaybackSpeed, both of which conflate the
+        // two kinds of still.
+        [JsonIgnore]
+        public bool IsImage => !string.IsNullOrWhiteSpace(_filePath) && IsImagePath(_filePath);
+
+        // What the per-clip scrubber in Edit should span.
+        //
+        // A video (including a speed-0 snapshot) scrubs its SOURCE, which is how you pick the frame
+        // to freeze. An image has no source to roam: its meaningful axis is the hold it occupies on
+        // the timeline, which is what the Edit preview animates the Ken Burns over. Binding the
+        // scrubber to SourceDuration gave every image a 0-5s range invented by the loader.
+        [JsonIgnore]
+        public double ScrubMaxSeconds => IsImage
+            ? Math.Max(MinClipSeconds, _opDuration.TotalSeconds)
+            : SourceDurationSeconds;
+
         private static bool IsImagePath(string path)
         {
             var ext = System.IO.Path.GetExtension(path);
@@ -171,6 +190,7 @@ namespace VideoDirector.Models
                 if (SetProperty(ref _sourceDuration, value))
                 {
                     OnPropertyChanged(nameof(SourceDurationSeconds));
+                    OnPropertyChanged(nameof(ScrubMaxSeconds));
                     // Learning the true source length (e.g. backfilled after the media opens) can
                     // retroactively invalidate a trim; re-clamp so the window stays inside it.
                     if (!_isUpdatingTiming)
@@ -234,6 +254,7 @@ namespace VideoDirector.Models
                                 {
                                     _opDuration = TimeSpan.FromSeconds(actual);
                                     OnPropertyChanged(nameof(OpDuration));
+                    OnPropertyChanged(nameof(ScrubMaxSeconds));
                                 }
                             }
                             else
@@ -318,6 +339,7 @@ namespace VideoDirector.Models
             {
                 _opDuration = TimeSpan.FromSeconds(dur);
                 OnPropertyChanged(nameof(OpDuration));
+                    OnPropertyChanged(nameof(ScrubMaxSeconds));
             }
         }
 
@@ -340,6 +362,7 @@ namespace VideoDirector.Models
                 {
                     _opDuration = TimeSpan.FromSeconds(d);
                     OnPropertyChanged(nameof(OpDuration));
+                    OnPropertyChanged(nameof(ScrubMaxSeconds));
                 }
                 OnPropertyChanged(nameof(HasModifications));
                 return;
@@ -360,6 +383,7 @@ namespace VideoDirector.Models
             {
                 _opDuration = TimeSpan.FromSeconds(actual);
                 OnPropertyChanged(nameof(OpDuration));
+                    OnPropertyChanged(nameof(ScrubMaxSeconds));
             }
             OnPropertyChanged(nameof(HasModifications));
         }
