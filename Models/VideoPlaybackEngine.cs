@@ -1388,37 +1388,47 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             PlaceSurface(surfaces.Video, -padX, -padY, contentW, contentH);
             PlaceSurface(surfaces.Still, -padX, -padY, contentW, contentH);
 
-            // Apply border styling
+            // BORDERS ARE DRAWN AS A CHILD, never as the Grid's own border.
+            //
+            // Grid.BorderBrush renders BENEATH the grid's children, and the video surface fills -
+            // usually overflows - the grid. So a Solid border was painted and then covered, and the
+            // only parts that survived were slivers where the picture happened not to reach: one
+            // edge here, two there, apparently at random. Soft escaped it by accident, because its
+            // CornerRadius clips the children to a rounded rectangle and cuts the corners away.
+            // FilmStrip always worked because it alone was a child Rectangle.
+            //
+            // All three now take that same route, so they are all on top of the picture and all
+            // four sides are drawn.
+            grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
+
             if (overlay.BorderType == BorderType.None || editMode)
             {
-                grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
                 grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                HideFilmStrip(grid);
+                HideBorderRect(grid);
             }
             else
             {
-                if (overlay.BorderType == BorderType.FilmStrip)
+                var c = overlay.BorderColor;
+                switch (overlay.BorderType)
                 {
-                    grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
-                    grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                    ShowFilmStrip(grid, overlay.BorderColor, overlay.BorderThickness);
-                }
-                else
-                {
-                    HideFilmStrip(grid);
-                    grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(overlay.BorderThickness);
-                    
-                    if (overlay.BorderType == BorderType.Soft)
-                    {
-                        var c = overlay.BorderColor;
-                        grid.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(128, c.R, c.G, c.B));
-                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(16);
-                    }
-                    else // Solid
-                    {
-                        grid.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(overlay.BorderColor);
+                    case BorderType.FilmStrip:
                         grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                    }
+                        ShowBorderRect(grid, c, overlay.BorderThickness,
+                                       new Microsoft.UI.Xaml.Media.DoubleCollection { 2, 1, 2, 1 }, 0);
+                        break;
+
+                    case BorderType.Soft:
+                        // The rounded corner stays on the grid as well, so the PICTURE is rounded
+                        // too rather than a rounded outline sitting on a square image.
+                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(16);
+                        ShowBorderRect(grid, Windows.UI.Color.FromArgb(128, c.R, c.G, c.B),
+                                       overlay.BorderThickness, null, 16);
+                        break;
+
+                    default:
+                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
+                        ShowBorderRect(grid, c, overlay.BorderThickness, null, 0);
+                        break;
                 }
             }
 
@@ -1449,40 +1459,50 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(el, top);
         }
 
-        private void HideFilmStrip(Microsoft.UI.Xaml.Controls.Grid grid)
+        // The single border overlay for a clip, whatever its style. Reused rather than recreated,
+        // because this runs from the per-frame render path.
+        private static Microsoft.UI.Xaml.Shapes.Rectangle GetBorderRect(Microsoft.UI.Xaml.Controls.Grid grid, bool create)
         {
             foreach (var child in grid.Children)
+                if (child is Microsoft.UI.Xaml.Shapes.Rectangle r && r.Name == "ClipBorderRect")
+                    return r;
+
+            if (!create) return null;
+            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
             {
-                if (child is Microsoft.UI.Xaml.Shapes.Rectangle r && r.Name == "FilmStripRect")
-                {
-                    r.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-                    break;
-                }
-            }
+                Name = "ClipBorderRect",
+                Fill = null,
+                IsHitTestVisible = false
+            };
+            grid.Children.Add(rect);   // last child: on top of the picture
+            return rect;
         }
 
-        private void ShowFilmStrip(Microsoft.UI.Xaml.Controls.Grid grid, Windows.UI.Color color, double thickness)
+        private static void HideBorderRect(Microsoft.UI.Xaml.Controls.Grid grid)
         {
-            Microsoft.UI.Xaml.Shapes.Rectangle dashRect = null;
-            foreach (var child in grid.Children)
-            {
-                if (child is Microsoft.UI.Xaml.Shapes.Rectangle r && r.Name == "FilmStripRect")
-                {
-                    dashRect = r;
-                    break;
-                }
-            }
-            if (dashRect == null)
-            {
-                dashRect = new Microsoft.UI.Xaml.Shapes.Rectangle() { Name = "FilmStripRect" };
-                grid.Children.Add(dashRect);
-            }
-            dashRect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
-            dashRect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
-            dashRect.StrokeThickness = thickness;
-            // A filmstrip-like pattern
-            dashRect.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection() { 2, 1, 2, 1 };
+            var rect = GetBorderRect(grid, create: false);
+            if (rect != null) rect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
         }
+
+        private static void ShowBorderRect(Microsoft.UI.Xaml.Controls.Grid grid, Windows.UI.Color color,
+                                           double thickness,
+                                           Microsoft.UI.Xaml.Media.DoubleCollection dash, double radius)
+        {
+            var rect = GetBorderRect(grid, create: true);
+            if (rect == null) return;
+
+            rect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            rect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+            rect.StrokeThickness = thickness;
+            rect.RadiusX = radius;
+            rect.RadiusY = radius;
+
+            // Null clears the dashes; assigning an empty collection leaves a solid line either way,
+            // but clearing keeps the property honest about what the style is.
+            if (dash == null) rect.ClearValue(Microsoft.UI.Xaml.Shapes.Shape.StrokeDashArrayProperty);
+            else rect.StrokeDashArray = dash;
+        }
+
 
         private void SeekAndPlayOverlay(MediaPlayer player, CinematicOperation overlay, TimeSpan currentStoryTime)
         {
