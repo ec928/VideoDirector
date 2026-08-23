@@ -243,14 +243,12 @@ namespace VideoDirector.Views
         {
             if (_contextSlot < 0) return;
             var tag = (sender as FrameworkElement)?.Tag?.ToString();
-            if (double.TryParse(tag, System.Globalization.NumberStyles.Float,
-                                System.Globalization.CultureInfo.InvariantCulture, out double fraction))
-            {
-                PipSizeRequested?.Invoke(this, (_contextSlot, fraction));
-            }
+            if (!string.IsNullOrEmpty(tag)) PipSizeRequested?.Invoke(this, (_contextSlot, tag));
         }
 
-        public event EventHandler<(int slot, double fraction)>? PipSizeRequested;
+        // The preset travels as its tag rather than a number, because "fill" is not a fraction -
+        // it depends on the window's shape, which only the engine knows.
+        public event EventHandler<(int slot, string preset)>? PipSizeRequested;
 
         /// <summary>
         /// A layout applies to the whole composite, so unlike the size presets it carries no slot -

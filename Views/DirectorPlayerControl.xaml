@@ -140,7 +140,11 @@
                           <MenuFlyoutItem Text="Grid" Click="PipLayout_Click" Tag="grid" />
                       </MenuFlyoutSubItem>
                       <MenuFlyoutSubItem Text="Size">
-                          <MenuFlyoutItem Text="Full Screen" Click="PipSize_Click" Tag="1.0" />
+                          <!-- 100%, not "Full Screen": the box is the clip's whole frame, which is
+                               letterboxed inside the window when their shapes differ. Covering the
+                               window instead would mean cropping, and placement fractions are
+                               capped at 1.0, so that is not expressible here. -->
+                          <MenuFlyoutItem Text="100%" Click="PipSize_Click" Tag="1.0" />
                           <MenuFlyoutItem Text="75%" Click="PipSize_Click" Tag="0.75" />
                           <MenuFlyoutItem Text="50%" Click="PipSize_Click" Tag="0.5" />
                           <MenuFlyoutItem Text="33%" Click="PipSize_Click" Tag="0.33" />

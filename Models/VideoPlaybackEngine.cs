@@ -2224,13 +2224,22 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         /// time you changed its size. The centre is only nudged when the new box would hang off the
         /// frame, and full screen re-centres because there is nowhere else for it to be.
         /// </remarks>
-        private void OnPipSizeRequested(object? sender, (int slot, double fraction) e)
+        private void OnPipSizeRequested(object? sender, (int slot, string preset) e)
         {
             if (_mode != EditorMode.Arrange) return;
             var overlay = _activeOverlay[e.slot];
             if (overlay == null) return;
 
-            double f = Math.Clamp(e.fraction, 0.05, 1.0);
+            // 100% means the clip's WHOLE frame: the box is the fit rectangle, so a clip shaped
+            // differently from the window is letterboxed and nothing is cropped. Covering the
+            // window instead would need a fraction above 1.0, and PlacementWidth/Height clamp to
+            // [0.05, 1.0] - so a "fill and crop" preset would silently do nothing here. Relaxing
+            // that cap is a change to the placement model, not a menu entry.
+            if (!double.TryParse(e.preset, System.Globalization.NumberStyles.Float,
+                                 System.Globalization.CultureInfo.InvariantCulture, out double fraction))
+                return;
+
+            double f = Math.Clamp(fraction, 0.05, 1.0);
             overlay.PlacementWidth = f;
             overlay.PlacementHeight = f;
 
