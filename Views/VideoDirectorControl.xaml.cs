@@ -721,7 +721,9 @@ namespace VideoDirector.Views
             if (isGapless)
             {
                 // Live transfer between Track 1 (Spine) and Track 2/3/4 (Overlays)
-                if (_dragIsSpine && p.Y >= RowOvY && ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 1)
+                // Count > 1, not > 0: with a single track there is no upper row to drop onto, and
+                // the clamp below would be Math.Clamp(x, 0, -1), which throws.
+                if (_dragIsSpine && p.Y >= RowOvY && ViewModel.Tracks.Count > 1 && ViewModel.Tracks[0].Clips.Count > 1)
                 {
                     ViewModel.Tracks[0].Clips.Remove(_dragClip);
                     int targetIndex = Math.Clamp((int)((p.Y - RowOvY) / RowPitch), 0, ViewModel.Tracks.Count - 2) + 1;
@@ -729,7 +731,12 @@ namespace VideoDirector.Views
                     double newStart = Math.Max(0, (p.X / _timelinePxPerSec) - _dragGrabOffsetSec);
                     _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
                     targetTrk.Clips.Add(_dragClip);
-                    targetTrk.ResolveOverlaps();
+                    // NO ResolveOverlaps here. This runs on every pointer move, so dragging a clip
+                    // from T1 up to T6 crossed - and permanently rearranged - every track on the
+                    // way. ResolveOverlaps shifts the START TIMES of the clips already on a track
+                    // to make room, and taking the dragged clip away again does not put them back.
+                    // The commit belongs on release, where TimelineBar_PointerReleased already
+                    // does it once, for the track the clip actually landed on.
                     _dragIsSpine = false;
                 }
                 else if (!_dragIsSpine && p.Y < RowOvY && ViewModel.Tracks.Count > 0)
@@ -838,6 +845,7 @@ namespace VideoDirector.Views
                     }
                     else
                     {
+                        InsertBeforeIfDroppedOnFrontHalf(track, _dragClip);
                         track?.ResolveOverlaps();
                         _playbackEngine?.RefreshComposite();
                     }
@@ -1199,6 +1207,34 @@ namespace VideoDirector.Views
             return best;
         }
 
+        // Dropping a clip onto the FRONT half of another means "put me before this", not "find me
+        // a gap after it". Without this there was no way to move a clip in front of one that
+        // starts at 0: ResolveOverlaps sorts by start time, the dropped clip sorted second, and it
+        // got pushed out to the far end. The only route was to shuffle the other clip out of the
+        // way first and then back.
+        //
+        // One tick earlier is enough to win the sort; ResolveOverlaps then pushes the other clip
+        // right, which is what "insert before" means on a timeline.
+        private static void InsertBeforeIfDroppedOnFrontHalf(Models.TimelineTrack track,
+                                                             CinematicOperation moving)
+        {
+            if (track == null || moving == null) return;
+
+            long start = moving.StartTime.Ticks;
+            foreach (var other in track.Clips)
+            {
+                if (ReferenceEquals(other, moving)) continue;
+
+                long os = other.StartTime.Ticks;
+                long oe = os + other.OpDuration.Ticks;
+                if (start <= os || start >= oe) continue; // did not land inside this clip
+
+                if (start - os < (oe - os) / 2)
+                    moving.StartTime = TimeSpan.FromTicks(Math.Max(0, os - 1));
+                return;
+            }
+        }
+
         private double ApplyClipSnapping(double desiredStartSec, double durSec, CinematicOperation ignoreClip, Models.TimelineTrack targetTrack)
         {
             if (ViewModel == null || targetTrack == null || !targetTrack.IsSnappingEnabled || _timelinePxPerSec <= 0) return desiredStartSec;
@@ -1306,7 +1342,9 @@ namespace VideoDirector.Views
 
             if (trackChanged)
             {
-                target.ResolveOverlaps();
+                // Deliberately no ResolveOverlaps: see the note in the gapless branch above. The
+                // clip follows the cursor between rows so you can see where it is going, but no
+                // track it merely passes over is rewritten. Release commits.
                 BuildTimelineBar();
                 _playbackEngine?.RefreshComposite();
             }
@@ -1966,10 +2004,20 @@ namespace VideoDirector.Views
         }
 
 
-        private async void Save_Click(object? sender, RoutedEventArgs e)
+        private async void Save_Click(object? sender, RoutedEventArgs e) => await SaveProjectAsync();
+
+        /// <summary>Does the project hold work that closing would destroy?</summary>
+        public bool HasUnsavedChanges => ViewModel != null && ViewModel.HasUnsavedChanges;
+
+        /// <summary>
+        /// Save through the picker. Returns false if the user backed out, which the caller needs
+        /// in order NOT to close the window on a save that never happened.
+        /// </summary>
+        public async Task<bool> SaveProjectAsync()
         {
             var savePicker = new FileSavePicker();
             var window = MainWindow.Instance;
+            if (window == null) return false;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             WinRT.Interop.InitializeWithWindow.Initialize(savePicker, hwnd);
 
@@ -1978,13 +2026,35 @@ namespace VideoDirector.Views
             savePicker.SuggestedFileName = "NewSequence";
 
             StorageFile file = await savePicker.PickSaveFileAsync();
-            if (file != null)
+            if (file == null) return false;
+
+            // Any clip still holding pre-normalisation pixel marks has to be converted before
+            // the file claims the current schema.
+            _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
+            await ViewModel.SaveAsync(file);
+            ViewModel.MarkSaved();
+            return true;
+        }
+
+        /// <summary>Save / Don't save / Cancel, asked on the way out.</summary>
+        public async Task<UnsavedChoice> ConfirmUnsavedAsync()
+        {
+            var dialog = new ContentDialog
             {
-                // Any clip still holding pre-normalisation pixel marks has to be converted before
-                // the file claims the current schema.
-                _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
-                await ViewModel.SaveAsync(file);
-            }
+                Title = "Save changes before closing?",
+                Content = "This project has changes that have not been saved. "
+                        + "Closing now loses them for good - undo does not survive a restart.",
+                PrimaryButtonText = "Save",
+                SecondaryButtonText = "Don't save",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary) return UnsavedChoice.Save;
+            if (result == ContentDialogResult.Secondary) return UnsavedChoice.Discard;
+            return UnsavedChoice.Cancel;
         }
 
         private async void Load_Click(object? sender, RoutedEventArgs e)
@@ -2038,6 +2108,40 @@ namespace VideoDirector.Views
             }
 
             ViewModel.Clear();
+        }
+
+        // Add and Remove act on the TOP of the stack, never the middle. The timeline bar and the
+        // composite both rebuild off Tracks.CollectionChanged (wired in the constructor), so
+        // neither handler needs to refresh anything itself.
+        private void AddTrack_Click(object? sender, RoutedEventArgs e)
+        {
+            ViewModel.AddTopTrack();
+        }
+
+        private async void RemoveTrack_Click(object? sender, RoutedEventArgs e)
+        {
+            if (!ViewModel.CanRemoveTrack) return;
+
+            // Removing a populated track destroys those clips. Undo gets them back, but that is
+            // not obvious in the moment, so say what is about to go and how many.
+            int clips = ViewModel.TopTrackClipCount;
+            if (clips > 0)
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "Remove Track " + ViewModel.Tracks.Count + "?",
+                    Content = clips == 1
+                        ? "That track has 1 clip on it, which will be removed with it. You can undo with Ctrl+Z."
+                        : "That track has " + clips + " clips on it, which will be removed with it. You can undo with Ctrl+Z.",
+                    PrimaryButtonText = "Remove",
+                    CloseButtonText = "Cancel",
+                    DefaultButton = ContentDialogButton.Close,
+                    XamlRoot = this.XamlRoot
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            }
+
+            ViewModel.RemoveTopTrack();
         }
 
         private async void Export_Click(object? sender, RoutedEventArgs e)
@@ -2325,8 +2429,10 @@ namespace VideoDirector.Views
         // it) is the spine; the rows below are the overlay tracks.
         private string TrackNameAt(double y)
         {
-            if (y < RowOvY) return "Track 1";
-            int i = Math.Clamp((int)((y - RowOvY) / RowPitch), 0, Math.Max(0, ViewModel.Tracks.Count - 2));
+            // The Count check matters at a single track: there is no row below the spine, so any
+            // y belongs to Track 1. Without it this named a Track 2 that does not exist.
+            if (y < RowOvY || ViewModel.Tracks.Count < 2) return "Track 1";
+            int i = Math.Clamp((int)((y - RowOvY) / RowPitch), 0, ViewModel.Tracks.Count - 2);
             return "Track " + (i + 2);
         }
 

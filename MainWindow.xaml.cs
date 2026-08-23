@@ -54,11 +54,38 @@ namespace VideoDirector
 
             ConfigureWindow();
 
+            // Closed fires when the window is already going away - too late to keep anything. The
+            // AppWindow.Closing event is the one that can still be cancelled.
+            _appWindow.Closing += AppWindow_Closing;
+
             this.Closed += (s, e) =>
             {
                 Instance = null!;
                 SaveAllSettings();
             };
+        }
+
+        // Set once the user has answered the prompt, so the second pass straight through.
+        private bool _closeConfirmed;
+
+        private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
+        {
+            if (_closeConfirmed) return;
+
+            var control = DirectorControl;
+            if (control == null || !control.HasUnsavedChanges) return;
+
+            // Cancel BEFORE the first await. The event args are only honoured while the handler is
+            // still running synchronously; awaiting first lets the close through and the dialog
+            // would then be asked of a window that no longer exists.
+            args.Cancel = true;
+
+            var choice = await control.ConfirmUnsavedAsync();
+            if (choice == Views.UnsavedChoice.Cancel) return;
+            if (choice == Views.UnsavedChoice.Save && !await control.SaveProjectAsync()) return;
+
+            _closeConfirmed = true;
+            this.Close();
         }
 
         private void RootGrid_PointerMoved(object? sender, PointerRoutedEventArgs e)

@@ -10,11 +10,22 @@ namespace VideoDirector.Views
     {
         public static readonly Color Spine = C(0x3B, 0x82, 0xF6);   // blue
 
+        // Chosen by hue spacing against the four already in saved projects (amber 38 deg,
+        // emerald 160, blue 217, violet 258). The two widest gaps are yellow-green and
+        // magenta-red, so lime and rose go there. Cyan looks like the obvious pick and is
+        // wrong: at 187 deg it wedges between emerald and blue, 27 and 30 deg from each,
+        // putting three near-neighbours in a row.
+        //
+        // Weakest pair for red-green colour blindness is amber vs lime, 46 deg apart, which
+        // is the best available without moving colours that saved projects already use. The
+        // T1..T6 badges mean colour is never the only channel.
         private static readonly Color[] Overlays =
         {
             C(0xF5, 0x9E, 0x0B),   // Track 2 — amber
             C(0x10, 0xB9, 0x81),   // Track 3 — emerald
             C(0xA7, 0x8B, 0xFA),   // Track 4 — violet
+            C(0x84, 0xCC, 0x16),   // Track 5 - lime
+            C(0xF4, 0x3F, 0x5E),   // Track 6 - rose
         };
 
         public static Color Overlay(int index) => Overlays[((index % Overlays.Length) + Overlays.Length) % Overlays.Length];

@@ -92,6 +92,7 @@ namespace VideoDirector.Models
             if (overlay != null)
             {
                 _playerControl.UpdateBorderMenuState(overlay.BorderType, overlay.BorderColor, overlay.BorderThickness);
+                _playerControl.UpdateOpacityMenuState(overlay.Opacity);
             }
         }
 
@@ -1057,6 +1058,9 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             switch (mode)
             {
                 case OverlayRender.Hidden:
+                    // The border is outside this grid, so it no longer vanishes for free when the
+                    // grid opacity drops to zero. Nothing else clears it.
+                    HideBorderRect(track);
                     DetachOverlayVideo(track);
                     ClearStillMotion(track);
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
@@ -1381,46 +1385,56 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             PlaceSurface(surfaces.Video, -padX, -padY, contentW, contentH);
             PlaceSurface(surfaces.Still, -padX, -padY, contentW, contentH);
 
-            // BORDERS ARE DRAWN AS A CHILD, never as the Grid's own border.
+            // BORDERS ARE DRAWN IN BorderHost, above every track picture.
             //
-            // Grid.BorderBrush renders BENEATH the grid's children, and the video surface fills -
-            // usually overflows - the grid. So a Solid border was painted and then covered, and the
-            // only parts that survived were slivers where the picture happened not to reach: one
-            // edge here, two there, apparently at random. Soft escaped it by accident, because its
-            // CornerRadius clips the children to a rounded rectangle and cuts the corners away.
-            // FilmStrip always worked because it alone was a child Rectangle.
+            // Not as the Grid's own border: Grid.BorderBrush renders beneath the grid's children,
+            // so the video surface covered it and only slivers survived.
             //
-            // All three now take that same route, so they are all on top of the picture and all
-            // four sides are drawn.
+            // Not as a child of the clip either: that puts it under the video surface of every
+            // HIGHER track, and a shape beneath a video surface is erased rather than blended. A
+            // clip at 35% opacity on a higher track wiped the border out completely rather than
+            // dimming it to 65%.
+            //
+            // The cost of being above everything is that stacking can no longer say "something
+            // covers this", so that is decided here instead.
             grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
 
-            if (overlay.BorderType == BorderType.None || editMode)
+            bool anyVisible = TryGetVisibleBorderRegion(slot, box, out var visibleBorder);
+
+            if (overlay.BorderType == BorderType.None || editMode || !anyVisible)
             {
                 grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                HideBorderRect(grid);
+                HideBorderRect(slot);
             }
             else
             {
+                // The border fades with the picture it frames rather than floating at full
+                // strength over a clip that has been faded down.
+                double borderOpacity = overlay.IsVideoHidden ? 0.0 : overlay.Opacity;
                 var c = overlay.BorderColor;
                 switch (overlay.BorderType)
                 {
                     case BorderType.FilmStrip:
                         grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                        ShowBorderRect(grid, c, overlay.BorderThickness,
-                                       new Microsoft.UI.Xaml.Media.DoubleCollection { 2, 1, 2, 1 }, 0);
+                        ShowBorderRect(slot, c, overlay.BorderThickness,
+                                       new Microsoft.UI.Xaml.Media.DoubleCollection { 2, 1, 2, 1 }, 0,
+                                       left, top, boxW, boxH, borderOpacity, visibleBorder);
                         break;
 
                     case BorderType.Soft:
                         // The rounded corner stays on the grid as well, so the PICTURE is rounded
-                        // too rather than a rounded outline sitting on a square image.
+                        // too rather than a rounded outline sitting on a square image. Half alpha
+                        // is what makes Soft soft.
                         grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(16);
-                        ShowBorderRect(grid, Windows.UI.Color.FromArgb(128, c.R, c.G, c.B),
-                                       overlay.BorderThickness, null, 16);
+                        ShowBorderRect(slot, Windows.UI.Color.FromArgb(128, c.R, c.G, c.B),
+                                       overlay.BorderThickness, null, 16,
+                                       left, top, boxW, boxH, borderOpacity, visibleBorder);
                         break;
 
                     default:
                         grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                        ShowBorderRect(grid, c, overlay.BorderThickness, null, 0);
+                        ShowBorderRect(slot, c, overlay.BorderThickness, null, 0,
+                                       left, top, boxW, boxH, borderOpacity, visibleBorder);
                         break;
                 }
             }
@@ -1452,43 +1466,157 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(el, top);
         }
 
-        // The single border overlay for a clip, whatever its style. Reused rather than recreated,
-        // because this runs from the per-frame render path.
-        private static Microsoft.UI.Xaml.Shapes.Rectangle GetBorderRect(Microsoft.UI.Xaml.Controls.Grid grid, bool create)
+        // The single border overlay for a clip, whatever its style. A child of the clip's own
+        // grid, so its z-layer is the clip's: over this picture, under anything on a higher track.
+        // Built once with the rest of the clip's surfaces rather than created on demand.
+        private Microsoft.UI.Xaml.Shapes.Rectangle GetBorderRect(int slot)
         {
-            foreach (var child in grid.Children)
-                if (child is Microsoft.UI.Xaml.Shapes.Rectangle r && r.Name == "ClipBorderRect")
-                    return r;
-
-            if (!create) return null;
-            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
-            {
-                Name = "ClipBorderRect",
-                Fill = null,
-                IsHitTestVisible = false
-            };
-            grid.Children.Add(rect);   // last child: on top of the picture
-            return rect;
+            if (_playerControl == null) return null;
+            var visuals = _playerControl.OverlayVisuals;
+            if (visuals == null || slot < 0 || slot >= visuals.Length) return null;
+            return visuals[slot]?.Border;
         }
 
-        private static void HideBorderRect(Microsoft.UI.Xaml.Controls.Grid grid)
+        // The box a slot's active clip occupies in the pane. Same call the clip's own layout uses.
+        private bool TryGetSlotBox(int slot, out ClipGeometry.GeoRect box)
         {
-            var rect = GetBorderRect(grid, create: false);
+            box = default;
+            if (slot < 0 || slot >= MaxOverlayTracks) return false;
+
+            var op = _activeOverlay[slot];
+            if (op == null) return false;
+
+            double aspect = AspectOf(op, slot);
+            double vpW = _playerControl.ActualWidth, vpH = _playerControl.ActualHeight;
+            if (aspect <= 0 || vpW <= 0 || vpH <= 0) return false;
+
+            var fit = ClipGeometry.Fit(aspect, vpW, vpH);
+            box = ClipGeometry.Box(fit.W, fit.H, vpW, vpH,
+                                   op.PlacementWidth, op.PlacementHeight,
+                                   op.PlacementCenterX, op.PlacementCenterY, editMode: false);
+            return true;
+        }
+
+        // How much of a border is still visible once higher tracks are taken into account.
+        //
+        // The border is drawn above every picture so that it survives at all, which means stacking
+        // can no longer hide it when something covers the clip it belongs to. So it is worked out
+        // here and applied as a clip on the rectangle, giving the border the same behaviour the
+        // PICTURE gets for free: present where nothing covers it, gone where something does.
+        //
+        // A containment test was not enough. A PiP that pokes out past the edge of the full-frame
+        // clip above it is not "fully covered", so the whole border drew - including the three
+        // quarters of it lying under an opaque clip.
+        //
+        // Returns false when nothing of it is left.
+        private bool TryGetVisibleBorderRegion(int slot, ClipGeometry.GeoRect box,
+                                               out ClipGeometry.GeoRect visible)
+        {
+            visible = box;
+            if (box.W <= 0 || box.H <= 0) return false;
+
+            for (int j = slot + 1; j < MaxOverlayTracks; j++)
+            {
+                var other = _activeOverlay[j];
+                if (other == null || other.IsVideoHidden || other.Opacity < 0.999) continue;
+                if (!TryGetSlotBox(j, out var ob)) continue;
+
+                // No overlap: this one hides nothing.
+                if (ob.Right <= visible.X || ob.X >= visible.Right ||
+                    ob.Bottom <= visible.Y || ob.Y >= visible.Bottom) continue;
+
+                // What is left is an L-shape in general, and UIElement.Clip only takes a rectangle,
+                // so keep the largest rectangular strip that survives. For the case this exists to
+                // handle - a full-frame clip above a PiP that overhangs one edge - the remainder IS
+                // that strip, exactly.
+                double leftW   = ob.X - visible.X;
+                double rightW  = visible.Right - ob.Right;
+                double topH    = ob.Y - visible.Y;
+                double bottomH = visible.Bottom - ob.Bottom;
+
+                double leftA   = Math.Max(0, leftW)   * visible.H;
+                double rightA  = Math.Max(0, rightW)  * visible.H;
+                double topA    = Math.Max(0, topH)    * visible.W;
+                double bottomA = Math.Max(0, bottomH) * visible.W;
+
+                double best = Math.Max(Math.Max(leftA, rightA), Math.Max(topA, bottomA));
+                if (best <= 0) return false; // this clip swallows what was left
+
+                if (best == leftA)
+                    visible = new ClipGeometry.GeoRect(visible.X, visible.Y, leftW, visible.H);
+                else if (best == rightA)
+                    visible = new ClipGeometry.GeoRect(ob.Right, visible.Y, rightW, visible.H);
+                else if (best == topA)
+                    visible = new ClipGeometry.GeoRect(visible.X, visible.Y, visible.W, topH);
+                else
+                    visible = new ClipGeometry.GeoRect(visible.X, ob.Bottom, visible.W, bottomH);
+            }
+
+            return visible.W > 0 && visible.H > 0;
+        }
+
+        private void HideBorderRect(int slot)
+        {
+            var rect = GetBorderRect(slot);
             if (rect != null) rect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
         }
 
-        private static void ShowBorderRect(Microsoft.UI.Xaml.Controls.Grid grid, Windows.UI.Color color,
-                                           double thickness,
-                                           Microsoft.UI.Xaml.Media.DoubleCollection dash, double radius)
+        // Geometry is passed in because the rect lives in BorderHost and has no parent to inherit
+        // it from. These are the SAME box values the clip's grid is sized and positioned with, so
+        // the two cannot drift apart.
+        //
+        // The rect IS the box - no inset. A stroke is centred on its path, so it straddles the box
+        // edge, which is what reads as a border sitting on the edge. Insetting it by half the
+        // stroke pushed the outline visibly inward and the picture showed all round the outside.
+        //
+        // Writes are delta-guarded: this runs from the per-frame render path.
+        private void ShowBorderRect(int slot, Windows.UI.Color color, double thickness,
+                                    Microsoft.UI.Xaml.Media.DoubleCollection dash, double radius,
+                                    double left, double top, double w, double h, double opacity,
+                                    ClipGeometry.GeoRect visible)
         {
-            var rect = GetBorderRect(grid, create: true);
+            var rect = GetBorderRect(slot);
             if (rect == null) return;
+            if (w <= 0 || h <= 0) { rect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed; return; }
 
             rect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
             rect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
             rect.StrokeThickness = thickness;
             rect.RadiusX = radius;
             rect.RadiusY = radius;
+
+            if (rect.Width != w) rect.Width = w;
+            if (rect.Height != h) rect.Height = h;
+            if (Microsoft.UI.Xaml.Controls.Canvas.GetLeft(rect) != left)
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(rect, left);
+            if (Microsoft.UI.Xaml.Controls.Canvas.GetTop(rect) != top)
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(rect, top);
+            if (Math.Abs(rect.Opacity - opacity) > 0.001) rect.Opacity = opacity;
+
+            // Hide the part that a higher opaque clip covers. Expanded by half the stroke on every
+            // side that is NOT being trimmed, because the stroke is centred on the path and half of
+            // it lies outside the box - clipping to the bare box would shave the whole outline.
+            double half = thickness / 2;
+            bool trimmed = visible.W < w - 0.5 || visible.H < h - 0.5
+                           || visible.X > left + 0.5 || visible.Y > top + 0.5;
+            if (!trimmed)
+            {
+                if (rect.Clip != null) rect.Clip = null;
+            }
+            else
+            {
+                double cx = visible.X - left, cy = visible.Y - top;
+                double cw = visible.W, ch = visible.H;
+                if (cx <= 0.5) { cx -= half; cw += half; }
+                if (cy <= 0.5) { cy -= half; ch += half; }
+                if (visible.Right >= left + w - 0.5) cw += half;
+                if (visible.Bottom >= top + h - 0.5) ch += half;
+
+                rect.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
+                {
+                    Rect = new Windows.Foundation.Rect(cx, cy, Math.Max(0, cw), Math.Max(0, ch))
+                };
+            }
 
             // Null clears the dashes; assigning an empty collection leaves a solid line either way,
             // but clearing keeps the property honest about what the style is.

@@ -7,111 +7,28 @@
     mc:Ignorable="d"
     Background="Black">
 
-    <Grid Background="Black">
-        <!-- 4 Identical Track Players -->
-        <Grid x:Name="TrackGrid0" x:FieldModifier="public"
-              Opacity="0" IsHitTestVisible="False"
-              HorizontalAlignment="Left" VerticalAlignment="Top">
-            <Canvas x:Name="TrackSurfaces0" x:FieldModifier="public" IsHitTestVisible="False">
-                <MediaPlayerElement x:Name="TrackPlayer0" x:FieldModifier="public"
-                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
-                                    RenderTransformOrigin="0.5,0.5">
-                    <MediaPlayerElement.RenderTransform>
-                        <CompositeTransform x:Name="TrackTransform0" x:FieldModifier="public" />
-                    </MediaPlayerElement.RenderTransform>
-                </MediaPlayerElement>
-                <Image x:Name="TrackImage0" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
-                       RenderTransformOrigin="0.5,0.5">
-                    <Image.RenderTransform>
-                        <CompositeTransform x:Name="StillTransform0" x:FieldModifier="public" />
-                    </Image.RenderTransform>
-                </Image>
-            </Canvas>
-            <Grid x:Name="TrackFrame0" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
-                <!-- A Rectangle, not a Border, because a Border cannot draw dashes. Same dashed
-                     treatment as the keyframe rectangles; the Stroke is set per track from
-                     TrackPalette so the colour matches that track's row in the timeline. -->
-                <Rectangle Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
-            </Grid>
-        </Grid>
-        
-        <Grid x:Name="TrackGrid1" x:FieldModifier="public"
-              Opacity="0" IsHitTestVisible="False"
-              HorizontalAlignment="Left" VerticalAlignment="Top">
-            <Canvas x:Name="TrackSurfaces1" x:FieldModifier="public" IsHitTestVisible="False">
-                <MediaPlayerElement x:Name="TrackPlayer1" x:FieldModifier="public"
-                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
-                                    RenderTransformOrigin="0.5,0.5">
-                    <MediaPlayerElement.RenderTransform>
-                        <CompositeTransform x:Name="TrackTransform1" x:FieldModifier="public" />
-                    </MediaPlayerElement.RenderTransform>
-                </MediaPlayerElement>
-                <Image x:Name="TrackImage1" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
-                       RenderTransformOrigin="0.5,0.5">
-                    <Image.RenderTransform>
-                        <CompositeTransform x:Name="StillTransform1" x:FieldModifier="public" />
-                    </Image.RenderTransform>
-                </Image>
-            </Canvas>
-            <Grid x:Name="TrackFrame1" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
-                <!-- A Rectangle, not a Border, because a Border cannot draw dashes. Same dashed
-                     treatment as the keyframe rectangles; the Stroke is set per track from
-                     TrackPalette so the colour matches that track's row in the timeline. -->
-                <Rectangle Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
-            </Grid>
-        </Grid>
+    <Grid x:Name="RootLayer" Background="Black">
+        <!-- Track render surfaces are built in code and INSERTED HERE, as direct children of this
+             grid - one per DirectorViewModel.MaxTracks, ahead of InputLayer so they sit beneath it.
+             They are built rather than declared so the slot count and the visual count cannot
+             drift apart: addressing a slot with no visual behind it is an IndexOutOfRangeException
+             mid-playback.
 
-        <Grid x:Name="TrackGrid2" x:FieldModifier="public"
-              Opacity="0" IsHitTestVisible="False"
-              HorizontalAlignment="Left" VerticalAlignment="Top">
-            <Canvas x:Name="TrackSurfaces2" x:FieldModifier="public" IsHitTestVisible="False">
-                <MediaPlayerElement x:Name="TrackPlayer2" x:FieldModifier="public"
-                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
-                                    RenderTransformOrigin="0.5,0.5">
-                    <MediaPlayerElement.RenderTransform>
-                        <CompositeTransform x:Name="TrackTransform2" x:FieldModifier="public" />
-                    </MediaPlayerElement.RenderTransform>
-                </MediaPlayerElement>
-                <Image x:Name="TrackImage2" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
-                       RenderTransformOrigin="0.5,0.5">
-                    <Image.RenderTransform>
-                        <CompositeTransform x:Name="StillTransform2" x:FieldModifier="public" />
-                    </Image.RenderTransform>
-                </Image>
-            </Canvas>
-            <Grid x:Name="TrackFrame2" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
-                <!-- A Rectangle, not a Border, because a Border cannot draw dashes. Same dashed
-                     treatment as the keyframe rectangles; the Stroke is set per track from
-                     TrackPalette so the colour matches that track's row in the timeline. -->
-                <Rectangle Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
-            </Grid>
-        </Grid>
+             They are NOT wrapped in a container. Nesting them one level deeper changed how the
+             tracks composite against each other - a clip border stopped surviving under a
+             semi-transparent clip on a higher track - so the tree is kept exactly as it was when
+             the six grids were written out longhand here. -->
 
-        <Grid x:Name="TrackGrid3" x:FieldModifier="public"
-              Opacity="0" IsHitTestVisible="False"
-              HorizontalAlignment="Left" VerticalAlignment="Top">
-            <Canvas x:Name="TrackSurfaces3" x:FieldModifier="public" IsHitTestVisible="False">
-                <MediaPlayerElement x:Name="TrackPlayer3" x:FieldModifier="public"
-                                    AreTransportControlsEnabled="False" Stretch="UniformToFill"
-                                    RenderTransformOrigin="0.5,0.5">
-                    <MediaPlayerElement.RenderTransform>
-                        <CompositeTransform x:Name="TrackTransform3" x:FieldModifier="public" />
-                    </MediaPlayerElement.RenderTransform>
-                </MediaPlayerElement>
-                <Image x:Name="TrackImage3" x:FieldModifier="public" Stretch="UniformToFill" Visibility="Collapsed"
-                       RenderTransformOrigin="0.5,0.5">
-                    <Image.RenderTransform>
-                        <CompositeTransform x:Name="StillTransform3" x:FieldModifier="public" />
-                    </Image.RenderTransform>
-                </Image>
-            </Canvas>
-            <Grid x:Name="TrackFrame3" x:FieldModifier="public" IsHitTestVisible="False" Visibility="Collapsed">
-                <!-- A Rectangle, not a Border, because a Border cannot draw dashes. Same dashed
-                     treatment as the keyframe rectangles; the Stroke is set per track from
-                     TrackPalette so the colour matches that track's row in the timeline. -->
-                <Rectangle Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
-            </Grid>
-        </Grid>
+        <!-- Clip borders, ABOVE every track picture and below the input layer.
+
+             They cannot be drawn inside the clip they belong to. A XAML shape beneath a video
+             surface is erased rather than blended, so a clip at 35% opacity on a higher track
+             wiped a lower border out completely instead of dimming it. Above the video surfaces
+             it simply draws.
+
+             Declared FIRST so that after the track grids are inserted at 0..MaxTracks-1 this ends
+             up directly above them and still below InputLayer. -->
+        <Canvas x:Name="BorderHost" x:FieldModifier="public" IsHitTestVisible="False" />
 
         <!-- Interactive Input Layer for Manual Targeting -->
         <Grid x:Name="InputLayer" Background="Transparent"

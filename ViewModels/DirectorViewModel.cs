@@ -19,20 +19,42 @@ namespace VideoDirector.ViewModels
 
     public class DirectorViewModel : ObservableObject
     {
-        public const int MaxTracks = 4;
+        // Hard ceiling on track slots. DirectorPlayerControl builds exactly this many render
+        // surfaces in a loop from this same constant, so the two cannot drift apart and there
+        // is no way to address a slot with no visual behind it.
+        public const int MaxTracks = 6;
+
+        // What a NEW project starts with. Slots 4-6 exist but are not shown until asked for.
+        public const int DefaultTracks = 3;
+
+        // The floor. Removing the last track would leave nowhere to put a clip.
+        public const int MinTracks = 1;
         public ObservableCollection<TimelineTrack> Tracks { get; } = new();
 
-        // Default corners so stacked PiPs don't land on top of each other.
-        // We have 4 tracks now. Track 1 defaults to center/full screen.
+        // Default placement per track. Y increases downward (top = cyPx - boxH/2), so 0.28 is
+        // the UPPER half. T1 is full screen and acts as the spine by convention - nothing in the
+        // model privileges it. T2-T5 take the four corners; T6 sits in the middle, on top of
+        // everything, since Z-order is track order.
+        //
+        // T2-T4 are deliberately left exactly as they were. A track default is what Reset
+        // restores a clip to, so nudging these would silently change what Reset does to every
+        // project already saved.
         private static readonly (double x, double y, double w, double h)[] TrackDefaults =
-            { 
-                (0.5, 0.5, 1.0, 1.0), // Track 1: full screen center
-                (0.72, 0.72, 0.3, 0.3), // Track 2
-                (0.28, 0.72, 0.3, 0.3), // Track 3
-                (0.72, 0.28, 0.3, 0.3)  // Track 4
+            {
+                (0.50, 0.50, 1.0, 1.0), // T1 full screen, centre
+                (0.72, 0.72, 0.3, 0.3), // T2 bottom-right
+                (0.28, 0.72, 0.3, 0.3), // T3 bottom-left
+                (0.72, 0.28, 0.3, 0.3), // T4 top-right
+                (0.28, 0.28, 0.3, 0.3), // T5 top-left
+                // T6 overlaps each corner PiP by about 8% of the pane. That is arithmetic, not a
+                // bug: corners span 0.13-0.43 and 0.57-0.87, centre spans 0.35-0.65, and full
+                // clearance would need T6 below 0.14 wide - too small to be useful. It is the top
+                // layer and is meant to sit over things.
+                (0.50, 0.50, 0.3, 0.3)  // T6 centre
             };
 
-        public bool CanAddOverlayTrack => false; // Track count is now fixed.
+        public bool CanAddTrack => Tracks.Count < MaxTracks;
+        public bool CanRemoveTrack => Tracks.Count > MinTracks;
 
         public TimelineTrack AddTrack(int index)
         {
@@ -453,14 +475,72 @@ namespace VideoDirector.ViewModels
 
         public DirectorViewModel()
         {
-            EnsureTracks(); // always the full set of tracks
+            EnsureTracks(DefaultTracks); // a new project opens with T1-T3
             ResetHistory(); // baseline = the empty project, so the first edit is undoable
         }
 
-        // The track count is fixed: 1 main + MaxOverlayTracks upper tracks are always present.
-        public void EnsureTracks()
+        // Bring the list up to the given floor. Called with MinTracks after a load or an undo, so
+        // a project saved with two tracks opens with two; called with DefaultTracks for a new one.
+        //
+        // This used to pad unconditionally to MaxTracks, which is precisely why removing a track
+        // was not expressible: the next load or undo silently put it back.
+        public void EnsureTracks(int minimum = MinTracks)
         {
-            while (Tracks.Count < MaxTracks) AddTrack(Tracks.Count);
+            int target = Math.Clamp(minimum, MinTracks, MaxTracks);
+            while (Tracks.Count < target) AddTrack(Tracks.Count);
+        }
+
+        /// <summary>Add one track on top. Returns null at the ceiling.</summary>
+        public TimelineTrack AddTopTrack()
+        {
+            if (!CanAddTrack) return null;
+            var track = AddTrack(Tracks.Count);
+            RaiseTrackCountChanged();
+            RecordIfChanged();
+            return track;
+        }
+
+        /// <summary>
+        /// Remove the highest track. Top-only by design: a track index IS its identity - clips
+        /// address their track by position and Z-order is index order - so removing from the
+        /// middle would renumber every track above it and move those clips between layers.
+        /// </summary>
+        public bool RemoveTopTrack()
+        {
+            if (!CanRemoveTrack) return false;
+            var track = Tracks[Tracks.Count - 1];
+
+            // The inspector binds to SelectedClip. Leaving it pointed at a clip on a track that no
+            // longer exists shows an editor for something the user can no longer see or reach.
+            if (SelectedClip != null && track.Clips.Contains(SelectedClip)) SelectedClip = null;
+
+            foreach (var clip in track.Clips) clip.PropertyChanged -= CinematicOperation_PropertyChanged;
+            Tracks.RemoveAt(Tracks.Count - 1);
+
+            RaiseTrackCountChanged();
+            OnPropertyChanged(nameof(TotalStoryTime));
+            RecordIfChanged();
+            return true;
+        }
+
+        /// <summary>Clips on the top track - what the removal prompt needs in order to warn.</summary>
+        public int TopTrackClipCount => Tracks.Count > 0 ? Tracks[Tracks.Count - 1].Clips.Count : 0;
+
+        /// <summary>
+        /// Drop empty tracks from the TOP of the stack, down to MinTracks. Trailing-only is
+        /// deliberate: a project with clips on T1 and T4 keeps all four, because dropping the
+        /// empty T2/T3 would move T4 down two layers and change the composition.
+        /// </summary>
+        private void TrimTrailingEmptyTracks()
+        {
+            while (Tracks.Count > MinTracks && Tracks[Tracks.Count - 1].Clips.Count == 0)
+                Tracks.RemoveAt(Tracks.Count - 1);
+        }
+
+        private void RaiseTrackCountChanged()
+        {
+            OnPropertyChanged(nameof(CanAddTrack));
+            OnPropertyChanged(nameof(CanRemoveTrack));
         }
 
         public event EventHandler ClipPropertyChanged;
@@ -831,6 +911,10 @@ namespace VideoDirector.ViewModels
                     foreach (var track in legacyOverlayTracks)
                     {
                         if (trackIdx >= MaxTracks) break;
+                        // These formats predate a variable track count and address tracks by
+                        // index, so the slot has to exist before it is written to. EnsureTracks
+                        // no longer pads to the ceiling, which is what makes this necessary.
+                        EnsureTracks(trackIdx + 1);
                         foreach (var clip in track.Clips)
                         {
                             Tracks[trackIdx].Clips.Add(clip);
@@ -841,6 +925,7 @@ namespace VideoDirector.ViewModels
                 }
                 else if (legacyOverlays != null && legacyOverlays.Count > 0)
                 {
+                    EnsureTracks(2); // legacy loose overlays all land on T2
                     foreach (var clip in legacyOverlays)
                     {
                         Tracks[1].Clips.Add(clip);
@@ -849,8 +934,9 @@ namespace VideoDirector.ViewModels
                 }
             }
             
-            EnsureTracks(); // top up so the timeline always shows the full set
-            OnPropertyChanged(nameof(CanAddOverlayTrack));
+            EnsureTracks();            // floor of one, no longer a top-up to the ceiling
+            TrimTrailingEmptyTracks(); // unused tracks on top of a saved project do not reopen
+            RaiseTrackCountChanged();
             ResetHistory(); // the loaded project is the new baseline, not an undo step
         }
 
@@ -898,7 +984,9 @@ namespace VideoDirector.ViewModels
         public void Clear()
         {
             Tracks.Clear();
-            EnsureTracks();
+            // DefaultTracks, not the bare floor: clearing gives you a NEW project, and a new
+            // project opens with T1-T3.
+            EnsureTracks(DefaultTracks);
             RecordIfChanged();
         }
 
@@ -913,6 +1001,14 @@ namespace VideoDirector.ViewModels
         private string _settled = string.Empty;
         private const int MaxHistory = 50;
         private static readonly System.Text.Json.JsonSerializerOptions _snapshotOptions = new();
+
+        // The project as it stood at the last save - or load, or new project, which are equally
+        // "nothing to lose" points. Compared against live state rather than kept as a dirty flag,
+        // so editing and then undoing back to the saved state correctly counts as unmodified and
+        // does not nag on the way out.
+        private string _savedSnapshot = string.Empty;
+        public bool HasUnsavedChanges => CaptureSnapshot() != _savedSnapshot;
+        public void MarkSaved() => _savedSnapshot = CaptureSnapshot();
 
         public bool CanUndo => _undo.Count > 0;
         public bool CanRedo => _redo.Count > 0;
@@ -933,6 +1029,7 @@ namespace VideoDirector.ViewModels
             _undo.Clear();
             _redo.Clear();
             _settled = CaptureSnapshot();
+            _savedSnapshot = _settled; // a load or a new project is a clean slate, not a change
             RaiseHistoryChanged();
         }
 
@@ -1039,9 +1136,11 @@ namespace VideoDirector.ViewModels
             }
             // Legacy restore paths handled inside LoadAsync. Snapshot restoration only 
             // needs to deal with the current format since snapshots are created in-session.
+            // Floor only, and deliberately NO trim: undo must reproduce what was snapshotted,
+            // including empty tracks the user added on purpose.
             EnsureTracks();
             StampPlacementDefaults();
-            OnPropertyChanged(nameof(CanAddOverlayTrack));
+            RaiseTrackCountChanged();
             OnPropertyChanged(nameof(TotalStoryTime));
         }
     }

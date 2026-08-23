@@ -422,6 +422,24 @@
                         <Button Click="Redo_Click" IsEnabled="{x:Bind ViewModel.CanRedo, Mode=OneWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Redo (Ctrl+Y)">
                             <SymbolIcon Symbol="Redo" />
                         </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <!-- Tracks. Add appends on top - T4, then T5, T6; Remove takes the
+                             highest away, down to one. Top-only because a track index IS its
+                             identity: clips address their track by position and Z-order is index
+                             order, so removing from the middle would renumber every track above
+                             it and move those clips between layers. -->
+                        <Button x:Name="AddTrackButton" Click="AddTrack_Click"
+                                IsEnabled="{x:Bind ViewModel.CanAddTrack, Mode=OneWay}"
+                                Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
+                                ToolTipService.ToolTip="Add track">
+                            <FontIcon Glyph="&#xE710;" FontSize="13" />
+                        </Button>
+                        <Button x:Name="RemoveTrackButton" Click="RemoveTrack_Click"
+                                IsEnabled="{x:Bind ViewModel.CanRemoveTrack, Mode=OneWay}"
+                                Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
+                                ToolTipService.ToolTip="Remove the top track">
+                            <FontIcon Glyph="&#xE738;" FontSize="13" />
+                        </Button>
                     </StackPanel>
 
                     <!-- Right: Project, View, and Export -->

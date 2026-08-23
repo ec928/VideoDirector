@@ -15,13 +15,16 @@ namespace VideoDirector.Views
         ArrangePips  // Arrange mode: drag = move the PiP under the cursor, wheel = resize it.
     }
 
+    // The answer to "you have unsaved work" on the way out.
+    public enum UnsavedChoice { Save, Discard, Cancel }
+
     // What grabbing the PiP box does: move it, or resize it from a specific edge/corner.
     // Determined at pointer-press from where in the box the cursor is (interior = move,
     // near an edge = one-dimension resize, near a corner = two-dimension resize).
     public enum BoxGrab { Move, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight }
 
-    // One upper track's render surfaces. Pre-declared and bounded (3); the engine addresses them
-    // generically by track index via OverlayVisuals[i] — no per-track code paths (§7B).
+    // One track's render surfaces. Built in a loop, MaxTracks of them; the engine addresses
+    // them generically by track index via OverlayVisuals[i] - no per-track code paths (7B).
     public sealed class OverlayVisual
     {
         public Microsoft.UI.Xaml.Controls.Grid Grid;
@@ -37,6 +40,10 @@ namespace VideoDirector.Views
         // UniformToFill overflows its slot, and an absolute pivot would not be its centre.
         public Microsoft.UI.Xaml.Media.CompositeTransform StillTransform;
         public Microsoft.UI.Xaml.Controls.Grid Frame;
+        // The clip border. Lives in BorderHost, not in Grid: above every track picture, because a
+        // shape beneath a video surface is erased rather than blended. Being above everything, it
+        // is the engine that decides when a higher opaque clip should hide it.
+        public Microsoft.UI.Xaml.Shapes.Rectangle Border;
     }
 
     public sealed partial class DirectorPlayerControl : UserControl
@@ -46,7 +53,8 @@ namespace VideoDirector.Views
         private int _dragSlot = -1;
         private BoxGrab _dragGrab;
 
-        // Index 0..2 == overlay track 0..2. Built once from the pre-declared XAML units.
+        // Index i == track i. One entry per DirectorViewModel.MaxTracks, always, because the
+        // array is sized from that constant rather than transcribed from XAML by hand.
         public OverlayVisual[] OverlayVisuals { get; private set; }
 
         // How close (px) to an edge counts as grabbing that edge for a resize.
@@ -83,16 +91,100 @@ namespace VideoDirector.Views
         {
             this.InitializeComponent();
 
-            OverlayVisuals = new[]
+            OverlayVisuals = new OverlayVisual[ViewModels.DirectorViewModel.MaxTracks];
+            for (int i = 0; i < OverlayVisuals.Length; i++)
             {
-                new OverlayVisual { Grid = TrackGrid0, Video = TrackPlayer0, Still = TrackImage0, StillTransform = StillTransform0, Transform = TrackTransform0, Frame = TrackFrame0 },
-                new OverlayVisual { Grid = TrackGrid1, Video = TrackPlayer1, Still = TrackImage1, StillTransform = StillTransform1, Transform = TrackTransform1, Frame = TrackFrame1 },
-                new OverlayVisual { Grid = TrackGrid2, Video = TrackPlayer2, Still = TrackImage2, StillTransform = StillTransform2, Transform = TrackTransform2, Frame = TrackFrame2 },
-                new OverlayVisual { Grid = TrackGrid3, Video = TrackPlayer3, Still = TrackImage3, StillTransform = StillTransform3, Transform = TrackTransform3, Frame = TrackFrame3 },
+                OverlayVisuals[i] = BuildOverlayVisual();
+                // Insert at i so the tracks land ahead of everything declared in XAML (InputLayer,
+                // the WYSIWYG canvas, the HUD) and stack among themselves in track order.
+                RootLayer.Children.Insert(i, OverlayVisuals[i].Grid);
+
+                // One border per slot, in slot order, so BorderHost.Children[i] is always slot i.
+                BorderHost.Children.Add(OverlayVisuals[i].Border);
+                StyleOverlayFrame(OverlayVisuals[i].Frame,
+                                  i == 0 ? TrackPalette.Spine : TrackPalette.Overlay(i - 1),
+                                  "T" + (i + 1));
+
+            }
+        }
+
+        // One track's surfaces, matching what used to be four hand-copied XAML blocks. Every
+        // property below was load-bearing:
+        //   Opacity 0             - a slot shows nothing until the engine activates a clip on it
+        //   IsHitTestVisible off  - InputLayer owns all pointer input
+        //   Left/Top alignment    - the engine positions via Margin plus explicit Width/Height
+        //   UniformToFill         - the surface overflows its box on purpose, and that surplus is
+        //                           the only picture a Ken Burns pan has to move into; size it to
+        //                           the box instead and every pan runs straight to black
+        //   RenderTransformOrigin - 0.5,0.5 is RELATIVE to the element, which an overflowing
+        //                           UniformToFill surface needs; an absolute pivot is not centre
+        //
+        // The frame's Rectangle must stay Children[0]: the engine finds it by that index to
+        // colour it per track (SetOverlayRender), and StyleOverlayFrame appends the badge after.
+        private static OverlayVisual BuildOverlayVisual()
+        {
+            var videoTransform = new Microsoft.UI.Xaml.Media.CompositeTransform();
+            var video = new MediaPlayerElement
+            {
+                AreTransportControlsEnabled = false,
+                Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = videoTransform
             };
 
-            for (int i = 0; i < OverlayVisuals.Length; i++)
-                StyleOverlayFrame(OverlayVisuals[i].Frame, i == 0 ? TrackPalette.Spine : TrackPalette.Overlay(i - 1), "T" + (i + 1));
+            var stillTransform = new Microsoft.UI.Xaml.Media.CompositeTransform();
+            var still = new Image
+            {
+                Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill,
+                Visibility = Visibility.Collapsed,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = stillTransform
+            };
+
+            // A Canvas, because the engine places the surfaces with Canvas.Left/Top.
+            var surfaces = new Canvas { IsHitTestVisible = false };
+            surfaces.Children.Add(video);
+            surfaces.Children.Add(still);
+
+            // A Rectangle, not a Border, because a Border cannot draw dashes.
+            var frame = new Grid { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+            frame.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                StrokeThickness = 2,
+                StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 },
+                IsHitTestVisible = false
+            });
+
+            var border = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Fill = null,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed
+            };
+
+            var grid = new Grid
+            {
+                Opacity = 0,
+                IsHitTestVisible = false,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            grid.Children.Add(surfaces);
+            grid.Children.Add(frame);
+            // NOTE: `border` is deliberately NOT added here. It goes into BorderHost, above every
+            // track, because a shape underneath a video surface gets erased rather than blended.
+
+            return new OverlayVisual
+            {
+                Grid = grid,
+                Video = video,
+                Still = still,
+                Transform = videoTransform,
+                StillTransform = stillTransform,
+                Frame = frame,
+                Border = border
+            };
         }
 
         private static void StyleOverlayFrame(Microsoft.UI.Xaml.Controls.Grid frame, Windows.UI.Color color, string badgeText)
@@ -320,6 +412,22 @@ namespace VideoDirector.Views
                     OpacityRequested?.Invoke(this, (_contextSlot, opacity));
             }
         }
+        // The Opacity items are RadioMenuFlyoutItems, which keep whatever was last clicked. With
+        // nothing syncing them to the clip, the tick was a record of the last menu interaction in
+        // this session rather than a reading of the clip under the cursor - so a clip at 100% could
+        // show 25% ticked. The border menu had this method from the start; opacity never did.
+        //
+        // Nothing is ticked when the value came from the inspector slider and is not one of the
+        // four presets. Showing the nearest preset would be a different lie.
+        public void UpdateOpacityMenuState(double opacity)
+        {
+            const double eps = 0.001;
+            PipOpacity100.IsChecked = Math.Abs(opacity - 1.00) < eps;
+            PipOpacity75.IsChecked  = Math.Abs(opacity - 0.75) < eps;
+            PipOpacity50.IsChecked  = Math.Abs(opacity - 0.50) < eps;
+            PipOpacity25.IsChecked  = Math.Abs(opacity - 0.25) < eps;
+        }
+
         public void UpdateBorderMenuState(Models.BorderType type, Windows.UI.Color color, double thickness)
         {
             PipBorderTypeNone.IsChecked = type == Models.BorderType.None;
@@ -387,8 +495,16 @@ namespace VideoDirector.Views
         {
             if (InputMode == PlayerInputMode.ArrangePips)
             {
-                // Edit whatever is under the cursor: an overlay PiP, or Track 1 if not on one.
-                EditRequested?.Invoke(this, HitTestOverlaySlot(e.GetPosition(InputLayer)));
+                // Edit whatever is under the cursor - and nothing when there is nothing under it.
+                // HitTestOverlaySlot returns -1 for a miss, which used to be forwarded and read by
+                // the handler as "no PiP, so edit Track 1": double-clicking empty canvas to drop
+                // focus opened an edit session on an unrelated clip instead.
+                //
+                // This does not affect a full-screen Track 1: its grid covers the pane, so a click
+                // over its picture hit-tests to slot 0 and still opens. Only a genuine miss - the
+                // letterbox bars, or a spot where no track has an active clip - is now inert.
+                int slot = HitTestOverlaySlot(e.GetPosition(InputLayer));
+                if (slot >= 0) EditRequested?.Invoke(this, slot);
             }
             else
             {
