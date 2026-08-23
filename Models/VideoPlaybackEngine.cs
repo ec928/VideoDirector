@@ -1031,11 +1031,35 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
         {
             var v = _playerControl.OverlayVisuals[track];
 
-            if (v.Frame != null && v.Frame.Children.Count > 0 && v.Frame.Children[0] is Microsoft.UI.Xaml.Controls.Border border)
+            // The frame carries the track's identity colour, which is the whole point of
+            // TrackPalette: the same hue marks a track's blocks in the timeline and its picture in
+            // the composite, so you can tell at a glance which row a box on screen came from. The
+            // frame was hardcoded white, so that correlation existed in the palette's comments and
+            // nowhere on screen.
+            if (v.Frame != null && v.Frame.Children.Count > 0
+                && v.Frame.Children[0] is Microsoft.UI.Xaml.Shapes.Rectangle frameRect)
             {
                 bool isSelected = clip != null && _viewModel?.SelectedClip == clip;
-                border.BorderThickness = new Microsoft.UI.Xaml.Thickness(isSelected ? 5 : 2);
+                var colour = track == 0 ? Views.TrackPalette.Spine : Views.TrackPalette.Overlay(track - 1);
+
+                // Selected reads as solid and heavier; the rest stay dashed and quieter, matching
+                // how the keyframe rectangles distinguish the one being worked on.
+                frameRect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    isSelected ? colour : Views.TrackPalette.At(colour, 0xB0));
+                frameRect.StrokeThickness = isSelected ? 3 : 2;
+
+                bool dashed = frameRect.StrokeDashArray != null && frameRect.StrokeDashArray.Count > 0;
+                if (isSelected && dashed)
+                    frameRect.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection();
+                else if (!isSelected && !dashed)
+                    frameRect.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
             }
+
+            // Frames belong to Arrange, and only while nothing is rolling: they are a handle for
+            // composing, and clutter over a screening. Both render paths use the same rule - the
+            // video case used to collapse the frame unconditionally, so a video clip never got one
+            // at all and only stills were outlined.
+            bool showFrame = !IsActivelyPlaying && _mode == EditorMode.Arrange;
 
             switch (mode)
             {
@@ -1060,22 +1084,20 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                     // A frame marks every arrangeable PiP. No drawn handles: reshape grab-zones
                     // are geometric edge/corner bands on the InputLayer, so handles were decoration
                     // that also made chrome depend on a selection you cannot make while arranging.
-                    // Nothing is arrangeable mid-playback, so the frame stays off while rolling.
-                    // Arrange only. A still now takes this branch in EDIT mode too (images
-                    // render from a bitmap, so Edit no longer forces the video surface), and
-                    // the arrange frame must not follow it there - a PiP outline around the
-                    // clip you are framing is exactly the modal leak §5.3 forbids.
                     if (v.Frame != null)
-                        v.Frame.Visibility = (IsActivelyPlaying || _mode != EditorMode.Arrange)
-                            ? Microsoft.UI.Xaml.Visibility.Collapsed
-                            : Microsoft.UI.Xaml.Visibility.Visible;
+                        v.Frame.Visibility = showFrame
+                            ? Microsoft.UI.Xaml.Visibility.Visible
+                            : Microsoft.UI.Xaml.Visibility.Collapsed;
                     v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;
 
                 case OverlayRender.Video:
                     ClearStillMotion(track);
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-                    if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    if (v.Frame != null)
+                        v.Frame.Visibility = showFrame
+                            ? Microsoft.UI.Xaml.Visibility.Visible
+                            : Microsoft.UI.Xaml.Visibility.Collapsed;
                     AttachOverlayVideo(track);
                     v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;
