@@ -146,13 +146,17 @@ namespace VideoDirector.Models
         public bool HasModifications => 
             StartMark.Scale != 1.0f || StartMark.X != 0 || StartMark.Y != 0 ||
             EndMark.Scale != 1.0f || EndMark.X != 0 || EndMark.Y != 0 ||
-            PlaybackSpeed != 1.0 ||
             TransitionDuration > TimeSpan.Zero ||
             TransitionStyle != TransitionStyle.HardSnap ||
             CurveProfile != CurveProfile.Linear ||
-            VideoStartTime > TimeSpan.Zero ||
-            (VideoEndTime > TimeSpan.Zero && VideoEndTime != OpDuration) ||
-            PlacementModified;
+            PlacementModified ||
+            // Speed and trim only count for a clip that HAS a source window. For a still they are
+            // not modifications, they are what makes it a still - and counting them left Reset
+            // permanently enabled on every snapshot while having nothing it was willing to change.
+            (!HasNoSourceWindow &&
+                (PlaybackSpeed != 1.0 ||
+                 VideoStartTime > TimeSpan.Zero ||
+                 (VideoEndTime > TimeSpan.Zero && VideoEndTime != OpDuration)));
 
         private bool _isPlaying;
         [JsonIgnore]
@@ -671,18 +675,29 @@ namespace VideoDirector.Models
             EndMark.X = 0;
             EndMark.Y = 0;
 
-            PlaybackSpeed = 1.0;
             TransitionDuration = TimeSpan.Zero;
             TransitionStyle = TransitionStyle.HardSnap;
             CurveProfile = CurveProfile.Linear;
-            VideoStartTime = TimeSpan.Zero;
-            
-            // Revert duration to match the full clip duration
-            if (_videoEndTime > TimeSpan.Zero)
+
+            // TIMING IS ONLY RESET FOR SOMETHING THAT HAS A SOURCE WINDOW.
+            //
+            // A still - a freeze frame or an image - has no trim to restore. Resetting one used to
+            // set speed back to 1 and reopen the source, so a ten second snapshot of a feature film
+            // became a ninety minute clip. Reset means "put back how this clip is PRESENTED", not
+            // "stop being the thing it is"; un-freezing a snapshot is what the Speed field is for.
+            //
+            // The duration line was also wrong on its own terms: VideoEndTime is a POSITION in the
+            // source, not a length, so `OpDuration = VideoEndTime` was only right when the in-point
+            // already happened to be zero. Trim is now restored by setting the window, and
+            // OpDuration follows from it through RecomputeOpDurationFromTrim - the one place that
+            // knows a duration is (end - start) / speed.
+            if (!HasNoSourceWindow)
             {
-                OpDuration = _videoEndTime;
+                PlaybackSpeed = 1.0;          // first: the trim setters divide by it
+                VideoStartTime = TimeSpan.Zero;
+                if (_sourceDuration > TimeSpan.Zero) VideoEndTime = _sourceDuration;
             }
-            
+
             // Size and position go back to the track default too. They were left out, so after
             // resizing a PiP the clip was visibly modified while Reset sat disabled - and pressing
             // it, once something else had enabled it, left the box where it was.
