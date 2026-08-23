@@ -122,6 +122,27 @@ namespace VideoDirector.Models
         public bool MarksAreLegacyPixels { get; set; }
 
         [JsonIgnore]
+        // The placement this clip STARTED with, which is its track's default - full frame on
+        // track 1, a corner box on the others. Held per clip rather than looked up, so Reset and
+        // HasModifications stay self-contained; stamped at creation and re-stamped on load, so a
+        // project saved before this existed still gets the right answer.
+        //
+        // Without it "modified" could only mean "differs from full frame", under which every
+        // picture-in-picture is permanently modified and the flag says nothing.
+        public double DefaultPlacementWidth { get; set; } = 1.0;
+        public double DefaultPlacementHeight { get; set; } = 1.0;
+        public double DefaultPlacementCenterX { get; set; } = 0.5;
+        public double DefaultPlacementCenterY { get; set; } = 0.5;
+
+        private static bool Differs(double a, double b) => Math.Abs(a - b) > 1e-6;
+
+        [JsonIgnore]
+        public bool PlacementModified =>
+            Differs(_placementWidth, DefaultPlacementWidth) ||
+            Differs(_placementHeight, DefaultPlacementHeight) ||
+            Differs(_placementCenterX, DefaultPlacementCenterX) ||
+            Differs(_placementCenterY, DefaultPlacementCenterY);
+
         public bool HasModifications => 
             StartMark.Scale != 1.0f || StartMark.X != 0 || StartMark.Y != 0 ||
             EndMark.Scale != 1.0f || EndMark.X != 0 || EndMark.Y != 0 ||
@@ -130,7 +151,8 @@ namespace VideoDirector.Models
             TransitionStyle != TransitionStyle.HardSnap ||
             CurveProfile != CurveProfile.Linear ||
             VideoStartTime > TimeSpan.Zero ||
-            (VideoEndTime > TimeSpan.Zero && VideoEndTime != OpDuration);
+            (VideoEndTime > TimeSpan.Zero && VideoEndTime != OpDuration) ||
+            PlacementModified;
 
         private bool _isPlaying;
         [JsonIgnore]
@@ -447,6 +469,14 @@ namespace VideoDirector.Models
                 base.OnPropertyChanged(nameof(VideoStartTimeFormatted));
             else if (propertyName == nameof(VideoEndTime))
                 base.OnPropertyChanged(nameof(VideoEndTimeFormatted));
+            else if (propertyName == nameof(PlacementWidth) || propertyName == nameof(PlacementHeight)
+                  || propertyName == nameof(PlacementCenterX) || propertyName == nameof(PlacementCenterY))
+            {
+                // Placement now counts as a modification, so moving or resizing a PiP has to reach
+                // the Reset button's IsEnabled. Without this the button stayed grey after a resize.
+                base.OnPropertyChanged(nameof(PlacementModified));
+                base.OnPropertyChanged(nameof(HasModifications));
+            }
         }
 
         // Compositing opacity when this clip sits on an upper track. 1 = opaque.
@@ -653,6 +683,14 @@ namespace VideoDirector.Models
                 OpDuration = _videoEndTime;
             }
             
+            // Size and position go back to the track default too. They were left out, so after
+            // resizing a PiP the clip was visibly modified while Reset sat disabled - and pressing
+            // it, once something else had enabled it, left the box where it was.
+            PlacementWidth = DefaultPlacementWidth;
+            PlacementHeight = DefaultPlacementHeight;
+            PlacementCenterX = DefaultPlacementCenterX;
+            PlacementCenterY = DefaultPlacementCenterY;
+
             RecordedPath.Clear();
             OnPropertyChanged(nameof(HasModifications));
         }

@@ -42,6 +42,8 @@ namespace VideoDirector.ViewModels
                 Name = "Track " + (index + 1),
                 DefaultCenterX = TrackDefaults[index].x,
                 DefaultCenterY = TrackDefaults[index].y,
+                DefaultWidth = TrackDefaults[index].w,
+                DefaultHeight = TrackDefaults[index].h,
                 IsGapless = false // All tracks allow gaps now
             };
             
@@ -547,6 +549,10 @@ namespace VideoDirector.ViewModels
                     Thumbnail = thumbnail,
                     PlacementCenterX = mainTrack.DefaultCenterX,
                     PlacementCenterY = mainTrack.DefaultCenterY,
+                    DefaultPlacementCenterX = mainTrack.DefaultCenterX,
+                    DefaultPlacementCenterY = mainTrack.DefaultCenterY,
+                    DefaultPlacementWidth = TrackDefaults[0].w,
+                    DefaultPlacementHeight = TrackDefaults[0].h,
                     PlacementWidth = TrackDefaults[0].w,
                     PlacementHeight = TrackDefaults[0].h
                 });
@@ -668,6 +674,10 @@ namespace VideoDirector.ViewModels
                 Volume = trackIndex == 0 ? 1.0 : 0.0,
                 PlacementCenterX = track.DefaultCenterX,
                 PlacementCenterY = track.DefaultCenterY,
+                DefaultPlacementCenterX = track.DefaultCenterX,
+                DefaultPlacementCenterY = track.DefaultCenterY,
+                DefaultPlacementWidth = TrackDefaults[trackIndex].w,
+                DefaultPlacementHeight = TrackDefaults[trackIndex].h,
                 Thumbnail = thumbnail,
                 PlacementWidth = TrackDefaults[trackIndex].w,
                 PlacementHeight = TrackDefaults[trackIndex].h
@@ -967,6 +977,30 @@ namespace VideoDirector.ViewModels
             RaiseHistoryChanged();
         }
 
+        /// <summary>
+        /// Give every clip the default placement of the track it sits on.
+        /// </summary>
+        /// <remarks>
+        /// The default is a property of the TRACK, so a clip loaded from a project has to be told
+        /// what its baseline is before HasModifications or Reset mean anything. Re-stamping
+        /// unconditionally is what makes projects saved before these fields existed behave
+        /// correctly, rather than reporting every picture-in-picture as permanently modified.
+        /// </remarks>
+        private void StampPlacementDefaults()
+        {
+            for (int i = 0; i < Tracks.Count && i < TrackDefaults.Length; i++)
+            {
+                foreach (var clip in Tracks[i].Clips)
+                {
+                    if (clip == null) continue;
+                    clip.DefaultPlacementWidth = TrackDefaults[i].w;
+                    clip.DefaultPlacementHeight = TrackDefaults[i].h;
+                    clip.DefaultPlacementCenterX = TrackDefaults[i].x;
+                    clip.DefaultPlacementCenterY = TrackDefaults[i].y;
+                }
+            }
+        }
+
         private void RaiseHistoryChanged()
         {
             OnPropertyChanged(nameof(CanUndo));
@@ -1006,6 +1040,7 @@ namespace VideoDirector.ViewModels
             // Legacy restore paths handled inside LoadAsync. Snapshot restoration only 
             // needs to deal with the current format since snapshots are created in-session.
             EnsureTracks();
+            StampPlacementDefaults();
             OnPropertyChanged(nameof(CanAddOverlayTrack));
             OnPropertyChanged(nameof(TotalStoryTime));
         }

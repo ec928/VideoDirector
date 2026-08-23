@@ -26,6 +26,22 @@ namespace VideoDirector.Models
             set => SetProperty(ref _defaultCenterY, value);
         }
 
+        // The track already knew where new clips sit; it now also knows how big, so a clip can be
+        // stamped with a complete default placement and Reset has something to restore to.
+        private double _defaultWidth = 0.3;
+        public double DefaultWidth
+        {
+            get => _defaultWidth;
+            set => SetProperty(ref _defaultWidth, value);
+        }
+
+        private double _defaultHeight = 0.3;
+        public double DefaultHeight
+        {
+            get => _defaultHeight;
+            set => SetProperty(ref _defaultHeight, value);
+        }
+
         private string _name = "Track";
         public string Name
         {
