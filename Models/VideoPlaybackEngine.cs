@@ -71,6 +71,7 @@ namespace VideoDirector.Models
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
             _playerControl.OverlayBoxPointerPressed += OnOverlayBoxPointerPressed;
             _playerControl.PipSizeRequested += OnPipSizeRequested;
+            _playerControl.LayoutRequested += OnLayoutRequested;
             _playerControl.EditClipRequested += OnEditClipRequested;
             _playerControl.BorderTypeRequested += OnBorderTypeRequested;
             _playerControl.BorderColorRequested += OnBorderColorRequested;
@@ -2061,6 +2062,112 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         }
 
         // ---- Arrange mode: drag / wheel the PiP under the cursor (the hit slot) ----
+
+        // ==================== Layout prototypes ====================
+        //
+        // A layout arranges the clips that are ON SCREEN AT THE PLAYHEAD. That is the answer to
+        // "which clips?" - the question a spatial arrangement has to settle before it can mean
+        // anything on a timeline where tracks hold clips of different lengths. It arranges what you
+        // are looking at, which is also the only set you can judge by eye.
+        //
+        // Deliberately a one-shot: it writes each clip's placement and stops. It is NOT reflow -
+        // when one of these clips ends, its cell simply goes empty rather than the survivors
+        // rearranging. Whether that is acceptable is the thing these prototypes exist to find out.
+        private void OnLayoutRequested(object? sender, string layout)
+        {
+            if (_mode != EditorMode.Arrange) return;
+
+            var live = new System.Collections.Generic.List<(int slot, CinematicOperation clip)>();
+            for (int i = 0; i < MaxOverlayTracks; i++)
+                if (_activeOverlay[i] != null) live.Add((i, _activeOverlay[i]));
+            if (live.Count == 0) return;
+
+            var cells = LayoutCells(layout, live.Count);
+            if (cells == null) return;
+
+            for (int i = 0; i < live.Count && i < cells.Length; i++)
+                PlaceInCell(live[i].slot, live[i].clip, cells[i]);
+
+            _viewModel.RecordIfChanged();
+            Invalidate();
+        }
+
+        // Cells in PANE fractions: centre x, centre y, width, height.
+        //
+        // The gutter is subtracted from each cell rather than added between them, so the outer edge
+        // gets the same breathing room as the inner joins and the arrangement stays centred.
+        private static (double cx, double cy, double w, double h)[] LayoutCells(string layout, int count)
+        {
+            const double Gutter = 0.02;
+            double g = Gutter;
+
+            switch (layout)
+            {
+                case "side":
+                    return new[]
+                    {
+                        (0.25, 0.5, 0.5 - g * 1.5, 1.0 - g * 2),
+                        (0.75, 0.5, 0.5 - g * 1.5, 1.0 - g * 2),
+                    };
+
+                case "stack":
+                    return new[]
+                    {
+                        (0.5, 0.25, 1.0 - g * 2, 0.5 - g * 1.5),
+                        (0.5, 0.75, 1.0 - g * 2, 0.5 - g * 1.5),
+                    };
+
+                case "grid":
+                    double w = 0.5 - g * 1.5, h = 0.5 - g * 1.5;
+                    // Three clips centre the last one on its row, so the odd one out reads as
+                    // deliberate rather than as a missing fourth.
+                    if (count == 3)
+                        return new[]
+                        {
+                            (0.25, 0.25, w, h),
+                            (0.75, 0.25, w, h),
+                            (0.50, 0.75, w, h),
+                        };
+                    return new[]
+                    {
+                        (0.25, 0.25, w, h),
+                        (0.75, 0.25, w, h),
+                        (0.25, 0.75, w, h),
+                        (0.75, 0.75, w, h),
+                    };
+            }
+            return null;
+        }
+
+        // Put one clip in one cell, at the largest size that keeps its own shape.
+        //
+        // NOTHING IS CROPPED. A box whose PlacementWidth equals its PlacementHeight already has the
+        // source's aspect - that is why the default 0.3 x 0.3 corner PiPs look right - because the
+        // box is measured against the clip's own fit rectangle. So the cell is filled by the
+        // largest source-shaped rectangle that fits inside it, and the remainder of the cell is
+        // left empty rather than the picture being cut to fill it.
+        //
+        // Note the mixed units the placement model uses: width and height are fractions of the
+        // clip's FIT, while the centre is a fraction of the PANE. The conversion here is what keeps
+        // a cell expressed in pane terms from silently meaning something different per clip.
+        private void PlaceInCell(int slot, CinematicOperation clip, (double cx, double cy, double w, double h) cell)
+        {
+            double vpW = _playerControl.ActualWidth, vpH = _playerControl.ActualHeight;
+            if (vpW <= 0 || vpH <= 0) return;
+            if (!TryGetMarkSpace(clip, out double fitW, out double fitH) || fitW <= 0 || fitH <= 0) return;
+
+            double cellW = cell.w * vpW, cellH = cell.h * vpH;
+            double aspect = fitW / fitH;
+
+            // Largest rectangle of the source's aspect that fits the cell.
+            double boxW = cellW, boxH = cellW / aspect;
+            if (boxH > cellH) { boxH = cellH; boxW = cellH * aspect; }
+
+            clip.PlacementWidth = Math.Clamp(boxW / fitW, 0.05, 1.0);
+            clip.PlacementHeight = Math.Clamp(boxH / fitH, 0.05, 1.0);
+            clip.PlacementCenterX = Math.Clamp(cell.cx, 0, 1);
+            clip.PlacementCenterY = Math.Clamp(cell.cy, 0, 1);
+        }
 
         /// <summary>
         /// Resize a PiP to a fraction of the frame, in place.

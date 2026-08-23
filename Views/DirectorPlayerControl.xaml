@@ -120,6 +120,13 @@
                       <!-- Size as fractions of the frame, which is how every tool that offers
                            presets at all expresses them. Position is left alone deliberately: a
                            resize should not move the clip you have already placed. -->
+                      <!-- Acts on every clip on screen at the playhead, not just the one clicked -
+                           a layout is an arrangement of the whole frame. -->
+                      <MenuFlyoutSubItem Text="Layout (all on screen)">
+                          <MenuFlyoutItem Text="Side by side" Click="PipLayout_Click" Tag="side" />
+                          <MenuFlyoutItem Text="Stacked" Click="PipLayout_Click" Tag="stack" />
+                          <MenuFlyoutItem Text="Grid" Click="PipLayout_Click" Tag="grid" />
+                      </MenuFlyoutSubItem>
                       <MenuFlyoutSubItem Text="Size">
                           <MenuFlyoutItem Text="Full Screen" Click="PipSize_Click" Tag="1.0" />
                           <MenuFlyoutItem Text="75%" Click="PipSize_Click" Tag="0.75" />

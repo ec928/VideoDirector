@@ -252,6 +252,18 @@ namespace VideoDirector.Views
 
         public event EventHandler<(int slot, double fraction)>? PipSizeRequested;
 
+        /// <summary>
+        /// A layout applies to the whole composite, so unlike the size presets it carries no slot -
+        /// the engine works out which clips are on screen.
+        /// </summary>
+        private void PipLayout_Click(object? sender, RoutedEventArgs e)
+        {
+            var tag = (sender as FrameworkElement)?.Tag?.ToString();
+            if (!string.IsNullOrEmpty(tag)) LayoutRequested?.Invoke(this, tag);
+        }
+
+        public event EventHandler<string>? LayoutRequested;
+
         private void EditClip_Click(object? sender, RoutedEventArgs e)
         {
             if (_contextSlot >= 0) EditClipRequested?.Invoke(this, _contextSlot);
