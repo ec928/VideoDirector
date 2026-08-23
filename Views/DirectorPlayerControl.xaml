@@ -140,15 +140,22 @@
                           <MenuFlyoutItem Text="Grid" Click="PipLayout_Click" Tag="grid" />
                       </MenuFlyoutSubItem>
                       <MenuFlyoutSubItem Text="Size">
-                          <!-- 100%, not "Full Screen": the box is the clip's whole frame, which is
-                               letterboxed inside the window when their shapes differ. Covering the
-                               window instead would mean cropping, and placement fractions are
-                               capped at 1.0, so that is not expressible here. -->
-                          <MenuFlyoutItem Text="100%" Click="PipSize_Click" Tag="1.0" />
+                          <!-- ONE basis for the percentages: the window. 100% is the whole frame
+                               scaled to the window - full screen - and every other percentage is a
+                               fraction of that, so 75% is always three-quarters of 100%.
+                               Actual Size is deliberately not a percentage. It is measured against
+                               the source's own pixels, so giving it a number would put it on a
+                               different scale from the rest and invite comparisons that make no
+                               sense - which is exactly what "100% (actual size)" next to "75%"
+                               did, since 75% of a window can be larger than 100% of a small
+                               source. -->
+                          <MenuFlyoutItem Text="100% (full screen)" Click="PipSize_Click" Tag="1.0" />
                           <MenuFlyoutItem Text="75%" Click="PipSize_Click" Tag="0.75" />
                           <MenuFlyoutItem Text="50%" Click="PipSize_Click" Tag="0.5" />
                           <MenuFlyoutItem Text="33%" Click="PipSize_Click" Tag="0.33" />
                           <MenuFlyoutItem Text="25%" Click="PipSize_Click" Tag="0.25" />
+                          <MenuFlyoutSeparator />
+                          <MenuFlyoutItem Text="Actual Size" Click="PipSize_Click" Tag="actual" />
                       </MenuFlyoutSubItem>
                       <MenuFlyoutSubItem Text="Opacity">
                           <RadioMenuFlyoutItem x:Name="PipOpacity100" Text="100%" Click="Opacity_Click" Tag="1.0" GroupName="PipOpacity" />

@@ -549,17 +549,10 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
 
                 // Source pixel dimensions, so the sampled region reads in the units the footage is
                 // actually in rather than in pane pixels.
-                double srcW = 0, srcH = 0;
-                var session = _overlayPlayer[slot]?.PlaybackSession;
-                if (!still && session != null && session.NaturalVideoWidth > 0)
+                if (!TryGetSourcePixelSize(slot, op, out double srcW, out double srcH))
                 {
-                    srcW = session.NaturalVideoWidth; srcH = session.NaturalVideoHeight;
+                    srcH = 1080; srcW = 1080 * aspect;
                 }
-                else if (op.StillFrame != null && op.StillFrame.PixelWidth > 0)
-                {
-                    srcW = op.StillFrame.PixelWidth; srcH = op.StillFrame.PixelHeight;
-                }
-                if (srcW <= 0 || srcH <= 0) { srcH = 1080; srcW = 1080 * aspect; }
 
                 // The visible window expressed on the source frame. The content surface holds the
                 // WHOLE frame drawn at contentW x contentH, so scaling that ratio converts a
@@ -2215,6 +2208,26 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             clip.PlacementCenterY = Math.Clamp(cell.cy, 0, 1);
         }
 
+        // The source's real pixel dimensions: the decoder for a video, the baked bitmap for a
+        // still. Shared with the telemetry readout so the two cannot disagree about how big a clip
+        // actually is.
+        private bool TryGetSourcePixelSize(int slot, CinematicOperation clip, out double w, out double h)
+        {
+            w = 0; h = 0;
+            if (clip == null) return false;
+
+            var session = _overlayPlayer[slot]?.PlaybackSession;
+            if (!clip.IsStill && session != null && session.NaturalVideoWidth > 0)
+            {
+                w = session.NaturalVideoWidth; h = session.NaturalVideoHeight;
+            }
+            else if (clip.StillFrame != null && clip.StillFrame.PixelWidth > 0)
+            {
+                w = clip.StillFrame.PixelWidth; h = clip.StillFrame.PixelHeight;
+            }
+            return w > 0 && h > 0;
+        }
+
         /// <summary>
         /// Resize a PiP to a fraction of the frame, in place.
         /// </summary>
@@ -2230,14 +2243,32 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             var overlay = _activeOverlay[e.slot];
             if (overlay == null) return;
 
-            // 100% means the clip's WHOLE frame: the box is the fit rectangle, so a clip shaped
-            // differently from the window is letterboxed and nothing is cropped. Covering the
-            // window instead would need a fraction above 1.0, and PlacementWidth/Height clamp to
-            // [0.05, 1.0] - so a "fill and crop" preset would silently do nothing here. Relaxing
-            // that cap is a change to the placement model, not a menu entry.
-            if (!double.TryParse(e.preset, System.Globalization.NumberStyles.Float,
-                                 System.Globalization.CultureInfo.InvariantCulture, out double fraction))
+            // ONE BASIS FOR THE PERCENTAGES, and it is the window.
+            //
+            // 100% is the whole frame scaled to the window - full screen - and 75, 50, 33 and 25
+            // are fractions of that, so 75% is always three-quarters of 100%. They say nothing
+            // about the source's resolution, and they are not supposed to.
+            //
+            // "actual" is the odd one out on purpose: it sizes the box to the source's own pixels,
+            // which is a different measure entirely. That is why the menu calls it Actual Size and
+            // gives it no number - labelling it "100%" alongside a "75%" measured against the
+            // window produced the absurdity that 75% could render LARGER than 100%.
+            double fraction;
+            if (string.Equals(e.preset, "actual", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryGetSourcePixelSize(e.slot, overlay, out double nativeW, out _)) return;
+                if (!TryGetMarkSpace(overlay, out double fitW, out _) || fitW <= 0) return;
+
+                // Over 1.0 means the source is bigger than the window can show whole, so 1:1 is out
+                // of reach and the clamp below lands on Full Screen - as close as the placement
+                // model gets. Stated rather than hidden: the setter caps at 1.0.
+                fraction = nativeW / fitW;
+            }
+            else if (!double.TryParse(e.preset, System.Globalization.NumberStyles.Float,
+                                      System.Globalization.CultureInfo.InvariantCulture, out fraction))
+            {
                 return;
+            }
 
             double f = Math.Clamp(fraction, 0.05, 1.0);
             overlay.PlacementWidth = f;
