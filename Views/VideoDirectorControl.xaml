@@ -88,11 +88,32 @@
                         Padding="16">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel Spacing="16">
-                            <!-- Header: clip name + track label -->
-                            <StackPanel Margin="0,0,0,8" Spacing="2">
-                                <TextBlock Text="{Binding SelectedClip.FileName}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{Binding SelectedTrackLabel}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            </StackPanel>
+                            <!-- Header: clip name + track label, with the clip-scoped Reset beside
+                                 them. Reset lived on the transport pill, which is a GLOBAL bar -
+                                 play, speed, loop - so a per-clip destructive action sat among
+                                 controls that affect the whole project, and was hidden outside Edit
+                                 mode for no reason of its own. It resets framing, speed, trim,
+                                 transition and curve, none of which are Edit-specific, so it now
+                                 follows the clip it acts on and is available whenever one is
+                                 selected. Enablement still comes from HasModifications, so it is
+                                 dead until there is something to undo. -->
+                            <Grid Margin="0,0,0,8" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="{Binding SelectedClip.FileName}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding SelectedTrackLabel}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <Button x:Name="ResetClipButton" Grid.Column="1" Click="ResetClip_Click"
+                                        Width="32" Height="32" Padding="0" VerticalAlignment="Top"
+                                        Background="Transparent" BorderThickness="0" CornerRadius="16"
+                                        ToolTipService.ToolTip="Reset this clip: framing, speed, trim, transition and curve back to defaults"
+                                        IsEnabled="{x:Bind ViewModel.SelectedClip.HasModifications, Mode=OneWay, FallbackValue=False}">
+                                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                                </Button>
+                            </Grid>
 
                             <StackPanel Spacing="2">
                                 <!-- 1. Zoom & Motion Controls (Contains Zoom/Motion & PiP) -->
@@ -335,11 +356,6 @@
                                       ToolTipService.ToolTip="Cinematic mode - full screen, no editor chrome (Esc to exit)">
                             <FontIcon Glyph="&#xE740;" FontSize="14" />
                         </ToggleButton>
-                        <Button x:Name="ResetClipButton" Click="ResetClip_Click" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Reset Clip Modifications" Padding="0"
-                                Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
-                                IsEnabled="{x:Bind ViewModel.SelectedClip.HasModifications, Mode=OneWay, FallbackValue=False}">
-                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                        </Button>
                     </StackPanel>
 
                     <Border Width="1" Height="32" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="8,0" />
