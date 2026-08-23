@@ -230,22 +230,27 @@ namespace VideoDirector.Views
             }
         }
 
-        public event EventHandler<int>? MakeFullScreenRequested;
-        public event EventHandler<int>? MakeWindowRequested;
         public event EventHandler<int>? EditClipRequested;
         public event EventHandler<(int Slot, Models.BorderType Type)>? BorderTypeRequested;
         public event EventHandler<(int Slot, Windows.UI.Color Color)>? BorderColorRequested;
         public event EventHandler<(int Slot, double Thickness)>? BorderThicknessRequested;
 
-        private void MakeFullScreen_Click(object? sender, RoutedEventArgs e)
+        /// <summary>
+        /// One handler for every size preset; the fraction rides on the menu item's Tag, so adding
+        /// a size is a line of XAML rather than another event and another engine method.
+        /// </summary>
+        private void PipSize_Click(object? sender, RoutedEventArgs e)
         {
-            if (_contextSlot >= 0) MakeFullScreenRequested?.Invoke(this, _contextSlot);
+            if (_contextSlot < 0) return;
+            var tag = (sender as FrameworkElement)?.Tag?.ToString();
+            if (double.TryParse(tag, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out double fraction))
+            {
+                PipSizeRequested?.Invoke(this, (_contextSlot, fraction));
+            }
         }
 
-        private void MakeWindow_Click(object? sender, RoutedEventArgs e)
-        {
-            if (_contextSlot >= 0) MakeWindowRequested?.Invoke(this, _contextSlot);
-        }
+        public event EventHandler<(int slot, double fraction)>? PipSizeRequested;
 
         private void EditClip_Click(object? sender, RoutedEventArgs e)
         {

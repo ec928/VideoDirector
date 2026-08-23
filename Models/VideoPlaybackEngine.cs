@@ -70,8 +70,7 @@ namespace VideoDirector.Models
             _playerControl.CanvasCleared += (s, e) => SetSelectedMark(null);
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
             _playerControl.OverlayBoxPointerPressed += OnOverlayBoxPointerPressed;
-            _playerControl.MakeFullScreenRequested += OnMakeFullScreenRequested;
-            _playerControl.MakeWindowRequested += OnMakeWindowRequested;
+            _playerControl.PipSizeRequested += OnPipSizeRequested;
             _playerControl.EditClipRequested += OnEditClipRequested;
             _playerControl.BorderTypeRequested += OnBorderTypeRequested;
             _playerControl.BorderColorRequested += OnBorderColorRequested;
@@ -2063,35 +2062,42 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
 
         // ---- Arrange mode: drag / wheel the PiP under the cursor (the hit slot) ----
 
-        private void OnMakeFullScreenRequested(object? sender, int slot)
+        /// <summary>
+        /// Resize a PiP to a fraction of the frame, in place.
+        /// </summary>
+        /// <remarks>
+        /// Position is preserved, not reset. Resizing and repositioning are separate decisions, and
+        /// a preset that silently flung the clip back to a corner would undo placement work every
+        /// time you changed its size. The centre is only nudged when the new box would hang off the
+        /// frame, and full screen re-centres because there is nowhere else for it to be.
+        /// </remarks>
+        private void OnPipSizeRequested(object? sender, (int slot, double fraction) e)
         {
             if (_mode != EditorMode.Arrange) return;
-            var overlay = _activeOverlay[slot];
-            if (overlay != null)
+            var overlay = _activeOverlay[e.slot];
+            if (overlay == null) return;
+
+            double f = Math.Clamp(e.fraction, 0.05, 1.0);
+            overlay.PlacementWidth = f;
+            overlay.PlacementHeight = f;
+
+            if (f >= 1.0)
             {
-                overlay.PlacementWidth = 1.0;
-                overlay.PlacementHeight = 1.0;
                 overlay.PlacementCenterX = 0.5;
                 overlay.PlacementCenterY = 0.5;
-                _dispatcher.TryEnqueue(() => ApplyOverlayBox(slot, overlay, false));
-                _viewModel.RecordIfChanged();
             }
+            else
+            {
+                // Keep it on screen: the centre can sit no closer to an edge than half the box.
+                overlay.PlacementCenterX = Math.Clamp(overlay.PlacementCenterX, f / 2, 1 - f / 2);
+                overlay.PlacementCenterY = Math.Clamp(overlay.PlacementCenterY, f / 2, 1 - f / 2);
+            }
+
+            _dispatcher.TryEnqueue(() => ApplyOverlayBox(e.slot, overlay, false));
+            _viewModel.RecordIfChanged();
         }
 
-        private void OnMakeWindowRequested(object? sender, int slot)
-        {
-            if (_mode != EditorMode.Arrange) return;
-            var overlay = _activeOverlay[slot];
-            if (overlay != null)
-            {
-                overlay.PlacementWidth = 0.3;
-                overlay.PlacementHeight = 0.3;
-                overlay.PlacementCenterX = 0.72;
-                overlay.PlacementCenterY = 0.72;
-                _dispatcher.TryEnqueue(() => ApplyOverlayBox(slot, overlay, false));
-                _viewModel.RecordIfChanged();
-            }
-        }
+
 
         private void OnEditClipRequested(object? sender, int slot)
         {

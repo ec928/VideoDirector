@@ -117,9 +117,15 @@
                       <ToggleMenuFlyoutItem x:Name="PipHideItem" Text="Hide Video" Click="PipHide_Click" />
                       <ToggleMenuFlyoutItem x:Name="PipLockItem" Text="Lock Video" Click="PipLock_Click" />
                     <MenuFlyoutSeparator />
-                                          <MenuFlyoutSubItem Text="Layout">
-                          <MenuFlyoutItem Text="Full Screen (16:9)" Click="MakeFullScreen_Click" />
-                          <MenuFlyoutItem Text="Window (30% PIP)" Click="MakeWindow_Click" />
+                      <!-- Size as fractions of the frame, which is how every tool that offers
+                           presets at all expresses them. Position is left alone deliberately: a
+                           resize should not move the clip you have already placed. -->
+                      <MenuFlyoutSubItem Text="Size">
+                          <MenuFlyoutItem Text="Full Screen" Click="PipSize_Click" Tag="1.0" />
+                          <MenuFlyoutItem Text="75%" Click="PipSize_Click" Tag="0.75" />
+                          <MenuFlyoutItem Text="50%" Click="PipSize_Click" Tag="0.5" />
+                          <MenuFlyoutItem Text="33%" Click="PipSize_Click" Tag="0.33" />
+                          <MenuFlyoutItem Text="25%" Click="PipSize_Click" Tag="0.25" />
                       </MenuFlyoutSubItem>
                       <MenuFlyoutSubItem Text="Opacity">
                           <RadioMenuFlyoutItem x:Name="PipOpacity100" Text="100%" Click="Opacity_Click" Tag="1.0" GroupName="PipOpacity" />
