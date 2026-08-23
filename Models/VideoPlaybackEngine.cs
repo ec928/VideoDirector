@@ -2094,49 +2094,53 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
 
         // Cells in PANE fractions: centre x, centre y, width, height.
         //
-        // The gutter is subtracted from each cell rather than added between them, so the outer edge
-        // gets the same breathing room as the inner joins and the arrangement stays centred.
+        // DERIVED FROM THE COUNT, never a fixed table. The first cut hardcoded two cells for "side"
+        // and "stack", so with four clips on screen it arranged two of them and left the other two
+        // wherever they already were - a half-applied layout on top of the old one, which looked
+        // like nothing at all. A layout has to account for every clip it claims to arrange.
+        //
+        // side  = one row, N columns.  stack = N rows, one column.  grid = the squarest fit.
+        //
+        // The gutter is subtracted from each cell rather than inserted between them, so the outer
+        // edge gets the same breathing room as the inner joins and the block stays centred.
         private static (double cx, double cy, double w, double h)[] LayoutCells(string layout, int count)
         {
+            if (count <= 0) return null;
             const double Gutter = 0.02;
-            double g = Gutter;
 
+            int rows, cols;
             switch (layout)
             {
-                case "side":
-                    return new[]
-                    {
-                        (0.25, 0.5, 0.5 - g * 1.5, 1.0 - g * 2),
-                        (0.75, 0.5, 0.5 - g * 1.5, 1.0 - g * 2),
-                    };
-
-                case "stack":
-                    return new[]
-                    {
-                        (0.5, 0.25, 1.0 - g * 2, 0.5 - g * 1.5),
-                        (0.5, 0.75, 1.0 - g * 2, 0.5 - g * 1.5),
-                    };
-
+                case "side":  rows = 1; cols = count; break;
+                case "stack": rows = count; cols = 1; break;
                 case "grid":
-                    double w = 0.5 - g * 1.5, h = 0.5 - g * 1.5;
-                    // Three clips centre the last one on its row, so the odd one out reads as
-                    // deliberate rather than as a missing fourth.
-                    if (count == 3)
-                        return new[]
-                        {
-                            (0.25, 0.25, w, h),
-                            (0.75, 0.25, w, h),
-                            (0.50, 0.75, w, h),
-                        };
-                    return new[]
-                    {
-                        (0.25, 0.25, w, h),
-                        (0.75, 0.25, w, h),
-                        (0.25, 0.75, w, h),
-                        (0.75, 0.75, w, h),
-                    };
+                    cols = (int)Math.Ceiling(Math.Sqrt(count));
+                    rows = (int)Math.Ceiling(count / (double)cols);
+                    break;
+                default: return null;
             }
-            return null;
+
+            double cellW = 1.0 / cols, cellH = 1.0 / rows;
+            double w = cellW - Gutter * (1 + 1.0 / cols);
+            double h = cellH - Gutter * (1 + 1.0 / rows);
+            if (w <= 0 || h <= 0) return null;
+
+            var cells = new (double, double, double, double)[count];
+            for (int i = 0; i < count; i++)
+            {
+                int row = i / cols;
+                int col = i % cols;
+
+                // A short last row is centred, so the odd one out reads as deliberate rather than
+                // as a gap where a clip should have been.
+                int inThisRow = Math.Min(cols, count - row * cols);
+                double rowOffset = (cols - inThisRow) * cellW / 2.0;
+
+                cells[i] = (rowOffset + (col + 0.5) * cellW,
+                            (row + 0.5) * cellH,
+                            w, h);
+            }
+            return cells;
         }
 
         // Put one clip in one cell, at the largest size that keeps its own shape.
