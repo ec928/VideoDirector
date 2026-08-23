@@ -45,7 +45,18 @@
         </Grid.RowDefinitions>
 
         <!-- Background Layer: Full Bleed Immersive Player -->
-        <local:DirectorPlayerControl x:Name="PlayerControl" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+        <!-- RowSpan 2: the player pane is the WHOLE window, and the track dock overlays the bottom
+             of it rather than taking a bite out of it.
+
+             With the dock in its own row the pane was the window MINUS the dock, so Auto captured a
+             canvas 15% short, and toggling the dock changed the pane - which rescaled and recentred
+             the canvas every time. The canvas already reserves that space at its bottom edge; the
+             layout does not need to reserve it a second time.
+
+             The dock is declared after this and so paints on top. The dock tab stays in row 0, whose
+             bottom edge IS the dock top edge, so it needs no margin arithmetic and lands correctly
+             whether the dock is up or down. -->
+        <local:DirectorPlayerControl x:Name="PlayerControl" Grid.Row="0" Grid.RowSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
 
         <!-- ===== Zone A: Global Command Zone (top-right) =====
              Project-scoped controls only — the mode badge (read-only state) + Save/Load/Clear.
@@ -385,9 +396,9 @@
                             <!-- Show/hide, not a pin. Disabled with nothing selected, because a
                                  panel with no clip to describe has nothing to show either way -
                                  better to say so than to look inert. -->
-                            <ToggleButton x:Name="InspectorButton" IsChecked="{x:Bind ViewModel.IsInspectorOpen, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Show or hide the Properties panel for the selected clip">
-                                <SymbolIcon Symbol="List" />
-                            </ToggleButton>
+                            <!-- The inspector toggle used to live here, on the TRANSPORT pill, where
+                                 nobody would look for it: this cluster means playback. It is now a
+                                 tab on the right edge, attached to the panel it opens. -->
                             <ToggleButton x:Name="TelemetryButton" IsChecked="{x:Bind ViewModel.IsTelemetryVisible, Mode=TwoWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Show the telemetry readout (box, motion, and which part of the source is on screen)">
                                 <FontIcon Glyph="&#xE9D9;" FontSize="14" />
                             </ToggleButton>
@@ -396,6 +407,35 @@
                 </StackPanel>
             </StackPanel>
         </Border>
+
+        <!-- PANEL AFFORDANCES. Attached to the edge each panel occupies, because a control for a
+             panel belongs to that panel - not to the transport pill, which is where these used to
+             be and where they were effectively undiscoverable.
+
+             They stay visible when their panel is closed, or the panel becomes unreachable. Both
+             hide with the rest of the chrome in cinematic mode. -->
+        <ToggleButton Grid.Row="0" x:Name="InspectorTab"
+                      IsChecked="{x:Bind ViewModel.IsInspectorOpen, Mode=TwoWay}"
+                      IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}"
+                      Visibility="{x:Bind ViewModel.IsChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                      Width="14" Height="56" Padding="0" Margin="0,0,2,0"
+                      Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                      BorderThickness="0" CornerRadius="4" Opacity="0.65"
+                      ToolTipService.ToolTip="Show or hide the Properties panel for the selected clip">
+            <FontIcon Glyph="&#xE76B;" FontSize="10" />
+        </ToggleButton>
+
+        <ToggleButton Grid.Row="0" x:Name="TrackDockTab"
+                      IsChecked="{x:Bind ViewModel.IsTrackDockOpen, Mode=TwoWay}"
+                      Visibility="{x:Bind ViewModel.IsChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                      HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                      Width="56" Height="14" Padding="0" Margin="0,0,0,2"
+                      Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                      BorderThickness="0" CornerRadius="4" Opacity="0.65"
+                      ToolTipService.ToolTip="Show or hide the track manager">
+            <FontIcon Glyph="&#xE70D;" FontSize="10" />
+        </ToggleButton>
 
         <!-- Bottom Track Dock: horizontal arrangement lanes (one per track).
              Auto-hides during playback if no mouse movement. -->
@@ -433,6 +473,23 @@
                                 Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
                                 ToolTipService.ToolTip="Add track">
                             <FontIcon Glyph="&#xE710;" FontSize="13" />
+                        </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <!-- Canvas: the composition space everything is measured against. Only Auto
+                             is implemented; the rest are listed so the choice is visible rather
+                             than hidden, and disabled so they cannot lie about what they do. -->
+                        <Button x:Name="CanvasButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
+                                ToolTipService.ToolTip="Canvas size">
+                            <FontIcon Glyph="&#xE7C4;" FontSize="13" />
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <RadioMenuFlyoutItem x:Name="CanvasAutoItem" Text="Auto" IsChecked="True" GroupName="CanvasSize" Click="CanvasMode_Click" Tag="Auto" />
+                                    <MenuFlyoutSeparator />
+                                    <RadioMenuFlyoutItem Text="Match working area" GroupName="CanvasSize" IsEnabled="False" />
+                                    <RadioMenuFlyoutItem Text="Follow window" GroupName="CanvasSize" IsEnabled="False" />
+                                    <RadioMenuFlyoutItem Text="Custom size..." GroupName="CanvasSize" IsEnabled="False" />
+                                </MenuFlyout>
+                            </Button.Flyout>
                         </Button>
                         <Button x:Name="RemoveTrackButton" Click="RemoveTrack_Click"
                                 IsEnabled="{x:Bind ViewModel.CanRemoveTrack, Mode=OneWay}"

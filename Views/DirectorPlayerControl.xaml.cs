@@ -44,11 +44,24 @@ namespace VideoDirector.Views
         // shape beneath a video surface is erased rather than blended. Being above everything, it
         // is the engine that decides when a higher opaque clip should hide it.
         public Microsoft.UI.Xaml.Shapes.Rectangle Border;
+
     }
 
     public sealed partial class DirectorPlayerControl : UserControl
     {
         private bool _isDragging = false;
+
+        // Middle-button view drag. Panning is measured in PANE pixels - the translate it feeds is
+        // applied outside the canvas scale, so canvas-space deltas would be wrong by the zoom.
+        private bool _isPanning;
+        private bool _panMoved;
+        private Point _panLast;
+
+        /// <summary>Set by the host so the wheel knows whether a clip owns it.</summary>
+        public bool HasSelection { get; set; }
+
+        /// <summary>The middle button clears the clip selection before it pans.</summary>
+        public event EventHandler? DeselectRequested;
         private Point _lastPointerPosition;
         private int _dragSlot = -1;
         private BoxGrab _dragGrab;
@@ -85,19 +98,210 @@ namespace VideoDirector.Views
         public event EventHandler<int> EditRequested;
         public event EventHandler ExitEditRequested;
 
-        public PlayerInputMode InputMode { get; set; } = PlayerInputMode.Content;
+        // ---- The canvas ------------------------------------------------------------------
+        //
+        // Its size is the composition's size. The pane only decides how big it LOOKS.
+
+        public double CanvasWidth  => CanvasHost.Width  > 0 ? CanvasHost.Width  : 1920;
+        public double CanvasHeight => CanvasHost.Height > 0 ? CanvasHost.Height : 1080;
+
+        private double _canvasZoom = 1.0;
+
+        // Two different presentations, with different rules.
+        //
+        // PLAYBACK dims the chrome and leaves the view alone: zoom and pan are useful while
+        // something is running, and middle-click puts the view back in one action.
+        //
+        // CINEMATIC is the performance. The whole canvas, fit, no pan, and the view controls inert -
+        // there is no reason to be zoomed into a corner of a piece you are showing someone, and no
+        // opportunity to notice and fix it while it happens. The working view is handed back on the
+        // way out.
+        private bool _isPlaybackView;
+        private bool _isCinematicView;
+        private bool _isEditView;
+        private double _savedZoom = 1.0, _savedPanX, _savedPanY;
+        private double _canvasPanX, _canvasPanY;
+
+        public double CanvasZoom => _canvasZoom;
+        public bool IsCanvasViewDefault => _canvasZoom == 1.0 && _canvasPanX == 0 && _canvasPanY == 0;
+
+        /// <summary>Raised when the canvas size changes, so the composite can be re-laid out.</summary>
+        public event EventHandler CanvasSizeChanged;
+
+        public void SetCanvasSize(double w, double h)
+        {
+            if (w <= 0 || h <= 0) return;
+            if (CanvasHost.Width == w && CanvasHost.Height == h) return;
+
+            CanvasHost.Width = w;
+            CanvasHost.Height = h;
+
+            // Once now, and once more after the layout pass this resize triggers. Computing the fit
+            // against a stale ActualWidth is what left it wrong for the rest of the session, because
+            // nothing recomputed it afterwards.
+            UpdateCanvasLayout();
+            DispatcherQueue?.TryEnqueue(UpdateCanvasLayout);
+
+            CanvasSizeChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        // Fit the canvas to the pane, then apply zoom and pan on top. Fit is recomputed on every
+        // pane resize; the arrangement inside the canvas never moves, only this transform does.
+        public void UpdateCanvasLayout()
+        {
+            if (RootLayer == null || CanvasTransform == null) return;
+
+            // THIS control's size, not RootLayer's. The host sets the canvas from PlayerControl's
+            // ActualWidth/Height, and the fit has to divide by the very same number or the two
+            // disagree - which is exactly how a canvas that had just been set to the pane size still
+            // came out at 107%: set from one measurement, divided by another taken a layout pass
+            // apart.
+            double paneW = ActualWidth, paneH = ActualHeight;
+            if (paneW <= 0 || paneH <= 0) return;
+
+            double fit = Math.Min(paneW / CanvasWidth, paneH / CanvasHeight);
+            if (fit <= 0 || double.IsNaN(fit) || double.IsInfinity(fit)) fit = 1;
+
+            double effective = fit * _canvasZoom;
+
+            CanvasTransform.ScaleX = effective;
+            CanvasTransform.ScaleY = effective;
+            CanvasTransform.TranslateX = _canvasPanX;
+            CanvasTransform.TranslateY = _canvasPanY;
+
+            UpdateCanvasLabel(effective);
+
+            // Keyframe tabs carry the inverse, so their text is never drawn at a fractional scale.
+            double inv = effective > 0 ? 1.0 / effective : 1.0;
+            if (WysiwygStartTabScale != null) { WysiwygStartTabScale.ScaleX = inv; WysiwygStartTabScale.ScaleY = inv; }
+            if (WysiwygMidTabScale != null)   { WysiwygMidTabScale.ScaleX = inv;   WysiwygMidTabScale.ScaleY = inv; }
+            if (WysiwygEndTabScale != null)   { WysiwygEndTabScale.ScaleX = inv;   WysiwygEndTabScale.ScaleY = inv; }
+        }
+
+        // The canvas outline belongs to Arrange. In Edit a single clip is being framed against the
+        // Start/Mid/End rectangles, and a canvas outline there has nothing to say.
+
+        /// <summary>Called per frame by the engine. Records the condition; ApplyCanvasChrome owns
+        /// what actually happens to the element.</summary>
+        public void SetCanvasEdgeVisible(bool visible)
+        {
+            bool edit = !visible;
+            if (_isEditView == edit) return;
+
+            _isEditView = edit;
+            ApplyCanvasChrome();
+        }
+
+        // Takes the scale it is meant to display, rather than reading a field that has to be kept
+        // in step. The field version silently printed its own initialiser - 100%, always - once a
+        // refactor dropped the line that assigned it, so the readout sat next to a transform it had
+        // no connection to.
+        private void UpdateCanvasLabel(double effectiveScale)
+        {
+            if (CanvasLabel == null) return;
+            CanvasLabel.Text = "Canvas  " + Math.Round(effectiveScale * 100).ToString("0") + "%";
+        }
+
+        /// <summary>
+        /// Playback: take the canvas chrome out of shot. The view is untouched.
+        /// </summary>
+        public void SetPlaybackView(bool playing)
+        {
+            if (_isPlaybackView == playing) return;
+            _isPlaybackView = playing;
+            ApplyCanvasChrome();
+        }
+
+        /// <summary>
+        /// Cinematic: the whole canvas at fit, no pan, view controls inert. The working view is
+        /// saved on the way in and restored on the way out.
+        /// </summary>
+        public void SetCinematicView(bool cinematic)
+        {
+            if (_isCinematicView == cinematic) return;
+            _isCinematicView = cinematic;
+
+            if (cinematic)
+            {
+                _savedZoom = _canvasZoom; _savedPanX = _canvasPanX; _savedPanY = _canvasPanY;
+                _canvasZoom = 1.0; _canvasPanX = 0; _canvasPanY = 0;
+            }
+            else
+            {
+                _canvasZoom = _savedZoom; _canvasPanX = _savedPanX; _canvasPanY = _savedPanY;
+            }
+
+            ApplyCanvasChrome();
+            UpdateCanvasLayout();
+        }
+
+        // ONE OWNER FOR THE EDGE.
+        //
+        // Every condition that can hide it feeds this, and nothing else writes Visibility. The bug
+        // this replaces: the engine set the edge visible from ApplyOverlayBox on EVERY FRAME while
+        // playback set it hidden once, so playback lost - the chrome came straight back and the
+        // label sat in the middle of the picture for the whole performance.
+        //
+        // HIDDEN, not dimmed. The edge stroke straddles the canvas boundary, so half of it lies over
+        // the outermost pixels of any clip that reaches the edge - and a full-frame clip does. At low
+        // opacity against black void it disappears; against a bright picture it reads as a line down
+        // each side of the frame, which is precisely where it is least wanted.
+        private void ApplyCanvasChrome()
+        {
+            if (CanvasEdge == null) return;
+
+            bool show = !_isPlaybackView && !_isCinematicView && !_isEditView;
+            var want = show ? Visibility.Visible : Visibility.Collapsed;
+            if (CanvasEdge.Visibility != want) CanvasEdge.Visibility = want;
+        }
+
+        /// <summary>Back to fit-the-pane, centred. Bound to middle-click.</summary>
+        /// <summary>Back to fit-the-pane, centred. Bound to middle-click.</summary>
+        public void ResetCanvasView()
+        {
+            _canvasZoom = 1.0;
+            _canvasPanX = 0;
+            _canvasPanY = 0;
+            UpdateCanvasLayout();
+        }
+
+        public void ZoomCanvas(double factor)
+        {
+            if (_isCinematicView) return;   // a performance is not a view to move around
+            _canvasZoom = Math.Clamp(_canvasZoom * factor, 0.2, 8.0);
+            UpdateCanvasLayout();
+        }
+
+        public void PanCanvas(double dx, double dy)
+        {
+            if (_isCinematicView) return;
+            _canvasPanX += dx;
+            _canvasPanY += dy;
+            UpdateCanvasLayout();
+        }
+
+        // Setting this abandons any view drag in progress. Edit has no view controls, so a pan
+        // that survived the mode change would keep swallowing pointer moves that Edit needs.
+        private PlayerInputMode _inputMode = PlayerInputMode.Content;
+        public PlayerInputMode InputMode
+        {
+            get => _inputMode;
+            set { _inputMode = value; _isPanning = false; }
+        }
 
         public DirectorPlayerControl()
         {
             this.InitializeComponent();
 
+            RootLayer.SizeChanged += (s, e) => UpdateCanvasLayout();
+
             OverlayVisuals = new OverlayVisual[ViewModels.DirectorViewModel.MaxTracks];
             for (int i = 0; i < OverlayVisuals.Length; i++)
             {
                 OverlayVisuals[i] = BuildOverlayVisual();
-                // Insert at i so the tracks land ahead of everything declared in XAML (InputLayer,
-                // the WYSIWYG canvas, the HUD) and stack among themselves in track order.
-                RootLayer.Children.Insert(i, OverlayVisuals[i].Grid);
+                // Insert at i so the tracks land beneath everything declared inside CanvasHost
+                // and stack among themselves in track order.
+                CanvasHost.Children.Insert(i, OverlayVisuals[i].Grid);
 
                 // One border per slot, in slot order, so BorderHost.Children[i] is always slot i.
                 BorderHost.Children.Add(OverlayVisuals[i].Border);
@@ -259,12 +463,42 @@ namespace VideoDirector.Views
 
         private void InputLayer_PointerPressed(object? sender, PointerRoutedEventArgs e)
         {
-            var p = e.GetCurrentPoint(InputLayer).Position;
+            // MIDDLE BUTTON DRIVES THE VIEW, never a clip - and it drops the selection first.
+            //
+            // ARRANGE ONLY. This block used to run before the mode check, so in Edit it cleared the
+            // selected clip and started panning the canvas: the keyframe rectangles lost their
+            // selection, the inspector emptied, and the whole mode came apart. Edit frames one clip
+            // against the canvas and has its own meaning for drag and wheel - the view controls have
+            // no business there.
+            //
+            // The wheel means "zoom the canvas" only while nothing is selected. Without clearing
+            // here, the natural sequence - pan to somewhere, then scroll to zoom - would silently
+            // resize whatever was still selected instead. That is a destructive accident you would
+            // not notice, which is worth more than the mild annoyance of losing a selection.
+            if (InputMode == PlayerInputMode.ArrangePips && !_isCinematicView &&
+                e.GetCurrentPoint(RootLayer).Properties.IsMiddleButtonPressed)
+            {
+                DeselectRequested?.Invoke(this, EventArgs.Empty);
+                _isPanning = true;
+                _panMoved = false;
+                _panLast = e.GetCurrentPoint(RootLayer).Position;
+                InputLayer.CapturePointer(e.Pointer);
+                e.Handled = true;
+                return;
+            }
+
+            var p = e.GetCurrentPoint(CanvasHost).Position;
 
             if (InputMode == PlayerInputMode.ArrangePips)
             {
                 _dragSlot = HitTestOverlaySlot(p);
-                if (_dragSlot < 0) return; // clicked empty canvas
+                if (_dragSlot < 0)
+                {
+                    // Empty space drops the selection - the same outcome the middle button has, but
+                    // without resetting the view, because a click on nothing says nothing about zoom.
+                    DeselectRequested?.Invoke(this, EventArgs.Empty);
+                    return;
+                }
                 OverlayBoxPointerPressed?.Invoke(this, _dragSlot);
                 _dragGrab = ClassifyGrab(_dragSlot, p);
                 _isDragging = true;
@@ -284,9 +518,18 @@ namespace VideoDirector.Views
 
         private void InputLayer_PointerMoved(object? sender, PointerRoutedEventArgs e)
         {
+            if (_isPanning)
+            {
+                var q = e.GetCurrentPoint(RootLayer).Position;
+                double dx = q.X - _panLast.X, dy = q.Y - _panLast.Y;
+                if (Math.Abs(dx) > 0.5 || Math.Abs(dy) > 0.5) _panMoved = true;
+                PanCanvas(dx, dy);
+                _panLast = q;
+                return;
+            }
             if (!_isDragging) return;
 
-            var p = e.GetCurrentPoint(InputLayer).Position;
+            var p = e.GetCurrentPoint(CanvasHost).Position;
             var deltaX = p.X - _lastPointerPosition.X;
             var deltaY = p.Y - _lastPointerPosition.Y;
             _lastPointerPosition = p;
@@ -311,14 +554,15 @@ namespace VideoDirector.Views
         {
             if (InputMode != PlayerInputMode.ArrangePips) return;
 
-            var p = e.GetPosition(InputLayer);
+            var p = e.GetPosition(CanvasHost);       // canvas space: for the hit test
+            var paneP = e.GetPosition(InputLayer);   // pane space: for where the flyout opens
             _contextSlot = HitTestOverlaySlot(p);
             
             if (_contextSlot >= 0)
             {
                 OverlayBoxPointerPressed?.Invoke(this, _contextSlot);
                 ContextMenuOpening?.Invoke(this, _contextSlot);
-                PipContextMenu.ShowAt(InputLayer, new FlyoutShowOptions { Position = p });
+                PipContextMenu.ShowAt(InputLayer, new FlyoutShowOptions { Position = paneP });
             }
         }
 
@@ -450,6 +694,14 @@ namespace VideoDirector.Views
 
         private void InputLayer_PointerReleased(object? sender, PointerRoutedEventArgs e)
         {
+            if (_isPanning)
+            {
+                _isPanning = false;
+                InputLayer.ReleasePointerCapture(e.Pointer);
+                // A middle CLICK - press and release without moving - is "put the view back".
+                if (!_panMoved) ResetCanvasView();
+                return;
+            }
             _isDragging = false;
             _dragSlot = -1;
             InputLayer.ReleasePointerCapture(e.Pointer);
@@ -457,6 +709,14 @@ namespace VideoDirector.Views
 
         private void InputLayer_PointerCanceled(object? sender, PointerRoutedEventArgs e)
         {
+            if (_isPanning)
+            {
+                _isPanning = false;
+                InputLayer.ReleasePointerCapture(e.Pointer);
+                // A middle CLICK - press and release without moving - is "put the view back".
+                if (!_panMoved) ResetCanvasView();
+                return;
+            }
             _isDragging = false;
             _dragSlot = -1;
             InputLayer.ReleasePointerCapture(e.Pointer);
@@ -464,11 +724,19 @@ namespace VideoDirector.Views
 
         private void InputLayer_PointerWheelChanged(object? sender, PointerRoutedEventArgs e)
         {
-            var pt = e.GetCurrentPoint(InputLayer);
+            var pt = e.GetCurrentPoint(CanvasHost);
             int delta = pt.Properties.MouseWheelDelta;
 
             if (InputMode == PlayerInputMode.ArrangePips)
             {
+                // Nothing selected: the wheel belongs to the view. Select a clip and it goes back
+                // to resizing, which is why the middle button deselects before it pans.
+                if (!HasSelection)
+                {
+                    ZoomCanvas(delta > 0 ? 1.1 : 1.0 / 1.1);
+                    return;
+                }
+
                 int slot = HitTestOverlaySlot(pt.Position);
                 if (slot >= 0) OverlayBoxWheel?.Invoke(this, (slot, delta));
                 return;
@@ -503,7 +771,7 @@ namespace VideoDirector.Views
                 // This does not affect a full-screen Track 1: its grid covers the pane, so a click
                 // over its picture hit-tests to slot 0 and still opens. Only a genuine miss - the
                 // letterbox bars, or a spot where no track has an active clip - is now inert.
-                int slot = HitTestOverlaySlot(e.GetPosition(InputLayer));
+                int slot = HitTestOverlaySlot(e.GetPosition(CanvasHost));
                 if (slot >= 0) EditRequested?.Invoke(this, slot);
             }
             else

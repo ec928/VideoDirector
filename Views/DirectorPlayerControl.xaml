@@ -8,28 +8,11 @@
     Background="Black">
 
     <Grid x:Name="RootLayer" Background="Black">
-        <!-- Track render surfaces are built in code and INSERTED HERE, as direct children of this
-             grid - one per DirectorViewModel.MaxTracks, ahead of InputLayer so they sit beneath it.
-             They are built rather than declared so the slot count and the visual count cannot
-             drift apart: addressing a slot with no visual behind it is an IndexOutOfRangeException
-             mid-playback.
-
-             They are NOT wrapped in a container. Nesting them one level deeper changed how the
-             tracks composite against each other - a clip border stopped surviving under a
-             semi-transparent clip on a higher track - so the tree is kept exactly as it was when
-             the six grids were written out longhand here. -->
-
-        <!-- Clip borders, ABOVE every track picture and below the input layer.
-
-             They cannot be drawn inside the clip they belong to. A XAML shape beneath a video
-             surface is erased rather than blended, so a clip at 35% opacity on a higher track
-             wiped a lower border out completely instead of dimming it. Above the video surfaces
-             it simply draws.
-
-             Declared FIRST so that after the track grids are inserted at 0..MaxTracks-1 this ends
-             up directly above them and still below InputLayer. -->
-        <Canvas x:Name="BorderHost" x:FieldModifier="public" IsHitTestVisible="False" />
-
+        <!-- Input sits UNDERNEATH everything on purpose. The track surfaces, the borders and the
+             canvas edge are all hit-test-invisible, so pointer input falls straight through to
+             here; only the WYSIWYG handles above it consume anything. It stays in PANE space
+             rather than moving inside the canvas because a click in the void outside the canvas
+             has to be catchable too - that is where you click to drop a selection. -->
         <!-- Interactive Input Layer for Manual Targeting -->
         <Grid x:Name="InputLayer" Background="Transparent"
               PointerWheelChanged="InputLayer_PointerWheelChanged"
@@ -72,6 +55,10 @@
                           <MenuFlyoutItem Text="33%" Click="PipSize_Click" Tag="0.33" />
                           <MenuFlyoutItem Text="25%" Click="PipSize_Click" Tag="0.25" />
                           <MenuFlyoutSeparator />
+                          <!-- Neither of these is a percentage of the window, so neither gets a
+                               number: Fill Canvas is measured against the CANVAS and crops whatever
+                               overhangs, Actual Size against the source's own pixels. -->
+                          <MenuFlyoutItem Text="Fill Canvas (crops)" Click="PipSize_Click" Tag="fill" />
                           <MenuFlyoutItem Text="Actual Size" Click="PipSize_Click" Tag="actual" />
                       </MenuFlyoutSubItem>
                       <MenuFlyoutSubItem Text="Opacity">
@@ -102,56 +89,123 @@
             </FlyoutBase.AttachedFlyout>
         </Grid>
 
-        <!-- WYSIWYG Overlay for Edit Mode (Interactive Grids) -->
-        <Canvas x:Name="WysiwygCanvas" x:FieldModifier="public" IsHitTestVisible="True" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-            <!-- Start Box -->
-            <Grid x:Name="WysiwygStartRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
-                <Grid.RenderTransform>
-                    <ScaleTransform x:Name="WysiwygStartPop" x:FieldModifier="public" />
-                </Grid.RenderTransform>
-                <Rectangle x:Name="WysiwygStartFrame" x:FieldModifier="public" Stroke="Cyan" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
-                <Border Background="Cyan" Padding="6,2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
-                        PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Start">
-                     <TextBlock Text="Start Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
+        <!-- THE CANVAS.
+
+             A composition space of its own fixed size, rather than "whatever the pane happens to
+             be right now". Everything is measured against it, so hiding the dock, resizing the
+             window or going fullscreen changes only the SCALE at which the arrangement is seen -
+             never the arrangement itself. Before this, the pane WAS the composition, so the dock
+             stole height from the frame and playback silently handed it back.
+
+             CanvasTransform scales it to fit the pane and carries the Arrange-mode zoom and pan
+             on top. Centred, so scaling about the middle keeps it put. -->
+        <Grid x:Name="CanvasHost" x:FieldModifier="public"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              Width="1920" Height="1080" RenderTransformOrigin="0.5,0.5">
+            <Grid.RenderTransform>
+                <CompositeTransform x:Name="CanvasTransform" x:FieldModifier="public" />
+            </Grid.RenderTransform>
+
+            <!-- Track render surfaces are built in code and INSERTED HERE at 0..MaxTracks-1, so
+                 they land beneath everything declared below and stack in track order among
+                 themselves. Built rather than declared so the slot count and the visual count
+                 cannot drift apart. -->
+
+            <!-- Clip borders, above every track picture. They cannot be drawn inside the clip they
+                 belong to: a XAML shape beneath a video surface is erased rather than blended, so
+                 a clip at 35% opacity on a higher track wiped a lower border out completely. -->
+            <Canvas x:Name="BorderHost" x:FieldModifier="public" IsHitTestVisible="False" />
+
+            <!-- Where the frame ends.
+
+                 A 1px near-transparent hairline was effectively invisible against video. This is a
+                 translucent cool white-blue at 2px, deliberately a colour no track uses so it never
+                 reads as a clip outline, plus a badge in the same idiom as the T1..T6 track badges
+                 so the two are obviously the same kind of label.
+
+                 The badge sits INSIDE the canvas, top centre. Track badges are all top-LEFT, so the
+                 centre is never mistaken for one, and inside means it cannot be clipped away when
+                 the canvas reaches the edge of the pane - which is what happened when it hung in
+                 the void above the canvas. -->
+            <Grid x:Name="CanvasEdge" x:FieldModifier="public" IsHitTestVisible="False">
+                <Rectangle x:Name="CanvasEdgeStroke" Fill="Transparent" Stroke="#7C838D" StrokeThickness="1" />
+                <Border x:Name="CanvasBadge" Background="#E6353A42" CornerRadius="3" Padding="8,2" MinWidth="96"
+                        HorizontalAlignment="Center" VerticalAlignment="Top" Margin="4">
+                    <TextBlock x:Name="CanvasLabel" Text="Canvas" FontSize="10" FontWeight="SemiBold"
+                               Foreground="#C9CED6" HorizontalAlignment="Center" />
                 </Border>
-                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,TL"/>
-                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,TR"/>
-                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,BL"/>
-                <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,BR"/>
             </Grid>
 
-            <!-- Mid Box -->
-            <Grid x:Name="WysiwygMidRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
-                <Grid.RenderTransform>
-                    <ScaleTransform x:Name="WysiwygMidPop" x:FieldModifier="public" />
-                </Grid.RenderTransform>
-                <Rectangle x:Name="WysiwygMidFrame" x:FieldModifier="public" Stroke="DeepSkyBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
-                <Border Background="DeepSkyBlue" Padding="6,2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
-                        PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Mid">
-                     <TextBlock Text="Mid Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
-                </Border>
-                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,TL"/>
-                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,TR"/>
-                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,BL"/>
-                <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,BR"/>
-            </Grid>
+            <!-- WYSIWYG Overlay for Edit Mode (Interactive Grids) -->
+            <Canvas x:Name="WysiwygCanvas" x:FieldModifier="public" IsHitTestVisible="True" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <!-- The three keyframe rectangles live INSIDE the canvas so their geometry matches
+                     the clips, which are measured against it. That means they are scaled by the
+                     canvas transform - and 10px bold text rasterised at a fractional scale turns to
+                     mush, which is what happened to these labels at any canvas scale other than 1
+                     (cinematic is 1.06, and any window resize does it).
 
-            <!-- End Box -->
-            <Grid x:Name="WysiwygEndRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
-                <Grid.RenderTransform>
-                    <ScaleTransform x:Name="WysiwygEndPop" x:FieldModifier="public" />
-                </Grid.RenderTransform>
-                <Rectangle x:Name="WysiwygEndFrame" x:FieldModifier="public" Stroke="RoyalBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
-                <Border Background="RoyalBlue" Padding="6,2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
-                        PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="End">
-                     <TextBlock Text="End Frame" FontSize="10" Foreground="White" FontWeight="Bold"/>
-                </Border>
-                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,TL"/>
-                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,TR"/>
-                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,BL"/>
-                <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,BR"/>
-            </Grid>
-        </Canvas>
+                     Each tab therefore carries the INVERSE scale, applied in UpdateCanvasLayout, so
+                     the rectangles scale with the picture while their labels stay legible at their
+                     designed size. RenderTransformOrigin anchors each tab to the corner it hangs
+                     off, so counter-scaling does not detach it from its rectangle. -->
+                <!-- Start Box -->
+                <Grid x:Name="WysiwygStartRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="WysiwygStartPop" x:FieldModifier="public" />
+                    </Grid.RenderTransform>
+                    <Rectangle x:Name="WysiwygStartFrame" x:FieldModifier="public" Stroke="Cyan" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+                    <Border x:Name="WysiwygStartTab" RenderTransformOrigin="0,1" Background="Cyan" Padding="6,2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
+                            PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Start">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="WysiwygStartTabScale" />
+                        </Border.RenderTransform>
+                         <TextBlock Text="Start Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
+                    </Border>
+                    <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,TL"/>
+                    <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,TR"/>
+                    <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,BL"/>
+                    <Rectangle Width="12" Height="12" Fill="Cyan" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Start,BR"/>
+                </Grid>
+
+                <!-- Mid Box -->
+                <Grid x:Name="WysiwygMidRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="WysiwygMidPop" x:FieldModifier="public" />
+                    </Grid.RenderTransform>
+                    <Rectangle x:Name="WysiwygMidFrame" x:FieldModifier="public" Stroke="DeepSkyBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+                    <Border x:Name="WysiwygMidTab" RenderTransformOrigin="0.5,1" Background="DeepSkyBlue" Padding="6,2" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
+                            PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="Mid">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="WysiwygMidTabScale" />
+                        </Border.RenderTransform>
+                         <TextBlock Text="Mid Frame" FontSize="10" Foreground="Black" FontWeight="Bold"/>
+                    </Border>
+                    <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,TL"/>
+                    <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,TR"/>
+                    <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,BL"/>
+                    <Rectangle Width="12" Height="12" Fill="DeepSkyBlue" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="Mid,BR"/>
+                </Grid>
+
+                <!-- End Box -->
+                <Grid x:Name="WysiwygEndRect" x:FieldModifier="public" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="WysiwygEndPop" x:FieldModifier="public" />
+                    </Grid.RenderTransform>
+                    <Rectangle x:Name="WysiwygEndFrame" x:FieldModifier="public" Stroke="RoyalBlue" Fill="Transparent" StrokeThickness="2" StrokeDashArray="4,4" IsHitTestVisible="False" />
+                    <Border x:Name="WysiwygEndTab" RenderTransformOrigin="1,1" Background="RoyalBlue" Padding="6,2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-22,0,0" CornerRadius="4,4,0,0" 
+                            PointerPressed="WysiwygTab_PointerPressed" PointerMoved="WysiwygTab_PointerMoved" PointerReleased="WysiwygTab_PointerReleased" PointerCanceled="WysiwygTab_PointerReleased" Tag="End">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="WysiwygEndTabScale" />
+                        </Border.RenderTransform>
+                         <TextBlock Text="End Frame" FontSize="10" Foreground="White" FontWeight="Bold"/>
+                    </Border>
+                    <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,TL"/>
+                    <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,TR"/>
+                    <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-6,0,0,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,BL"/>
+                    <Rectangle Width="12" Height="12" Fill="RoyalBlue" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,-6"  PointerPressed="WysiwygHandle_PointerPressed" PointerMoved="WysiwygHandle_PointerMoved" PointerReleased="WysiwygHandle_PointerReleased" PointerCanceled="WysiwygHandle_PointerReleased" Tag="End,BR"/>
+                </Grid>
+            </Canvas>
+        </Grid>
 
         <!-- HUD Overlays -->
         <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="20" Spacing="16" IsHitTestVisible="False">

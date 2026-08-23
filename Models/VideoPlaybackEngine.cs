@@ -532,7 +532,7 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
                 }
 
                 bool editMode = _mode == EditorMode.Edit;
-                double vpW = _playerControl.ActualWidth, vpH = _playerControl.ActualHeight;
+                double vpW = _playerControl.CanvasWidth, vpH = _playerControl.CanvasHeight;
 
                 // Same functions the compositor uses, not a parallel copy - a readout that
                 // recomputes its own geometry can agree with itself while disagreeing with what was
@@ -624,8 +624,8 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
         {
             fitW = 0; fitH = 0;
 
-            double vpW = _playerControl.ActualWidth;
-            double vpH = _playerControl.ActualHeight;
+            double vpW = _playerControl.CanvasWidth;
+            double vpH = _playerControl.CanvasHeight;
             if (vpW <= 0 || vpH <= 0) return false;
 
             // No 16:9 guess. Reporting false lets the caller hold off for a frame; inventing an
@@ -732,8 +732,8 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
             UpdateTelemetryOverlay(true);
 
-            double vpW = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
-            double vpH = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
+            double vpW = _playerControl.CanvasWidth > 0 ? _playerControl.CanvasWidth : 1920;
+            double vpH = _playerControl.CanvasHeight > 0 ? _playerControl.CanvasHeight : 1080;
 
             // In Edit mode, the clip being edited is always isolated into slot 0.
             //
@@ -1286,8 +1286,8 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
         {
             var grid = _playerControl.OverlayVisuals[slot].Grid;
             double aspect = AspectOf(overlay, slot);
-            double vpW = _playerControl.ActualWidth;
-            double vpH = _playerControl.ActualHeight;
+            double vpW = _playerControl.CanvasWidth;
+            double vpH = _playerControl.CanvasHeight;
             if (aspect <= 0 || vpW <= 0 || vpH <= 0) return false;
 
             // Video fit to viewport (contained), preserving aspect — the "scale 1" reference.
@@ -1399,6 +1399,14 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             // covers this", so that is decided here instead.
             grid.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
 
+            // The canvas outline is an ARRANGE thing and is hidden in Edit.
+            //
+            // Two attempts were made to give it a job there - outlining the clip box, then the
+            // transformed frame - and both put a rectangle somewhere unrelated to anything on
+            // screen. Edit already has the reference it needs: the Start, Mid and End rectangles
+            // ARE the framing, and a fourth outline competing with them is noise at best.
+            _playerControl.SetCanvasEdgeVisible(!editMode);
+
             bool anyVisible = TryGetVisibleBorderRegion(slot, box, out var visibleBorder);
 
             if (overlay.BorderType == BorderType.None || editMode || !anyVisible)
@@ -1487,7 +1495,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
             if (op == null) return false;
 
             double aspect = AspectOf(op, slot);
-            double vpW = _playerControl.ActualWidth, vpH = _playerControl.ActualHeight;
+            double vpW = _playerControl.CanvasWidth, vpH = _playerControl.CanvasHeight;
             if (aspect <= 0 || vpW <= 0 || vpH <= 0) return false;
 
             var fit = ClipGeometry.Fit(aspect, vpW, vpH);
@@ -2319,7 +2327,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
         // a cell expressed in pane terms from silently meaning something different per clip.
         private void PlaceInCell(int slot, CinematicOperation clip, (double cx, double cy, double w, double h) cell)
         {
-            double vpW = _playerControl.ActualWidth, vpH = _playerControl.ActualHeight;
+            double vpW = _playerControl.CanvasWidth, vpH = _playerControl.CanvasHeight;
             if (vpW <= 0 || vpH <= 0) return;
             if (!TryGetMarkSpace(clip, out double fitW, out double fitH) || fitW <= 0 || fitH <= 0) return;
 
@@ -2382,6 +2390,26 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             // gives it no number - labelling it "100%" alongside a "75%" measured against the
             // window produced the absurdity that 75% could render LARGER than 100%.
             double fraction;
+            if (string.Equals(e.preset, "fill", StringComparison.OrdinalIgnoreCase))
+            {
+                // Cover the canvas: grow until the SHORTER axis reaches it, so nothing is left
+                // uncovered and the overhang on the other axis is cropped. This is the one thing
+                // the percentages cannot express, because they stop at the clip's own fit.
+                if (!TryGetMarkSpace(overlay, out double fw, out double fh) || fw <= 0 || fh <= 0) return;
+                double cw = _playerControl.CanvasWidth, ch = _playerControl.CanvasHeight;
+                if (cw <= 0 || ch <= 0) return;
+
+                fraction = Math.Max(cw / fw, ch / fh);
+                overlay.PlacementWidth = fraction;
+                overlay.PlacementHeight = fraction;
+                overlay.PlacementCenterX = 0.5;
+                overlay.PlacementCenterY = 0.5;
+
+                _dispatcher.TryEnqueue(() => ApplyOverlayBox(e.slot, overlay, false));
+                _viewModel.RecordIfChanged();
+                return;
+            }
+
             if (string.Equals(e.preset, "actual", StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryGetSourcePixelSize(e.slot, overlay, out double nativeW, out _)) return;
@@ -2515,7 +2543,7 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             if (IsActivelyPlaying) return;
             var overlay = _activeOverlay[e.slot];
             if (overlay == null) return;
-            double vpW = _playerControl.ActualWidth, vpH = _playerControl.ActualHeight;
+            double vpW = _playerControl.CanvasWidth, vpH = _playerControl.CanvasHeight;
             if (vpW <= 0 || vpH <= 0) return;
 
             // Interior grab = translate the whole box.
@@ -2712,8 +2740,8 @@ public void BeginEdit(CinematicOperation clip, EditTarget target)
             var transform = _playerControl.ActiveTransform;
             if (transform == null) return;
 
-            double vpW = _playerControl.ActualWidth > 0 ? _playerControl.ActualWidth : 1920;
-            double vpH = _playerControl.ActualHeight > 0 ? _playerControl.ActualHeight : 1080;
+            double vpW = _playerControl.CanvasWidth > 0 ? _playerControl.CanvasWidth : 1920;
+            double vpH = _playerControl.CanvasHeight > 0 ? _playerControl.CanvasHeight : 1080;
 
             // Must resolve identically to the rect the user is dragging (see UpdateWysiwygOverlay).
             // A drag converted in a different space than it was drawn in moves the mark somewhere

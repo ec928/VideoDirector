@@ -114,6 +114,35 @@ namespace VideoDirector.Views
             PlayerControl.ViewportTransformChanged += PlayerControl_ViewportTransformChanged;
             PlayerControl.SizeChanged += PlayerControl_SizeChanged;
             PlayerControl.EditRequested += PlayerControl_EditRequested;
+
+            // The wheel only zooms the canvas while nothing is selected, so the player has to know.
+            ViewModel.PropertyChanged += (s, ev) =>
+            {
+                if (ev.PropertyName == nameof(ViewModel.HasSelection) ||
+                    ev.PropertyName == nameof(ViewModel.SelectedClip))
+                    PlayerControl.HasSelection = ViewModel.HasSelection;
+
+                // Playback takes the view: fit the whole canvas, drop the chrome, ignore zoom and
+                // pan until it stops.
+                if (ev.PropertyName == nameof(ViewModel.IsPlaying))
+                    PlayerControl.SetPlaybackView(ViewModel.IsPlaying);
+
+                // Cinematic goes further: it locks the view to the whole canvas as well.
+                if (ev.PropertyName == nameof(ViewModel.IsCinematicMode))
+                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode);
+            };
+            PlayerControl.DeselectRequested += (s, ev) => ViewModel.SelectedClip = null;
+
+            // The canvas has to exist before the first composite.
+            //
+            // CALLED, not subscribed. This method IS the Loaded handler, so "Loaded += ..." here
+            // hooked an event that had already fired and could never fire again - which is why the
+            // canvas stayed at its XAML default of 1920x1080 against a 2752-wide pane and the fit
+            // read 107% for the whole session. The enqueued second call catches the case where the
+            // pane has not reached its final size by the time Loaded runs.
+            ApplyCanvasSize();
+            DispatcherQueue.TryEnqueue(ApplyCanvasSize);
+            PlayerControl.SizeChanged += (s, ev) => ApplyCanvasSize();
             PlayerControl.ExitEditRequested += (s, ev) => ExitEditMode();
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
             ViewModel.EditTargetChanged += ViewModel_EditTargetChanged;
@@ -2057,6 +2086,13 @@ namespace VideoDirector.Views
             return UnsavedChoice.Cancel;
         }
 
+        // Applied after any project load: a loaded project brings its own canvas, and one saved
+        // before the canvas existed brings zeros and gets initialised from the window here.
+        private void AfterProjectLoaded()
+        {
+            ApplyCanvasSize();
+        }
+
         private async void Load_Click(object? sender, RoutedEventArgs e)
         {
             var openPicker = new FileOpenPicker();
@@ -2072,6 +2108,7 @@ namespace VideoDirector.Views
             if (file != null)
             {
                 await ViewModel.LoadAsync(file);
+                AfterProjectLoaded();   // the project brings its own canvas, or gets one from the window
                 // Convert a pre-normalisation project up front rather than clip-by-clip on first
                 // draw, so marks never sit in two conventions at once.
                 _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
@@ -2113,6 +2150,51 @@ namespace VideoDirector.Views
         // Add and Remove act on the TOP of the stack, never the middle. The timeline bar and the
         // composite both rebuild off Tracks.CollectionChanged (wired in the constructor), so
         // neither handler needs to refresh anything itself.
+        // Push the project's canvas size into the player, initialising it from the window the
+        // first time. Auto deliberately does NOT re-read the window afterwards: "the size it began
+        // at" is the whole point, and re-reading would put the drift straight back.
+        // Auto means "the size of the window the project began at". A project with nothing on it
+        // has not begun, so while it is EMPTY the canvas keeps following the window.
+        //
+        // That is not just semantics - it is the fix for the canvas reading 107% on a fresh start.
+        // Capturing once at Loaded took whatever the pane measured mid-startup, before the window
+        // had been restored to its saved size, and the canvas then stayed about a dock-height short
+        // of the pane for the rest of the session. Following until there is content to protect
+        // means the size that sticks is the one you actually started working at.
+        private void ApplyCanvasSize()
+        {
+            if (ViewModel == null || PlayerControl == null) return;
+
+            double w = PlayerControl.ActualWidth;
+            double h = PlayerControl.ActualHeight;
+            if (w <= 0 || h <= 0) return;   // not laid out yet; a later SizeChanged will come back
+            bool following = ViewModel.CanvasSizeMode == ViewModels.CanvasSizeMode.Auto
+                             && ViewModel.IsEmptyProject;
+
+            if (following)
+            {
+                ViewModel.CanvasWidth = w;
+                ViewModel.CanvasHeight = h;
+            }
+            else
+            {
+                ViewModel.InitialiseCanvasIfUnset(w, h);
+            }
+
+            if (!ViewModel.HasCanvasSize) return;
+
+            PlayerControl.SetCanvasSize(ViewModel.CanvasWidth, ViewModel.CanvasHeight);
+            PlayerControl.UpdateCanvasLayout();
+            _playbackEngine?.RefreshComposite();
+        }
+
+        private void CanvasMode_Click(object? sender, RoutedEventArgs e)
+        {
+            // Auto is the only mode wired up. The others are disabled in the menu.
+            ViewModel.CanvasSizeMode = ViewModels.CanvasSizeMode.Auto;
+            ApplyCanvasSize();
+        }
+
         private void AddTrack_Click(object? sender, RoutedEventArgs e)
         {
             ViewModel.AddTopTrack();

@@ -578,17 +578,28 @@ namespace VideoDirector.Models
         // video content crop-fills the box (UniformToFill + clip) so it never distorts.
         // Default 0.3 x 0.3 reproduces the old aspect-locked 30% corner PiP exactly.
         private double _placementWidth = 0.3;
+        // Placement is a fraction of the clip's FIT - the largest rectangle of its own shape that
+        // sits inside the canvas. So 1.0 means "as large as this clip goes without being cropped",
+        // which is NOT the same as filling the canvas whenever the two are different shapes.
+        //
+        // The cap used to be exactly 1.0, which made covering the canvas unreachable: on a canvas
+        // wider than the clip you could fill it vertically and never horizontally, and on a taller
+        // one the reverse - the clip simply stopped growing on one axis with no explanation.
+        // Above 1.0 the box is larger than the fit and the source is cropped to cover it, which is
+        // exactly what filling a differently-shaped frame means.
+        public const double MaxPlacement = 4.0;
+
         public double PlacementWidth
         {
             get => _placementWidth;
-            set => SetProperty(ref _placementWidth, Math.Clamp(value, 0.05, 1.0));
+            set => SetProperty(ref _placementWidth, Math.Clamp(value, 0.05, MaxPlacement));
         }
 
         private double _placementHeight = 0.3;
         public double PlacementHeight
         {
             get => _placementHeight;
-            set => SetProperty(ref _placementHeight, Math.Clamp(value, 0.05, 1.0));
+            set => SetProperty(ref _placementHeight, Math.Clamp(value, 0.05, MaxPlacement));
         }
 
         // Box centre as a fraction of the viewport (0.5,0.5 = centre). Default lower-right.

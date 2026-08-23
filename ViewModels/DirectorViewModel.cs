@@ -17,8 +17,61 @@ namespace VideoDirector.ViewModels
         End
     }
 
+    // How the canvas - the composition space everything is measured against - gets its size.
+    //
+    // Auto is the only one implemented. The rest are named and stubbed so the menu shows where
+    // this is going rather than pretending the choice does not exist.
+    public enum CanvasSizeMode
+    {
+        Auto,               // the app window as it was when the project began, then fixed
+        MatchWorkingArea,   // the visible area: the window less the inspector and the track dock
+        FollowWindow,       // tracks the window live, so the frame reshapes as you resize
+        Custom              // chosen explicitly
+    }
+
     public class DirectorViewModel : ObservableObject
     {
+        // ---- Canvas ----------------------------------------------------------------------
+        // Size is the COMPOSITION's, not the pane's. The pane only decides how big it looks, so
+        // hiding the dock or going fullscreen rescales the view and never the arrangement.
+        private CanvasSizeMode _canvasSizeMode = CanvasSizeMode.Auto;
+        public CanvasSizeMode CanvasSizeMode
+        {
+            get => _canvasSizeMode;
+            set => SetProperty(ref _canvasSizeMode, value);
+        }
+
+        private double _canvasWidth;
+        private double _canvasHeight;
+
+        public double CanvasWidth  { get => _canvasWidth;  set => SetProperty(ref _canvasWidth, value); }
+        public double CanvasHeight { get => _canvasHeight; set => SetProperty(ref _canvasHeight, value); }
+
+        public bool HasCanvasSize => _canvasWidth > 0 && _canvasHeight > 0;
+
+        /// <summary>Nothing on any track. Such a project has not "begun" yet, which is what lets
+        /// Auto keep following the window until there is something to protect.</summary>
+        public bool IsEmptyProject
+        {
+            get
+            {
+                foreach (var t in Tracks) if (t.Clips.Count > 0) return false;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Give the canvas a size from the window, once. Auto means "as the project began", so an
+        /// existing size is never overwritten - that is what stops the frame moving under you when
+        /// the window changes.
+        /// </summary>
+        public void InitialiseCanvasIfUnset(double windowW, double windowH)
+        {
+            if (HasCanvasSize || windowW <= 0 || windowH <= 0) return;
+            CanvasWidth = windowW;
+            CanvasHeight = windowH;
+        }
+
         // Hard ceiling on track slots. DirectorPlayerControl builds exactly this many render
         // surfaces in a loop from this same constant, so the two cannot drift apart and there
         // is no way to address a slot with no visual behind it.
@@ -101,6 +154,9 @@ namespace VideoDirector.ViewModels
             get => _isPlaying;
             set
             {
+                // Playback is a presentation: the inspector gets out of the way for it.
+                if (value) IsInspectorOpen = false;
+
                 if (SetProperty(ref _isPlaying, value))
                 {
                     OnPropertyChanged(nameof(ModeLabel));
@@ -128,6 +184,7 @@ namespace VideoDirector.ViewModels
                 {
                     OnPropertyChanged(nameof(IsStoryboardVisible));
                     OnPropertyChanged(nameof(IsTrackDockVisible));
+                    OnPropertyChanged(nameof(IsChromeVisible));
                     // Show the pill on the way in and on the way out: entering, so the exit control
                     // is visible rather than having to be hunted for; leaving, so the editor does
                     // not come back with its transport already faded out.
@@ -136,8 +193,27 @@ namespace VideoDirector.ViewModels
             }
         }
 
-        // The dock follows the pill EXCEPT in cinematic mode, where it stays down for good.
-        public bool IsTrackDockVisible => !_isCinematicMode && _isControlsVisible;
+        // The dock follows the pill EXCEPT in cinematic mode, where it stays down for good - and
+        // except when you have closed it yourself, which is what IsTrackDockOpen is for. Auto-hide
+        // during playback is a convenience; this is a decision, and a decision outranks it.
+        public bool IsTrackDockVisible => !_isCinematicMode && _isControlsVisible && _isTrackDockOpen;
+
+        // Whether the editing chrome is up at all. The panel TABS follow this rather than
+        // IsTrackDockVisible: a tab that disappeared when its own panel closed would be a panel
+        // you could shut and never reopen.
+        public bool IsChromeVisible => !_isCinematicMode && _isControlsVisible;
+
+        private bool _isTrackDockOpen = true;
+        public bool IsTrackDockOpen
+        {
+            get => _isTrackDockOpen;
+            set
+            {
+                if (SetProperty(ref _isTrackDockOpen, value))
+                    OnPropertyChanged(nameof(IsTrackDockVisible));
+                    OnPropertyChanged(nameof(IsChromeVisible));
+            }
+        }
 
         private bool _isLooping = true;
         public bool IsLooping
@@ -195,6 +271,7 @@ namespace VideoDirector.ViewModels
             {
                 if (SetProperty(ref _isControlsVisible, value))
                     OnPropertyChanged(nameof(IsTrackDockVisible));
+                    OnPropertyChanged(nameof(IsChromeVisible));
             }
         }
 
@@ -265,6 +342,12 @@ namespace VideoDirector.ViewModels
             {
                 if (SetProperty(ref _selectedClip, value))
                 {
+                    // Selecting a clip opens the inspector; dropping the selection closes it.
+                    // Entering Edit selects the clip too, so that path is covered by the same line.
+                    // Closing it by hand still works - the next selection change is what reopens it,
+                    // which is the behaviour you get from every panel that follows a selection.
+                    IsInspectorOpen = value != null;
+
                     OnPropertyChanged(nameof(HasSelection));
                     OnPropertyChanged(nameof(IsStoryboardVisible));
                     OnPropertyChanged(nameof(IsTrack1Selected));
@@ -781,6 +864,12 @@ namespace VideoDirector.ViewModels
         private class ProjectData
         {
             public int SchemaVersion { get; set; }   // absent in pre-versioned files => 0
+
+            // Canvas. Absent in older files, which read back as 0 and are then initialised from
+            // the window on first open - the same path a new project takes.
+            public int CanvasSizeMode { get; set; }
+            public double CanvasWidth { get; set; }
+            public double CanvasHeight { get; set; }
             public System.Collections.ObjectModel.ObservableCollection<CinematicOperation> TimelineNodes { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<TimelineTrack> OverlayTracks { get; set; } = new();
             public System.Collections.ObjectModel.ObservableCollection<TimelineTrack> Tracks { get; set; } = new();
@@ -817,6 +906,9 @@ namespace VideoDirector.ViewModels
             var data = new ProjectData
             {
                 SchemaVersion = CurrentSchemaVersion,
+                CanvasSizeMode = (int)_canvasSizeMode,
+                CanvasWidth = _canvasWidth,
+                CanvasHeight = _canvasHeight,
                 Tracks = Tracks
             };
             var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
@@ -858,6 +950,12 @@ namespace VideoDirector.ViewModels
                     nodes = data.TimelineNodes;
                     legacyOverlayTracks = data.OverlayTracks;
                     tracks = data.Tracks;
+
+                    // Zero for a project saved before the canvas existed. ApplyCanvasSize then
+                    // initialises it from the window, the same path a new project takes.
+                    CanvasSizeMode = (CanvasSizeMode)data.CanvasSizeMode;
+                    CanvasWidth = data.CanvasWidth;
+                    CanvasHeight = data.CanvasHeight;
                     legacyOverlays = data.OverlayClips;
                 }
             }
@@ -1018,7 +1116,14 @@ namespace VideoDirector.ViewModels
             // In-memory round trip of already-live objects, so the marks are whatever convention
             // they are already in. RestoreSnapshot deliberately does NOT re-flag them as legacy —
             // undo must not re-run a migration that has already happened.
-            var data = new ProjectData { SchemaVersion = CurrentSchemaVersion, Tracks = Tracks };
+            var data = new ProjectData
+            {
+                SchemaVersion = CurrentSchemaVersion,
+                CanvasSizeMode = (int)_canvasSizeMode,
+                CanvasWidth = _canvasWidth,
+                CanvasHeight = _canvasHeight,
+                Tracks = Tracks
+            };
             return System.Text.Json.JsonSerializer.Serialize(data, _snapshotOptions);
         }
 
@@ -1114,6 +1219,10 @@ namespace VideoDirector.ViewModels
             var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
             SelectedClip = null;
+
+            CanvasSizeMode = (CanvasSizeMode)data.CanvasSizeMode;
+            CanvasWidth = data.CanvasWidth;
+            CanvasHeight = data.CanvasHeight;
 
             Tracks.Clear();
             EnsureTracks();
