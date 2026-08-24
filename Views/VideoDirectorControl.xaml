@@ -260,7 +260,7 @@
 
                                 <!-- 4. Transitions (Track 1 only) -->
                                 <Expander Header="Transitions" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0,0,4,4"
-                                          IsEnabled="{Binding IsTrack1Selected}" ToolTipService.ToolTip="Transitions are currently only supported on Track 1." Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
+                                          ToolTipService.ToolTip="Fade this clip in from black, out to black, or both. Adds to the clip length rather than trimming it." Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
                                     <StackPanel Spacing="4">
                                         <TextBlock Text="Transition Style / Length (s)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         <Grid ColumnSpacing="8">

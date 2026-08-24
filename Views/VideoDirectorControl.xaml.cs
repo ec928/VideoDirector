@@ -284,6 +284,11 @@ namespace VideoDirector.Views
                     // Arming cinematic on its own must leave zoom and pan alone.
                     PlayerControl.SetCinematicView(ViewModel.IsCinematicMode && ViewModel.IsPlaying);
                     ApplyCinematicPlaybackChrome();
+
+                    // Arming cinematic is the deliberate "I am about to show this" moment, and the
+                    // last one where a missing file is still cheap to find out about.
+                    if (ViewModel.IsCinematicMode)
+                        _ = ReportMissingMediaAsync("Some clips will not play.");
                 }
             };
             PlayerControl.DeselectRequested += (s, ev) => ViewModel.SelectedClip = null;
@@ -665,6 +670,76 @@ namespace VideoDirector.Views
             }
         }
 
+        // Show which part of a block is the fade rather than the picture.
+        //
+        // A transition adds to the clip's length, so the block already includes it - but nothing said
+        // where the material stopped and the fade began, which matters most on the short clips these
+        // transitions are for.
+        //
+        // Drawn as a gradient running to black, which is literally what the fade does, plus a hairline
+        // at the boundary so the split can be read precisely rather than estimated from a gradient.
+        private void AddTransitionShading(double x, double y, double width, double height,
+                                          double dim, CinematicOperation clip)
+        {
+            if (clip == null || clip.TransitionStyle == TransitionStyle.HardSnap) return;
+
+            double secs = clip.TransitionDuration.TotalSeconds;
+            double len = clip.OpDuration.TotalSeconds;
+            if (secs <= 0 || len <= 0 || _timelinePxPerSec <= 0) return;
+
+            // The engine caps a fade at half the clip; the drawing has to agree or it would show a
+            // longer fade than actually plays.
+            secs = Math.Min(secs, len / 2);
+
+            double w = secs * _timelinePxPerSec;
+            if (w < 2) return;                       // too short to read; drawing it would be noise
+            w = Math.Min(w, width / 2);
+
+            bool fadeIn = clip.TransitionStyle == TransitionStyle.CinematicBridge;
+            if (fadeIn) AddFadeWedge(x, y, w, height, dim, toBlackOnLeft: true);
+            AddFadeWedge(x + width - w, y, w, height, dim, toBlackOnLeft: false);
+        }
+
+        private void AddFadeWedge(double x, double y, double w, double h, double dim, bool toBlackOnLeft)
+        {
+            var g = new Microsoft.UI.Xaml.Media.LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 0)
+            };
+            byte a = 165;
+            g.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop
+            { Color = Microsoft.UI.ColorHelper.FromArgb(toBlackOnLeft ? a : (byte)0, 0, 0, 0), Offset = 0.0 });
+            g.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop
+            { Color = Microsoft.UI.ColorHelper.FromArgb(toBlackOnLeft ? (byte)0 : a, 0, 0, 0), Offset = 1.0 });
+
+            var wedge = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Width = w,
+                Height = h,
+                Fill = g,
+                Opacity = dim,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(wedge, x);
+            Canvas.SetTop(wedge, y);
+            TimelineBar.Children.Add(wedge);
+
+            // The boundary between picture and fade, on the inner edge of the wedge.
+            var edge = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Width = 1,
+                Height = h,
+                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(150, 255, 255, 255)),
+                Opacity = dim,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(edge, toBlackOnLeft ? x + w : x);
+            Canvas.SetTop(edge, y);
+            TimelineBar.Children.Add(edge);
+        }
+
         // Spotlight opacity for a clip block, by mode:
         //   Arrange (not playing, nothing selected) -> everything full.
         //   Edit    (a clip selected)               -> that clip full, the rest dim.
@@ -739,6 +814,8 @@ namespace VideoDirector.Views
             Canvas.SetLeft(r, x);
             Canvas.SetTop(r, y);
             TimelineBar.Children.Add(r);
+
+            AddTransitionShading(x, y, width, height, dim, clip);
 
             if (clip != null)
             {
@@ -2063,6 +2140,7 @@ namespace VideoDirector.Views
                 ("A fixed canvas", "— the composition has its own frame rather than borrowing the window’s, so hiding a panel, resizing or presenting full screen changes only how big it looks."),
                 ("Free placement", "with independent size, position and opacity, plus solid, soft or film-strip borders."),
                 ("Stills as first-class clips", "— images hold for a set duration and advance story time by wall clock, so mixed photo and video sequences stay in sync."),
+                ("Fades", "in from black, out to black, or both, on any clip. A transition ADDS to the clip’s length rather than eating into it, and the timeline shades the part that is fade rather than picture."),
             });
 
             AddSection(body, "Motion", new[]
@@ -2082,6 +2160,8 @@ namespace VideoDirector.Views
             AddSection(body, "Screen and share", new[]
             {
                 ("Cinematic mode", "— arm it, and playback takes over the whole screen with every trace of the editor gone. Move the mouse for the transport, stop playing and the editor returns as you left it."),
+                ("Present on any display", "— choose which screen a performance takes over. The list is built when you open it, so a projector plugged in after launch needs no restart."),
+                ("A check before you present", "— opening a project, and arming cinematic, both say plainly which clips can no longer find their files. A project is a list of paths, and that is the failure that actually bites."),
                 ("Export to MP4", "at 1080p. Motion, per-clip speed and transitions are preview-only for now and are not yet baked into the render."),
             });
 
@@ -2305,6 +2385,7 @@ namespace VideoDirector.Views
             {
                 await ViewModel.LoadAsync(file);
                 AfterProjectLoaded();   // the project brings its own canvas, or gets one from the window
+                await ReportMissingMediaAsync("This project refers to files that are not where it left them.");
                 // Convert a pre-normalisation project up front rather than clip-by-clip on first
                 // draw, so marks never sit in two conventions at once.
                 _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
@@ -2397,6 +2478,52 @@ namespace VideoDirector.Views
                 ViewModel.IsTrackDockOpen = _dockOpenBeforePerformance;
                 ViewModel.IsControlsVisible = true;
             }
+        }
+
+        // Says plainly which sources are missing, and nothing at all when they are all fine.
+        //
+        // Called on opening a project and on arming cinematic - the two moments where finding out
+        // early is worth a dialog, and long before an audience is looking at a black rectangle.
+        private async System.Threading.Tasks.Task ReportMissingMediaAsync(string lead)
+        {
+            if (ViewModel == null) return;
+
+            var missing = ViewModel.MissingSources();
+            if (missing.Count == 0) return;
+
+            var list = new StackPanel { Spacing = 4 };
+            list.Children.Add(new TextBlock { Text = lead, TextWrapping = TextWrapping.Wrap });
+
+            const int show = 8;
+            foreach (var clip in missing.Take(show))
+            {
+                list.Children.Add(new TextBlock
+                {
+                    Text = "\u2022  " + clip.FileName,
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                });
+                ToolTipService.SetToolTip(list.Children[list.Children.Count - 1], clip.FilePath);
+            }
+
+            if (missing.Count > show)
+                list.Children.Add(new TextBlock
+                {
+                    Text = "and " + (missing.Count - show) + " more",
+                    FontSize = 12,
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                });
+
+            var dialog = new ContentDialog
+            {
+                Title = missing.Count == 1 ? "1 clip is missing its file" : missing.Count + " clips are missing their files",
+                Content = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320 },
+                CloseButtonText = "OK",
+                XamlRoot = this.XamlRoot
+            };
+
+            try { await dialog.ShowAsync(); } catch { }
         }
 
         private void UpdateChromeInset()

@@ -49,6 +49,30 @@ namespace VideoDirector.ViewModels
 
         public bool HasCanvasSize => _canvasWidth > 0 && _canvasHeight > 0;
 
+        /// <summary>
+        /// Clips whose source file is no longer where the project says it is.
+        /// </summary>
+        /// <remarks>
+        /// A project is a list of paths into a media library, so the failure that actually bites is
+        /// not a bad render - it is a clip that will not load because something moved. Hits the file
+        /// system once per clip, so it is called at deliberate moments (opening, and arming a
+        /// performance) rather than from anything that runs per frame or per timeline rebuild.
+        /// </remarks>
+        public List<CinematicOperation> MissingSources()
+        {
+            var missing = new List<CinematicOperation>();
+            foreach (var track in Tracks)
+            {
+                foreach (var clip in track.Clips)
+                {
+                    if (clip == null || string.IsNullOrWhiteSpace(clip.FilePath)) continue;
+                    try { if (!File.Exists(clip.FilePath)) missing.Add(clip); }
+                    catch { missing.Add(clip); }   // unreadable counts as missing
+                }
+            }
+            return missing;
+        }
+
         // Which project is open. Nothing on screen said so, and with several similar test projects
         // there was no way to tell which one had been loaded.
         // Which display a performance takes over. -1 means "wherever the window already is", which

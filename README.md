@@ -10,7 +10,16 @@ Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImage
 
 **Ken Burns Motion & Zoom** — Any clip, video or still, can carry an animated pan/zoom defined by start, optional mid, and end framing keyframes interpolated with easing curves.
 
-**Custom PiP Borders** — Picture-in-picture clips can be styled with custom borders directly from the video canvas or timeline right-click menus. Includes various edge styles (Solid, Soft rounded edges, and dashed FilmStrip perforations) with selectable colors and thickness.
+**Fades** — Fade a clip in from black, out to black, or both. A transition **adds** to the clip’s length rather than trimming it, and the timeline shades the fade portion with a hairline at the boundary so the picture and the fade are told apart at a glance.
+
+**Canvas Sizes** — Auto (the app window as it was when the project began, then held), four presets — 1920×1080, 3840×2160, 2.39:1 and 9:16 — or a custom size. Saved with the project.
+
+**Present on Any Display** — Pick which screen cinematic playback takes over; the window moves there before going full screen and returns to its desk afterwards.
+
+**Media Pre-Flight** — Opening a project, and arming cinematic, both report which clips can no longer find their source files. A project is a list of paths into a media library, so that is the failure worth catching early.
+
+**Custom PiP Borders**
+ — Picture-in-picture clips can be styled with custom borders directly from the video canvas or timeline right-click menus. Includes various edge styles (Solid, Soft rounded edges, and dashed FilmStrip perforations) with selectable colors and thickness.
 
 **Fixed Canvas** — The composition has its own frame rather than borrowing whatever the window happens to be. Hiding a panel, resizing the window or presenting full screen changes only the scale you view the arrangement at, never the arrangement. Pan with the middle mouse button and zoom with the wheel in Arrange; middle-click returns to fit.
 
