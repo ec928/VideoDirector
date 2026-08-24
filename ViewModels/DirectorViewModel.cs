@@ -250,7 +250,7 @@ namespace VideoDirector.ViewModels
         // The dock follows the pill EXCEPT in cinematic mode, where it stays down for good - and
         // except when you have closed it yourself, which is what IsTrackDockOpen is for. Auto-hide
         // during playback is a convenience; this is a decision, and a decision outranks it.
-        public bool IsTrackDockVisible => ChromeRules.IsTrackDockVisible(_isCinematicMode, _isPlaying, _isControlsVisible, _isTrackDockOpen);
+        public bool IsTrackDockVisible => ChromeRules.IsTrackDockVisible(_isCinematicMode, _isPlaying, _isControlsVisible, _isTrackDockOpen, _isRecording);
 
         // Whether the editing chrome is up at all. The panel TABS follow this rather than
         // IsTrackDockVisible: a tab that disappeared when its own panel closed would be a panel
@@ -259,7 +259,7 @@ namespace VideoDirector.ViewModels
         // though the hide button had been pressed, and the inactivity timer then takes the rest -
         // the same path playback already uses. One rule, one behaviour, and the transport stays
         // where it lives instead of being rebuilt as a floating object for one mode.
-        public bool IsChromeVisible => ChromeRules.IsChromeVisible(_isControlsVisible);
+        public bool IsChromeVisible => ChromeRules.IsChromeVisible(_isControlsVisible, _isRecording);
 
         // EDITOR chrome - undo, project, export, the panel toggles - as distinct from the transport.
         // During a performance the transport is all that should be on screen: the rest is editing
@@ -271,12 +271,34 @@ namespace VideoDirector.ViewModels
         // so a rule cannot be added later that forgets the playing half.
         public bool IsPerforming => ChromeRules.IsPerforming(_isCinematicMode, _isPlaying);
 
-        public bool IsEditorChromeVisible => ChromeRules.IsEditorChromeVisible(_isCinematicMode, _isPlaying);
+        private bool _isRecording;
+
+        /// <summary>
+        /// A take is rolling. Locks the chrome away until it ends - see ChromeRules.
+        /// </summary>
+        public bool IsRecording
+        {
+            get => _isRecording;
+            set
+            {
+                if (SetProperty(ref _isRecording, value))
+                {
+                    OnPropertyChanged(nameof(IsChromeVisible));
+                    OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsTrackDockVisible));
+                    OnPropertyChanged(nameof(IsTrackDockReopenVisible));
+                    OnPropertyChanged(nameof(IsStoryboardVisible));
+                    OnPropertyChanged(nameof(CanToggleEditMode));
+                }
+            }
+        }
+
+        public bool IsEditorChromeVisible => ChromeRules.IsEditorChromeVisible(_isCinematicMode, _isPlaying, _isRecording);
 
         // The REOPEN affordance, and only that. While the dock is open its collapse control lives
         // inside the dock toolbar, where it cannot collide with the transport sitting in the middle
         // of the same row; the floating tab exists purely so a closed dock is not unreachable.
-        public bool IsTrackDockReopenVisible => ChromeRules.IsTrackDockReopenVisible(_isControlsVisible, _isTrackDockOpen);
+        public bool IsTrackDockReopenVisible => ChromeRules.IsTrackDockReopenVisible(_isControlsVisible, _isTrackDockOpen, _isRecording);
 
         private bool _isTrackDockOpen = true;
         public bool IsTrackDockOpen
@@ -345,10 +367,10 @@ namespace VideoDirector.ViewModels
         // panel anyway, so it vanished for the length of every preview and came back afterwards.
         // Leaving Edit always works; entering needs a clip. Playback is not a mode you switch out of
         // with this control.
-        public bool CanToggleEditMode => ChromeRules.CanToggleEditMode(_isPlaying, _isEditMode, _selectedClip != null);
+        public bool CanToggleEditMode => ChromeRules.CanToggleEditMode(_isPlaying, _isEditMode, _selectedClip != null, _isRecording);
 
         public bool IsStoryboardVisible =>
-            ChromeRules.IsInspectorVisible(_isCinematicMode, _isPlaying, _isEditMode, _isInspectorOpen, HasSelection);
+            ChromeRules.IsInspectorVisible(_isCinematicMode, _isPlaying, _isEditMode, _isInspectorOpen, HasSelection, _isRecording);
 
         private bool _isControlsVisible = true;
         public bool IsControlsVisible
