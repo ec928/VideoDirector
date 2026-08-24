@@ -49,6 +49,27 @@ namespace VideoDirector.ViewModels
 
         public bool HasCanvasSize => _canvasWidth > 0 && _canvasHeight > 0;
 
+        // Which project is open. Nothing on screen said so, and with several similar test projects
+        // there was no way to tell which one had been loaded.
+        // Which display a performance takes over. -1 means "wherever the window already is", which
+        // is the right default for a single-screen machine and for anyone who has not chosen.
+
+        private string _projectName = "Untitled";
+        public string ProjectName
+        {
+            get => _projectName;
+            private set => SetProperty(ref _projectName, string.IsNullOrWhiteSpace(value) ? "Untitled" : value);
+        }
+
+        // Which display a performance takes over. -1 means "wherever the window already is", the
+        // right default on a single-screen machine and for anyone who has not chosen.
+        private int _presentDisplayIndex = -1;
+        public int PresentDisplayIndex
+        {
+            get => _presentDisplayIndex;
+            set => SetProperty(ref _presentDisplayIndex, value);
+        }
+
         /// <summary>Nothing on any track. Such a project has not "begun" yet, which is what lets
         /// Auto keep following the window until there is something to protect.</summary>
         public bool IsEmptyProject
@@ -292,8 +313,10 @@ namespace VideoDirector.ViewModels
             set
             {
                 if (SetProperty(ref _isInspectorOpen, value))
+                {
                     OnPropertyChanged(nameof(IsStoryboardVisible));
                     OnPropertyChanged(nameof(CanToggleEditMode));
+                }
             }
         }
 
@@ -314,11 +337,13 @@ namespace VideoDirector.ViewModels
             set
             {
                 if (SetProperty(ref _isControlsVisible, value))
+                {
                     OnPropertyChanged(nameof(IsTrackDockVisible));
                     OnPropertyChanged(nameof(IsChromeVisible));
                     OnPropertyChanged(nameof(IsEditorChromeVisible));
                     OnPropertyChanged(nameof(IsPerforming));
                     OnPropertyChanged(nameof(IsTrackDockReopenVisible));
+                }
             }
         }
 
@@ -953,6 +978,8 @@ namespace VideoDirector.ViewModels
 
         public async Task SaveAsync(Windows.Storage.StorageFile file)
         {
+            ProjectName = System.IO.Path.GetFileNameWithoutExtension(file?.Name);
+
             var data = new ProjectData
             {
                 SchemaVersion = CurrentSchemaVersion,
@@ -969,6 +996,8 @@ namespace VideoDirector.ViewModels
 
         public async Task LoadAsync(Windows.Storage.StorageFile file)
         {
+            ProjectName = System.IO.Path.GetFileNameWithoutExtension(file?.Name);
+
             var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
             using var stream = await file.OpenStreamForReadAsync();
             
@@ -1131,6 +1160,7 @@ namespace VideoDirector.ViewModels
 
         public void Clear()
         {
+            ProjectName = "Untitled";
             Tracks.Clear();
             // DefaultTracks, not the bare floor: clearing gives you a NEW project, and a new
             // project opens with T1-T3.

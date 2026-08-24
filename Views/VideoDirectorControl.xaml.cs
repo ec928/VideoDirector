@@ -135,6 +135,10 @@ namespace VideoDirector.Views
         //
         // Guarded because the presenter call throws if the window is mid-teardown, and a failed
         // toggle must not take the app down with it.
+        // Where the window was before a performance took it full screen, so it can be put back.
+        private Windows.Graphics.PointInt32? _restorePosition;
+        private Windows.Graphics.SizeInt32? _restoreSize;
+
         private void ApplyCinematicPresenter(bool cinematic)
         {
             try
@@ -143,15 +147,94 @@ namespace VideoDirector.Views
                 if (appWindow == null) return;
 
                 bool wantFullScreen = cinematic && ViewModel != null && ViewModel.IsPlaying;
-
                 bool isFullScreen = appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
                 if (wantFullScreen == isFullScreen) return;
 
-                appWindow.SetPresenter(wantFullScreen
-                    ? Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen
-                    : Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped);
+                if (wantFullScreen)
+                {
+                    _restorePosition = appWindow.Position;
+                    _restoreSize = appWindow.Size;
+
+                    // Move onto the chosen display FIRST. Full screen takes whichever display the
+                    // window is on, so the move has to happen before the presenter changes.
+                    var target = ChosenDisplay();
+                    if (target != null)
+                        appWindow.Move(new Windows.Graphics.PointInt32(
+                            target.WorkArea.X + 8, target.WorkArea.Y + 8));
+
+                    appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+                }
+                else
+                {
+                    appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped);
+
+                    // Back to the desk it came from, not wherever full screen left it.
+                    if (_restoreSize is Windows.Graphics.SizeInt32 sz) appWindow.Resize(sz);
+                    if (_restorePosition is Windows.Graphics.PointInt32 pt) appWindow.Move(pt);
+                    _restorePosition = null;
+                    _restoreSize = null;
+                }
             }
             catch { }
+        }
+
+        // Null means "leave the window where it is".
+        private Microsoft.UI.Windowing.DisplayArea ChosenDisplay()
+        {
+            int want = ViewModel?.PresentDisplayIndex ?? -1;
+            if (want < 0) return null;
+
+            try
+            {
+                var all = Microsoft.UI.Windowing.DisplayArea.FindAll();
+                return want < all.Count ? all[want] : null;
+            }
+            catch { return null; }
+        }
+
+        // Built when the menu opens, from the displays actually attached right now - a projector
+        // plugged in after launch appears without a restart.
+        private void PresentDisplayFlyout_Opening(object? sender, object e)
+        {
+            if (PresentDisplayFlyout == null || ViewModel == null) return;
+
+            PresentDisplayFlyout.Items.Clear();
+
+            var current = new RadioMenuFlyoutItem
+            {
+                Text = "Current display",
+                GroupName = "PresentDisplay",
+                IsChecked = ViewModel.PresentDisplayIndex < 0,
+                Tag = -1
+            };
+            current.Click += PresentDisplay_Click;
+            PresentDisplayFlyout.Items.Add(current);
+
+            IReadOnlyList<Microsoft.UI.Windowing.DisplayArea> all;
+            try { all = Microsoft.UI.Windowing.DisplayArea.FindAll(); } catch { return; }
+            if (all.Count <= 1) return;   // nothing to choose between
+
+            PresentDisplayFlyout.Items.Add(new MenuFlyoutSeparator());
+
+            for (int i = 0; i < all.Count; i++)
+            {
+                var b = all[i].OuterBounds;
+                var item = new RadioMenuFlyoutItem
+                {
+                    Text = "Display " + (i + 1) + "  (" + b.Width + " x " + b.Height + ")",
+                    GroupName = "PresentDisplay",
+                    IsChecked = ViewModel.PresentDisplayIndex == i,
+                    Tag = i
+                };
+                item.Click += PresentDisplay_Click;
+                PresentDisplayFlyout.Items.Add(item);
+            }
+        }
+
+        private void PresentDisplay_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement fe && fe.Tag is int idx && ViewModel != null)
+                ViewModel.PresentDisplayIndex = idx;
         }
 
         private void VideoDirectorControl_Loaded(object? sender, RoutedEventArgs e)
@@ -181,6 +264,10 @@ namespace VideoDirector.Views
 
                 if (ev.PropertyName == nameof(ViewModel.IsInspectorOpen) && InspectorTabIcon != null)
                     InspectorTabIcon.Glyph = ViewModel.IsInspectorOpen ? "\uE76C" : "\uE76B";
+
+                // The taskbar and Alt-Tab should say which project too.
+                if (ev.PropertyName == nameof(ViewModel.ProjectName) && MainWindow.Instance != null)
+                    MainWindow.Instance.Title = "Video Director  -  " + ViewModel.ProjectName;
 
                 if (ev.PropertyName == nameof(ViewModel.IsPlaying))
                 {
@@ -1398,7 +1485,7 @@ namespace VideoDirector.Views
             double total = ViewModel.TotalStoryDuration.TotalSeconds;
             double sec = Math.Clamp(x / _timelinePxPerSec, 0, total);
             sec = ApplyScrubSnapping(sec);
-            _playbackEngine?.SeekCompositeToStoryTime(TimeSpan.FromSeconds(sec));
+            _ = _playbackEngine?.SeekCompositeToStoryTime(TimeSpan.FromSeconds(sec));
         }
 
         // Which clip (and its start-second) sits under a point in the clip rows, if any.
@@ -1590,7 +1677,7 @@ namespace VideoDirector.Views
             {
                 double stepSec = direction > 0 ? (1.0/30.0) : -(1.0/30.0);
                 double newStoryTime = Math.Clamp(ViewModel.CurrentStoryTime.TotalSeconds + stepSec, 0, ViewModel.TotalStoryDuration.TotalSeconds);
-                _playbackEngine?.SeekCompositeToStoryTime(TimeSpan.FromSeconds(newStoryTime));
+                _ = _playbackEngine?.SeekCompositeToStoryTime(TimeSpan.FromSeconds(newStoryTime));
                 return;
             }
 
@@ -2398,9 +2485,100 @@ namespace VideoDirector.Views
 
         private void CanvasMode_Click(object? sender, RoutedEventArgs e)
         {
-            // Auto is the only mode wired up. The others are disabled in the menu.
             ViewModel.CanvasSizeMode = ViewModels.CanvasSizeMode.Auto;
+
+            // Auto follows the window only while the project is empty, so on a project with content
+            // this keeps whatever size it already had rather than snapping it to the window - which
+            // would move every clip at the moment you picked the mode.
             ApplyCanvasSize();
+        }
+
+        private void CanvasPreset_Click(object? sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.Tag is not string tag) return;
+
+            var parts = tag.Split('x');
+            if (parts.Length != 2) return;
+            if (!double.TryParse(parts[0], out double w) || !double.TryParse(parts[1], out double h)) return;
+
+            SetCustomCanvas(w, h);
+        }
+
+        private async void CanvasCustom_Click(object? sender, RoutedEventArgs e)
+        {
+            var wBox = new NumberBox
+            {
+                Header = "Width",  Minimum = 16, Maximum = 16384, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+                Value = ViewModel.CanvasWidth  > 0 ? Math.Round(ViewModel.CanvasWidth)  : 1920
+            };
+            var hBox = new NumberBox
+            {
+                Header = "Height", Minimum = 16, Maximum = 16384, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+                Value = ViewModel.CanvasHeight > 0 ? Math.Round(ViewModel.CanvasHeight) : 1080
+            };
+
+            var panel = new StackPanel { Spacing = 12, Width = 260 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "The composition's own size. Everything is measured against it; the window only "
+                     + "decides how big it looks.",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+            });
+            panel.Children.Add(wBox);
+            panel.Children.Add(hBox);
+
+            var dialog = new ContentDialog
+            {
+                Title = "Canvas size",
+                Content = panel,
+                PrimaryButtonText = "Set",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            if (double.IsNaN(wBox.Value) || double.IsNaN(hBox.Value)) return;
+
+            SetCustomCanvas(Math.Round(wBox.Value), Math.Round(hBox.Value));
+        }
+
+        private void SetCustomCanvas(double w, double h)
+        {
+            if (w <= 0 || h <= 0) return;
+
+            ViewModel.CanvasSizeMode = ViewModels.CanvasSizeMode.Custom;
+            ViewModel.CanvasWidth = w;
+            ViewModel.CanvasHeight = h;
+
+            PlayerControl.SetCanvasSize(w, h);
+            PlayerControl.UpdateCanvasLayout();
+            _playbackEngine?.RefreshComposite();
+            ViewModel.RecordIfChanged();
+        }
+
+        // The tick has to be read off the project, not left wherever the last click put it.
+        private void CanvasMenu_Opening(object? sender, object e)
+        {
+            if (ViewModel == null) return;
+
+            bool auto = ViewModel.CanvasSizeMode == ViewModels.CanvasSizeMode.Auto;
+            int w = (int)Math.Round(ViewModel.CanvasWidth);
+            int h = (int)Math.Round(ViewModel.CanvasHeight);
+
+            if (CanvasAutoItem != null)  CanvasAutoItem.IsChecked  = auto;
+            if (CanvasHdItem != null)    CanvasHdItem.IsChecked    = !auto && w == 1920 && h == 1080;
+            if (CanvasUhdItem != null)   CanvasUhdItem.IsChecked   = !auto && w == 3840 && h == 2160;
+            if (CanvasScopeItem != null) CanvasScopeItem.IsChecked = !auto && w == 2560 && h == 1072;
+            if (CanvasVertItem != null)  CanvasVertItem.IsChecked  = !auto && w == 1080 && h == 1920;
+
+            if (CanvasCustomItem != null)
+                CanvasCustomItem.IsChecked = !auto
+                    && !(CanvasHdItem?.IsChecked ?? false)
+                    && !(CanvasUhdItem?.IsChecked ?? false)
+                    && !(CanvasScopeItem?.IsChecked ?? false)
+                    && !(CanvasVertItem?.IsChecked ?? false);
         }
 
         private void AddTrack_Click(object? sender, RoutedEventArgs e)

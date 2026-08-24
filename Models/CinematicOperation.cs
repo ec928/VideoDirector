@@ -767,13 +767,26 @@ namespace VideoDirector.Models
         }
 
         private TimeSpan _transitionDuration = TimeSpan.Zero;
+        // A transition ADDS to the clip's length rather than eating into it.
+        //
+        // These clips are short already, and a fade that consumed the last second of a five second
+        // clip would cost a fifth of the content. So changing the transition length moves OpDuration
+        // by the same delta: the material you chose stays, and the fade is extra time on top.
         public TimeSpan TransitionDuration
         {
             get => _transitionDuration;
-            set 
+            set
             {
+                if (value < TimeSpan.Zero) value = TimeSpan.Zero;
+
+                var delta = value - _transitionDuration;
                 if (SetProperty(ref _transitionDuration, value))
                 {
+                    if (delta != TimeSpan.Zero)
+                    {
+                        var grown = OpDuration + delta;
+                        OpDuration = grown > TimeSpan.Zero ? grown : TimeSpan.Zero;
+                    }
                     OnPropertyChanged(nameof(HasModifications));
                 }
             }

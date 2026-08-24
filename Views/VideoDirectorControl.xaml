@@ -266,10 +266,14 @@
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="3*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
                                             <ComboBox Grid.Column="0" SelectedIndex="{Binding SelectedClip.TransitionStyleIndex, Mode=TwoWay, FallbackValue=0}" HorizontalAlignment="Stretch" ToolTipService.ToolTip="Transition Style">
-                                                <x:String>HardSnap</x:String>
-                                                <x:String>Crossfade</x:String>
-                                                <x:String>CinematicBridge</x:String>
-                                                <x:String>DipToColor</x:String>
+                                                <!-- Index order must match TransitionStyle. Crossfade
+                                                     needs two clips on screen at once, which the
+                                                     compositor cannot do, so it is disabled rather
+                                                     than offered and ignored. -->
+                                                <x:String>None</x:String>
+                                                <ComboBoxItem Content="Crossfade (not available)" IsEnabled="False" />
+                                                <x:String>Fade in and out</x:String>
+                                                <x:String>Fade out</x:String>
                                             </ComboBox>
                                             <NumberBox Grid.Column="1" local:NumberBoxExtensions.FractionDigits="1" Value="{Binding SelectedClip.TransitionDuration, Mode=TwoWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}, FallbackValue=0.0}"
                                                        IsEnabled="{Binding SelectedClip.TransitionEditable}"
@@ -455,15 +459,28 @@
                                 ToolTipService.ToolTip="Canvas size">
                             <FontIcon Glyph="&#xE7C4;" FontSize="13" />
                             <Button.Flyout>
-                                <MenuFlyout>
-                                    <RadioMenuFlyoutItem x:Name="CanvasAutoItem" Text="Auto" IsChecked="True" GroupName="CanvasSize" Click="CanvasMode_Click" Tag="Auto" />
+                                <MenuFlyout Opening="CanvasMenu_Opening">
+                                    <!-- Auto and Custom, which is what a project actually needs. The
+                                         two stubs that used to sit here tied the frame to transient UI
+                                         state - the coupling the canvas exists to remove. -->
+                                    <RadioMenuFlyoutItem x:Name="CanvasAutoItem" Text="Auto (window at project start)" GroupName="CanvasSize" Click="CanvasMode_Click" Tag="Auto" />
                                     <MenuFlyoutSeparator />
-                                    <RadioMenuFlyoutItem Text="Match working area" GroupName="CanvasSize" IsEnabled="False" />
-                                    <RadioMenuFlyoutItem Text="Follow window" GroupName="CanvasSize" IsEnabled="False" />
-                                    <RadioMenuFlyoutItem Text="Custom size..." GroupName="CanvasSize" IsEnabled="False" />
+                                    <RadioMenuFlyoutItem x:Name="CanvasHdItem"    Text="1920 x 1080  (16:9)"     GroupName="CanvasSize" Click="CanvasPreset_Click" Tag="1920x1080" />
+                                    <RadioMenuFlyoutItem x:Name="CanvasUhdItem"   Text="3840 x 2160  (16:9 UHD)" GroupName="CanvasSize" Click="CanvasPreset_Click" Tag="3840x2160" />
+                                    <RadioMenuFlyoutItem x:Name="CanvasScopeItem" Text="2560 x 1072  (2.39:1)"   GroupName="CanvasSize" Click="CanvasPreset_Click" Tag="2560x1072" />
+                                    <RadioMenuFlyoutItem x:Name="CanvasVertItem"  Text="1080 x 1920  (9:16)"     GroupName="CanvasSize" Click="CanvasPreset_Click" Tag="1080x1920" />
+                                    <MenuFlyoutSeparator />
+                                    <RadioMenuFlyoutItem x:Name="CanvasCustomItem" Text="Custom size..." GroupName="CanvasSize" Click="CanvasCustom_Click" />
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <!-- Which project is open. Far left, where a document name belongs, and
+                             trimmed rather than allowed to push the rest of the row around. -->
+                        <TextBlock Text="{x:Bind ViewModel.ProjectName, Mode=OneWay}"
+                                   VerticalAlignment="Center" MaxWidth="180" TextTrimming="CharacterEllipsis"
+                                   FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   ToolTipService.ToolTip="{x:Bind ViewModel.ProjectName, Mode=OneWay}" />
                     </StackPanel>
 
                     <!-- TRANSPORT LIVES HERE, in the column that was empty.
@@ -580,6 +597,21 @@
                             <SymbolIcon Symbol="Save" />
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                        <!-- Which display a performance takes over. Built when the menu opens, from
+                             the displays actually attached, so a projector plugged in after launch
+                             appears without a restart. -->
+
+                        <!-- Which display a performance takes over. Built at open time from the
+                             displays actually attached, so plugging in a projector needs no restart. -->
+                        <Button x:Name="PresentDisplayButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
+                                ToolTipService.ToolTip="Which display cinematic playback takes over">
+                            <FontIcon Glyph="&#xE7F4;" FontSize="13" />
+                            <Button.Flyout>
+                                <MenuFlyout x:Name="PresentDisplayFlyout" Opening="PresentDisplayFlyout_Opening" />
+                            </Button.Flyout>
+                        </Button>
+                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+
                         <!-- View -->
                         <Button x:Name="ZoomOutTimelineButton" Click="ZoomOutTimeline_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Zoom Out Timeline (Ctrl + -)">
                             <FontIcon Glyph="&#xE71F;" FontSize="13" />

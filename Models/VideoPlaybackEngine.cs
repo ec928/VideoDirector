@@ -849,7 +849,10 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
             var natural = player.PlaybackSession.NaturalDuration;
             if (natural > TimeSpan.Zero) op.SourceDuration = natural;
         }
-public async void SeekCompositeToStoryTime(TimeSpan t)
+// async Task, not async void. An exception inside an async void cannot be caught by the
+        // caller and takes the process down with it - and both of these await real work (seeking a
+        // decoder, opening a source) that can fail on a missing or damaged file.
+        public async System.Threading.Tasks.Task SeekCompositeToStoryTime(TimeSpan t)
         {
             if (_mode != EditorMode.Arrange) ExitToArrange();
             if (t < TimeSpan.Zero) t = TimeSpan.Zero;
@@ -991,6 +994,7 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
                     }
 
                     SetOverlayRender(i, mode, clip);
+                    ApplyTransitionOpacity(i, clip, currentStoryTime);
                     ApplyOverlayTransform(i, clip, currentStoryTime, mode);
                 }
                 else SetOverlayRender(i, OverlayRender.Hidden, null);
@@ -1155,6 +1159,52 @@ public async void SeekCompositeToStoryTime(TimeSpan t)
         // two clips overlapped, and a 1-tick overlap is all it took (see ClipGeometry.Covers). The
         // clip that started LATER is the one the playhead has most recently entered, so it wins -
         // which is also the right answer for a deliberate overlap, not just a rounding one.
+        // Fades, applied on top of the clip's own opacity.
+        //
+        // Only styles that need ONE clip are implemented: a fade out to black at the end, and
+        // optionally a fade in from black at the start. A true crossfade needs the outgoing and
+        // incoming clips on screen simultaneously, which one slot holding one clip cannot do.
+        //
+        // Multiplied into the grid opacity that SetOverlayRender just wrote, so a clip already at
+        // 35% fades from 35% rather than jumping to full.
+        private void ApplyTransitionOpacity(int slot, CinematicOperation clip, TimeSpan now)
+        {
+            var v = _playerControl.OverlayVisuals[slot];
+            if (v?.Grid == null || clip == null) return;
+
+            double f = TransitionFade(clip, now);
+            if (f >= 0.999) return;   // nothing to do, and no write on the common path
+
+            double baseOpacity = clip.IsVideoHidden ? 0.0 : clip.Opacity;
+            double want = baseOpacity * f;
+            if (Math.Abs(v.Grid.Opacity - want) > 0.001) v.Grid.Opacity = want;
+        }
+
+        internal static double TransitionFade(CinematicOperation clip, TimeSpan now)
+        {
+            if (clip == null || clip.TransitionStyle == TransitionStyle.HardSnap) return 1.0;
+
+            double d = clip.TransitionDuration.TotalSeconds;
+            double len = clip.OpDuration.TotalSeconds;
+            if (d <= 0 || len <= 0) return 1.0;
+
+            // A fade longer than half the clip would never reach full brightness; cap it so the
+            // middle of the clip is always the clip.
+            d = Math.Min(d, len / 2);
+
+            double into = (now - clip.StartTime).TotalSeconds;
+            if (into < 0 || into > len) return 1.0;
+
+            double f = 1.0;
+            if (clip.TransitionStyle == TransitionStyle.CinematicBridge && into < d)
+                f = Math.Min(f, into / d);
+
+            double left = len - into;
+            if (left < d) f = Math.Min(f, left / d);
+
+            return Math.Clamp(f, 0.0, 1.0);
+        }
+
         private static CinematicOperation ResolveActiveClip(TimelineTrack track, TimeSpan t)
         {
             CinematicOperation best = null;
@@ -1977,10 +2027,10 @@ public void ExitToArrange()
 public void BeginEdit(CinematicOperation clip, EditTarget target)
         {
             if (clip == null) return;
-            EnterEditMode(clip, target);
+            _ = EnterEditMode(clip, target);
         }
 
-        public async void EnterEditMode(CinematicOperation overlay, EditTarget target = EditTarget.Start)
+        public async System.Threading.Tasks.Task EnterEditMode(CinematicOperation overlay, EditTarget target = EditTarget.Start)
         {
             if (overlay == null || string.IsNullOrWhiteSpace(overlay.FilePath)) return;
 
