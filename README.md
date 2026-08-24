@@ -6,11 +6,13 @@ Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImage
 
 ## ✨ Key Features
 
-**4-Track Timeline** — Up to four video/image tracks composited freely. There is no artificial distinction between a "spine" and "overlays"—every track is treated equally, subject to Z-order. Picture-in-picture layers can be positioned anywhere, with automatic collision resolution when clips are reordered.
+**Six-Track Timeline** — Up to six video/image tracks composited freely, added and removed as a project needs. There is no artificial distinction between a "spine" and "overlays" — every track is treated equally, subject to Z-order. Picture-in-picture layers can be positioned anywhere, with automatic collision resolution when clips are reordered.
 
 **Ken Burns Motion & Zoom** — Any clip, video or still, can carry an animated pan/zoom defined by start, optional mid, and end framing keyframes interpolated with easing curves.
 
 **Custom PiP Borders** — Picture-in-picture clips can be styled with custom borders directly from the video canvas or timeline right-click menus. Includes various edge styles (Solid, Soft rounded edges, and dashed FilmStrip perforations) with selectable colors and thickness.
+
+**Fixed Canvas** — The composition has its own frame rather than borrowing whatever the window happens to be. Hiding a panel, resizing the window or presenting full screen changes only the scale you view the arrangement at, never the arrangement. Pan with the middle mouse button and zoom with the wheel in Arrange; middle-click returns to fit.
 
 **Three-Mode Interaction** — Playback, Arrange, and Edit modes strictly segregate what mouse input means, so canvas manipulation never collides with timeline scrubbing or review playback.
 

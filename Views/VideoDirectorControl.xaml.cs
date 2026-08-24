@@ -63,8 +63,26 @@ namespace VideoDirector.Views
             this.Loaded += VideoDirectorControl_Loaded;
         }
 
+        // Chrome wakes on REAL pointer movement only.
+        //
+        // Two things fire this without the mouse going anywhere: the window changing to full screen
+        // shifts the layout under a stationary cursor, and the pointer sitting still can still raise
+        // events. Either was enough to bring the playbar straight back the instant a performance
+        // started - which looked like the hide never happened.
+        private Windows.Foundation.Point _lastPointerPos;
+        private DateTime _chromeWakeBlockedUntil = DateTime.MinValue;
+
         private void VideoDirectorControl_PointerMoved(object? sender, PointerRoutedEventArgs e)
         {
+            var p = e.GetCurrentPoint(this).Position;
+            double dx = p.X - _lastPointerPos.X, dy = p.Y - _lastPointerPos.Y;
+            _lastPointerPos = p;
+
+            // A layout shift can move the pointer a long way in control coordinates without the mouse
+            // moving at all, so the settling period after entering a performance is ignored outright.
+            if (DateTime.UtcNow < _chromeWakeBlockedUntil) return;
+            if (Math.Abs(dx) < 2 && Math.Abs(dy) < 2) return;
+
             _inactivityTimer.Stop();
             ViewModel.IsControlsVisible = true;
             _inactivityTimer.Start();
@@ -78,19 +96,24 @@ namespace VideoDirector.Views
         {
             _inactivityTimer.Stop();
 
-            // Cinematic mode hides the chrome whether or not anything is rolling: the point is to
-            // look at the picture, and a paused frame is still a frame you want unobstructed.
-            // Outside it the old rule stands — chrome only gets out of the way during playback,
-            // because while editing it is what you are reaching for.
-            if (!_isPointerOverPill && (ViewModel.IsPlaying || ViewModel.IsCinematicMode))
+            // PLAYBACK is what hides the chrome, in either mode. Cinematic on its own is just a
+            // full-screen window: toggling it should do nothing but toggle it, because a paused
+            // frame you are still working on is not a performance.
+            if (!_isPointerOverPill && ViewModel.IsPlaying)
             {
                 ViewModel.IsControlsVisible = false;
             }
         }
 
-        // Cinematic mode owns the window presenter as well as the chrome. Guarded because the
-        // presenter call throws if the window is mid-teardown, and a failed toggle must not take
-        // the app down with it.
+        // Full screen belongs to the PERFORMANCE, not to arming it.
+        //
+        // Cinematic on its own is a choice about how the next playback will be presented; taking the
+        // window full screen while nothing is rolling just puts the editor in a bigger window with
+        // nothing gained. Full screen therefore follows cinematic AND playing, and drops back the
+        // moment either ends.
+        //
+        // Guarded because the presenter call throws if the window is mid-teardown, and a failed
+        // toggle must not take the app down with it.
         private void ApplyCinematicPresenter(bool cinematic)
         {
             try
@@ -98,10 +121,12 @@ namespace VideoDirector.Views
                 var appWindow = MainWindow.Instance?.AppWindow;
                 if (appWindow == null) return;
 
-                bool isFullScreen = appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
-                if (cinematic == isFullScreen) return;
+                bool wantFullScreen = cinematic && ViewModel != null && ViewModel.IsPlaying;
 
-                appWindow.SetPresenter(cinematic
+                bool isFullScreen = appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
+                if (wantFullScreen == isFullScreen) return;
+
+                appWindow.SetPresenter(wantFullScreen
                     ? Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen
                     : Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped);
             }
@@ -124,12 +149,31 @@ namespace VideoDirector.Views
 
                 // Playback takes the view: fit the whole canvas, drop the chrome, ignore zoom and
                 // pan until it stops.
+                // Each chevron points the way its panel will go when clicked.
+                if (ev.PropertyName == nameof(ViewModel.IsTrackDockOpen) && TrackDockTabIcon != null)
+                    TrackDockTabIcon.Glyph = ViewModel.IsTrackDockOpen ? "\uE70D" : "\uE70E";
+
+                if (ev.PropertyName == nameof(ViewModel.IsTrackDockOpen) ||
+                    ev.PropertyName == nameof(ViewModel.IsTrackDockVisible) ||
+                    ev.PropertyName == nameof(ViewModel.IsChromeVisible))
+                    DispatcherQueue.TryEnqueue(UpdateChromeInset);
+
+                if (ev.PropertyName == nameof(ViewModel.IsInspectorOpen) && InspectorTabIcon != null)
+                    InspectorTabIcon.Glyph = ViewModel.IsInspectorOpen ? "\uE76C" : "\uE76B";
+
                 if (ev.PropertyName == nameof(ViewModel.IsPlaying))
+                {
                     PlayerControl.SetPlaybackView(ViewModel.IsPlaying);
+                    ApplyCinematicPlaybackChrome();
+                    ApplyCinematicPresenter(ViewModel.IsCinematicMode);
+                }
 
                 // Cinematic goes further: it locks the view to the whole canvas as well.
                 if (ev.PropertyName == nameof(ViewModel.IsCinematicMode))
+                {
                     PlayerControl.SetCinematicView(ViewModel.IsCinematicMode);
+                    ApplyCinematicPlaybackChrome();
+                }
             };
             PlayerControl.DeselectRequested += (s, ev) => ViewModel.SelectedClip = null;
 
@@ -143,6 +187,11 @@ namespace VideoDirector.Views
             ApplyCanvasSize();
             DispatcherQueue.TryEnqueue(ApplyCanvasSize);
             PlayerControl.SizeChanged += (s, ev) => ApplyCanvasSize();
+            SetTransportDocked(true);   // out of the picture by default
+
+            // The canvas fits the part of the pane the dock is not covering.
+            TrackDock.SizeChanged += (s, ev) => UpdateChromeInset();
+            UpdateChromeInset();
             PlayerControl.ExitEditRequested += (s, ev) => ExitEditMode();
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
             ViewModel.EditTargetChanged += ViewModel_EditTargetChanged;
@@ -650,6 +699,36 @@ namespace VideoDirector.Views
                     if (clip.IsVideoHidden)
                         sp.Children.Add(new FontIcon { Glyph = "\uED1A", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = textColor, Opacity = 0.5, Margin = new Thickness(4,0,0,0) });
                     
+                    // Partial opacity: a half-filled disc, the mark every imaging tool uses for it.
+                    //
+                    // Deliberately NOT an eye - the eye-with-slash above already means hidden, and two
+                    // eye shapes meaning different things at 12px is noise. Drawn rather than a font
+                    // glyph so the hard half-and-half edge is exact at this size, and stroked so the
+                    // transparent half still reads as a circle rather than a blob.
+                    if (clip.Opacity < 0.999)
+                    {
+                        var half = new Microsoft.UI.Xaml.Media.LinearGradientBrush
+                        {
+                            StartPoint = new Windows.Foundation.Point(0, 0),
+                            EndPoint = new Windows.Foundation.Point(1, 0)
+                        };
+                        half.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop { Color = TrackPalette.TextOn(color), Offset = 0.5 });
+                        half.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop { Color = Microsoft.UI.Colors.Transparent, Offset = 0.5 });
+
+                        var disc = new Microsoft.UI.Xaml.Shapes.Ellipse
+                        {
+                            Width = 11,
+                            Height = 11,
+                            Fill = half,
+                            Stroke = textColor,
+                            StrokeThickness = 1,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Margin = new Thickness(4, 0, 0, 0)
+                        };
+                        ToolTipService.SetToolTip(disc, "Opacity " + Math.Round(clip.Opacity * 100) + "%");
+                        sp.Children.Add(disc);
+                    }
+
                     if (clip.Volume == 0)
                         sp.Children.Add(new FontIcon { Glyph = "\uE74F", FontSize = 14, VerticalAlignment = VerticalAlignment.Center, Foreground = muteColor, Margin = new Thickness(4,0,0,0) });
                 }
@@ -1675,10 +1754,15 @@ namespace VideoDirector.Views
             if (e.PropertyName == nameof(DirectorViewModel.IsEditMode))
             {
                 BuildTimelineBar(); // spotlight switches between Edit and Arrange
-                // Zone F: the global timeline recedes (dims) in Edit so it can't be confused with the
-                // Playbar's per-clip scrubber. It stays clickable — a click on it exits Edit.
+                // Zone F: the global timeline recedes in Edit so it cannot be confused with the
+                // Playbar's per-clip scrubber. It stays clickable - a click on it exits Edit.
+                //
+                // The TIMELINE dims, not the whole dock. The dock now also holds the transport, and
+                // dimming the lot took the playbar down to 50% in Edit along with it.
+                if (TimelineSection != null)
+                    TimelineSection.Opacity = ViewModel.IsEditMode ? 0.5 : 1.0;
                 if (TrackDock != null)
-                    TrackDock.Opacity = ViewModel.IsEditMode ? 0.5 : 1.0;
+                    TrackDock.Opacity = 1.0;
 
                 if (ViewModel.IsEditMode)
                 {
@@ -1706,7 +1790,7 @@ namespace VideoDirector.Views
             {
                 if (PlayPauseIcon != null)
                 {
-                    PlayPauseIcon.Symbol = ViewModel.IsPlaying ? Symbol.Pause : Symbol.Play;
+                    PlayPauseIcon.Glyph = ViewModel.IsPlaying ? "\uE769" : "\uE768";
                 }
                 _playbackEngine?.UpdateWysiwygOverlay();
 
@@ -1864,7 +1948,8 @@ namespace VideoDirector.Views
             // ---- sections. Claims kept to what the app actually does; see the export note.
             AddSection(body, "Compose", new[]
             {
-                ("Four equal tracks", "composited by Z-order — no privileged “spine”, and any clip on any track can be a picture-in-picture."),
+                ("Up to six equal tracks", "composited by Z-order — no privileged “spine”, and any clip on any track can be a picture-in-picture. Add and remove them as a project needs."),
+                ("A fixed canvas", "— the composition has its own frame rather than borrowing the window’s, so hiding a panel, resizing or presenting full screen changes only how big it looks."),
                 ("Free placement", "with independent size, position and opacity, plus solid, soft or film-strip borders."),
                 ("Stills as first-class clips", "— images hold for a set duration and advance story time by wall clock, so mixed photo and video sequences stay in sync."),
             });
@@ -1885,7 +1970,7 @@ namespace VideoDirector.Views
 
             AddSection(body, "Screen and share", new[]
             {
-                ("Cinematic mode", "— true full screen with the editor chrome fading away and returning on any mouse movement."),
+                ("Cinematic mode", "— arm it, and playback takes over the whole screen with every trace of the editor gone. Move the mouse for the transport, stop playing and the editor returns as you left it."),
                 ("Export to MP4", "at 1080p. Motion, per-clip speed and transitions are preview-only for now and are not yet baked into the render."),
             });
 
@@ -2161,6 +2246,105 @@ namespace VideoDirector.Views
         // had been restored to its saved size, and the canvas then stayed about a dock-height short
         // of the pane for the rest of the session. Following until there is content to protect
         // means the size that sticks is the one you actually started working at.
+        // Move the transport between the dock toolbar and floating over the canvas.
+        //
+        // Docked is normal: the column is centred under the canvas and costs no picture. Floating
+        // is for cinematic, where there is no dock - and there it keeps the pill chrome, because it
+        // is drawn straight onto video.
+        // Tell the player how much of its bottom edge the dock is covering, so the canvas can fit
+        // into what is left rather than running underneath it. Zero when the dock is not showing.
+        // CINEMATIC + PLAYING is the performance, and only that combination changes anything.
+        //
+        // Going in: the chrome goes at once rather than after a timeout - nobody wants the first
+        // seconds of a performance framed by an editor - and the timeline collapses so that moving
+        // the mouse brings back the playbar alone rather than the whole track manager.
+        //
+        // Coming out: whatever the timeline was set to before is handed back. Cinematic on its own,
+        // and playback on its own, are both left exactly as they were.
+        private bool _inCinematicPlayback;
+        private bool _dockOpenBeforePerformance = true;
+
+        private void ApplyCinematicPlaybackChrome()
+        {
+            if (ViewModel == null) return;
+
+            bool performing = ViewModel.IsCinematicMode && ViewModel.IsPlaying;
+            if (performing == _inCinematicPlayback) return;
+            _inCinematicPlayback = performing;
+
+            if (performing)
+            {
+                _dockOpenBeforePerformance = ViewModel.IsTrackDockOpen;
+                ViewModel.IsTrackDockOpen = false;
+                ViewModel.IsControlsVisible = false;
+
+                // Ignore the pointer events the full-screen transition generates on its way in.
+                _chromeWakeBlockedUntil = DateTime.UtcNow.AddMilliseconds(600);
+            }
+            else
+            {
+                ViewModel.IsTrackDockOpen = _dockOpenBeforePerformance;
+                ViewModel.IsControlsVisible = true;
+            }
+        }
+
+        private void UpdateChromeInset()
+        {
+            if (PlayerControl == null || TrackDock == null) return;
+
+            double inset = TrackDock.Visibility == Visibility.Visible ? TrackDock.ActualHeight : 0;
+            if (Math.Abs(PlayerControl.BottomChromeInset - inset) < 0.5) return;
+
+            PlayerControl.BottomChromeInset = inset;
+            PlayerControl.UpdateCanvasLayout();
+        }
+
+        // What XAML gave the pill before anything moved it. Application.Current.Resources is not
+        // theme-aware here and hands back the LIGHT brush, which is why the floating pill came out
+        // white with washed-out controls.
+        private Microsoft.UI.Xaml.Media.Brush _pillFloatBrush;
+
+        private void SetTransportDocked(bool docked)
+        {
+            _pillFloatBrush ??= FloatingPill?.Background;
+
+            if (FloatingPill == null || TransportHost == null || ShellGrid == null) return;
+
+            var wanted = docked ? (Panel)TransportHost : ShellGrid;
+            if (ReferenceEquals(FloatingPill.Parent, wanted)) return;
+
+            if (FloatingPill.Parent is Panel old) old.Children.Remove(FloatingPill);
+
+            wanted.Children.Add(FloatingPill);
+
+            // Column 0 of the transport grid, right-aligned: playback runs UP TO the centre line where
+            // the panel toggle sits, and the edit controls start from it.
+            Grid.SetColumn(FloatingPill, 0);
+
+            if (docked)
+            {
+                // A row of controls, not a floating object: pill chrome inside a bordered dock is a
+                // second border around the same thing.
+                FloatingPill.Background = null;
+                FloatingPill.BorderThickness = new Thickness(0);
+                FloatingPill.CornerRadius = new CornerRadius(0);
+                FloatingPill.Padding = new Thickness(0);
+                FloatingPill.Margin = new Thickness(0);
+                FloatingPill.VerticalAlignment = VerticalAlignment.Center;
+                FloatingPill.HorizontalAlignment = HorizontalAlignment.Right;
+            }
+            else
+            {
+                FloatingPill.Background = _pillFloatBrush;
+                FloatingPill.BorderThickness = new Thickness(1);
+                FloatingPill.CornerRadius = new CornerRadius(16);
+                FloatingPill.Padding = new Thickness(12, 8, 12, 8);
+                FloatingPill.Margin = new Thickness(0, 0, 0, 32);
+                FloatingPill.VerticalAlignment = VerticalAlignment.Bottom;
+                FloatingPill.HorizontalAlignment = HorizontalAlignment.Center;
+            }
+        }
+
         private void ApplyCanvasSize()
         {
             if (ViewModel == null || PlayerControl == null) return;
@@ -2324,12 +2508,24 @@ namespace VideoDirector.Views
             }
         }
 
+        // The badge is a two-way switch, not an exit. It left Edit but could not enter it, so the
+        // same control did something in one mode and nothing in the other.
+        //
+        // Entering needs a clip to edit, so with nothing selected it stays inert - and the badge is
+        // disabled in that case rather than looking broken. Playback is left alone: switching modes
+        // mid-roll is not what a mode badge is for.
         private void ModeBadge_Click(object? sender, RoutedEventArgs e)
         {
+            if (ViewModel.IsPlaying) return;
+
             if (ViewModel.IsEditMode)
             {
                 ExitEditMode();
+                return;
             }
+
+            if (ViewModel.SelectedClip is CinematicOperation clip && !clip.IsLocked)
+                _playbackEngine?.BeginEdit(clip, ViewModel.CurrentEditTarget);
         }
 
         private void PlaybarSplit_Click(object? sender, RoutedEventArgs e)

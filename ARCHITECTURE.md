@@ -8,10 +8,12 @@
 
 VideoDirector is a multi-track video sequencer and compositor built in **WinUI 3 / Windows App SDK** (mouse + keyboard primary; touch-compatible). It composes multiple video and image assets into a unified time-synchronized output.
 
-### 4-Track Topology The sequencer is bounded to 4 tracks. They are **equal**: every track is a `TimelineTrack` holding an `ObservableCollection<CinematicOperation>`, and the engine addresses them generically. There is no spine and no overlay role — the earlier A-Roll / B-Roll split was removed with the unified track engine.
+### 6-Track Topology The sequencer is bounded to 6 tracks, of which a new project shows 3; Add and Remove act on the top of the stack, because a track index IS its identity and removing from the middle would renumber everything above it. They are **equal**: every track is a `TimelineTrack` holding an `ObservableCollection<CinematicOperation>`, and the engine addresses them generically. There is no spine and no overlay role — the earlier A-Roll / B-Roll split was removed with the unified track engine.
 
 * **Compositing is by Z-order alone**: track 0 renders at the bottom, track 3 at the top.
 * **Clips never overlap within a track**, so at most one clip per track is active at any story time. `ResolveOverlaps()` shifts siblings when a clip is moved or reordered.
+* **The canvas is the composition space.** Every geometry read measures the canvas, not the player pane. Its size is the app window as it was when the project began (mode `Auto`), then held and persisted with the project; the pane only decides the scale it is drawn at. This is what stops the track dock, a window resize or full screen from changing an arrangement.
+
 * **Gaps are allowed on every track.** `TimelineTrack.IsGapless` can force clips to sit perfectly adjacent — the old spine behaviour — but it is a per-track option and every track is currently created with it off.
 * **Placement is normalised** (`PlacementCenterX/Y`, `PlacementWidth/Height` in 0..1 space) plus opacity, so any track can act as a Picture-in-Picture layer. Tracks differ only in where new clips *default* to sitting: track 1 defaults to full-screen centre, tracks 2–4 to smaller corner placements.
 * **Transitions and speed** (crossfade, dip to black, variable rate including speed 0 for stills held over a set time) apply per clip, not per track role.

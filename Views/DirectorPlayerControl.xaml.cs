@@ -105,6 +105,18 @@ namespace VideoDirector.Views
         public double CanvasWidth  => CanvasHost.Width  > 0 ? CanvasHost.Width  : 1920;
         public double CanvasHeight => CanvasHost.Height > 0 ? CanvasHost.Height : 1080;
 
+        // How much of the pane's bottom the track manager is covering.
+        //
+        // The pane deliberately spans the whole window so that showing or hiding the dock cannot
+        // change the canvas - but that left the bottom of the canvas BEHIND the dock, with edit
+        // rectangles and clip edges running under it.
+        //
+        // The fix is a VIEW adjustment, not a composition one: the canvas keeps its size, and the
+        // fit is computed against the part of the pane you can actually see, then nudged up to
+        // centre in it. Toggling the dock changes the scale you view the arrangement at and never
+        // the arrangement.
+        public double BottomChromeInset { get; set; }
+
         private double _canvasZoom = 1.0;
 
         // Two different presentations, with different rules.
@@ -159,7 +171,8 @@ namespace VideoDirector.Views
             double paneW = ActualWidth, paneH = ActualHeight;
             if (paneW <= 0 || paneH <= 0) return;
 
-            double fit = Math.Min(paneW / CanvasWidth, paneH / CanvasHeight);
+            double visibleH = Math.Max(1, paneH - BottomChromeInset);
+            double fit = Math.Min(paneW / CanvasWidth, visibleH / CanvasHeight);
             if (fit <= 0 || double.IsNaN(fit) || double.IsInfinity(fit)) fit = 1;
 
             double effective = fit * _canvasZoom;
@@ -167,7 +180,9 @@ namespace VideoDirector.Views
             CanvasTransform.ScaleX = effective;
             CanvasTransform.ScaleY = effective;
             CanvasTransform.TranslateX = _canvasPanX;
-            CanvasTransform.TranslateY = _canvasPanY;
+            // Up by half the covered strip, so the canvas centres in what is visible rather than in
+            // the pane - otherwise it would sit half behind the dock.
+            CanvasTransform.TranslateY = _canvasPanY - BottomChromeInset / 2;
 
             UpdateCanvasLabel(effective);
 

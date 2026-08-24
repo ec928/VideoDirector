@@ -66,6 +66,22 @@ namespace VideoDirector.Views
         }
     }
 
+    // Speeds read as multipliers - 2x, 1x, 0.5x - which is how every player labels them, and it
+    // lets the control drop its "SPEED" caption: "1x" needs no explaining, "1" does.
+    // Zero is the exception and stays bare: it is a freeze, not a multiplier.
+    public class SpeedToLabelConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, string language)
+        {
+            if (value is not double d) return value;
+            if (d <= 0) return "0";
+            return d.ToString("0.##") + "x";
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language)
+            => throw new NotImplementedException();
+    }
+
     public class BoolToVisConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, string language)

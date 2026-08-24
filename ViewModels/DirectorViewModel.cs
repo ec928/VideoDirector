@@ -154,13 +154,17 @@ namespace VideoDirector.ViewModels
             get => _isPlaying;
             set
             {
-                // Playback is a presentation: the inspector gets out of the way for it.
-                if (value) IsInspectorOpen = false;
+                // Playback is a presentation, so the inspector steps aside - EXCEPT in Edit, where
+                // playing is how you watch the Ken Burns move you are building. Closing the panel
+                // there meant reopening it after every preview, which is not a presentation at all.
+                if (value && !IsEditMode) IsInspectorOpen = false;
 
                 if (SetProperty(ref _isPlaying, value))
                 {
+                    OnPropertyChanged(nameof(IsEditorChromeVisible));
                     OnPropertyChanged(nameof(ModeLabel));
                     OnPropertyChanged(nameof(IsStoryboardVisible));
+                    OnPropertyChanged(nameof(CanToggleEditMode));
                     if (!value) IsControlsVisible = true;
                 }
             }
@@ -183,12 +187,15 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _isCinematicMode, value))
                 {
                     OnPropertyChanged(nameof(IsStoryboardVisible));
+                    OnPropertyChanged(nameof(CanToggleEditMode));
                     OnPropertyChanged(nameof(IsTrackDockVisible));
                     OnPropertyChanged(nameof(IsChromeVisible));
-                    // Show the pill on the way in and on the way out: entering, so the exit control
-                    // is visible rather than having to be hunted for; leaving, so the editor does
-                    // not come back with its transport already faded out.
-                    IsControlsVisible = true;
+                    OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsTrackDockReopenVisible));
+                    // Only on the way OUT. Forcing it on the way in undid the hide that entering a
+                    // performance had just applied - the chrome vanished for a frame and came
+                    // straight back, because this line runs after the handler that hid it.
+                    if (!value) IsControlsVisible = true;
                 }
             }
         }
@@ -201,7 +208,21 @@ namespace VideoDirector.ViewModels
         // Whether the editing chrome is up at all. The panel TABS follow this rather than
         // IsTrackDockVisible: a tab that disappeared when its own panel closed would be a panel
         // you could shut and never reopen.
-        public bool IsChromeVisible => !_isCinematicMode && _isControlsVisible;
+        // Cinematic no longer special-cases the chrome away. Entering it collapses the timeline as
+        // though the hide button had been pressed, and the inactivity timer then takes the rest -
+        // the same path playback already uses. One rule, one behaviour, and the transport stays
+        // where it lives instead of being rebuilt as a floating object for one mode.
+        public bool IsChromeVisible => _isControlsVisible;
+
+        // EDITOR chrome - undo, project, export, the panel toggles - as distinct from the transport.
+        // During a performance the transport is all that should be on screen: the rest is editing
+        // furniture and has no business in front of an audience.
+        public bool IsEditorChromeVisible => !(_isCinematicMode && _isPlaying);
+
+        // The REOPEN affordance, and only that. While the dock is open its collapse control lives
+        // inside the dock toolbar, where it cannot collide with the transport sitting in the middle
+        // of the same row; the floating tab exists purely so a closed dock is not unreachable.
+        public bool IsTrackDockReopenVisible => IsChromeVisible && !_isTrackDockOpen;
 
         private bool _isTrackDockOpen = true;
         public bool IsTrackDockOpen
@@ -210,8 +231,13 @@ namespace VideoDirector.ViewModels
             set
             {
                 if (SetProperty(ref _isTrackDockOpen, value))
+                {
                     OnPropertyChanged(nameof(IsTrackDockVisible));
+                    OnPropertyChanged(nameof(IsTrackDockReopenVisible));
+                }
                     OnPropertyChanged(nameof(IsChromeVisible));
+                    OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsTrackDockReopenVisible));
             }
         }
 
@@ -257,11 +283,19 @@ namespace VideoDirector.ViewModels
             {
                 if (SetProperty(ref _isInspectorOpen, value))
                     OnPropertyChanged(nameof(IsStoryboardVisible));
+                    OnPropertyChanged(nameof(CanToggleEditMode));
             }
         }
 
+        // Hidden while playing - EXCEPT in Edit, where playing is previewing the very move the panel
+        // is used to set. IsInspectorOpen was already exempted for Edit, but this expression hid the
+        // panel anyway, so it vanished for the length of every preview and came back afterwards.
+        // Leaving Edit always works; entering needs a clip. Playback is not a mode you switch out of
+        // with this control.
+        public bool CanToggleEditMode => !_isPlaying && (_isEditMode || _selectedClip != null);
+
         public bool IsStoryboardVisible =>
-            !_isCinematicMode && !_isPlaying && _isInspectorOpen && HasSelection;
+            !_isCinematicMode && (!_isPlaying || _isEditMode) && _isInspectorOpen && HasSelection;
 
         private bool _isControlsVisible = true;
         public bool IsControlsVisible
@@ -272,6 +306,8 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _isControlsVisible, value))
                     OnPropertyChanged(nameof(IsTrackDockVisible));
                     OnPropertyChanged(nameof(IsChromeVisible));
+                    OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsTrackDockReopenVisible));
             }
         }
 
@@ -294,7 +330,9 @@ namespace VideoDirector.ViewModels
 
         public bool IsPausedSpeed => _playbackSpeed == 0.0;
 
-        public List<double> AvailableSpeeds { get; } = new List<double> { 1.0, 0.5, 0.25, 0.0 };
+        // 2x was simply missing - the list only ever went down from 1. Fastest first, so the order
+        // reads the way the numbers do.
+        public List<double> AvailableSpeeds { get; } = new List<double> { 2.0, 1.0, 0.5, 0.25, 0.0 };
 
         public TimeSpan TotalStoryTime
         {
@@ -350,6 +388,7 @@ namespace VideoDirector.ViewModels
 
                     OnPropertyChanged(nameof(HasSelection));
                     OnPropertyChanged(nameof(IsStoryboardVisible));
+                    OnPropertyChanged(nameof(CanToggleEditMode));
                     OnPropertyChanged(nameof(IsTrack1Selected));
                     OnPropertyChanged(nameof(IsOverlaySelected));
                     OnPropertyChanged(nameof(SelectedTrackLabel));
@@ -1105,8 +1144,26 @@ namespace VideoDirector.ViewModels
         // so editing and then undoing back to the saved state correctly counts as unmodified and
         // does not nag on the way out.
         private string _savedSnapshot = string.Empty;
-        public bool HasUnsavedChanges => CaptureSnapshot() != _savedSnapshot;
-        public void MarkSaved() => _savedSnapshot = CaptureSnapshot();
+        private string _savedContent = string.Empty;
+
+        // Dirty state compares CONTENT only - the clips - not the canvas.
+        //
+        // The canvas is part of the saved file, but under Auto it is derived from the window and
+        // rewritten whenever the pane resizes. Including it meant a project with nothing on it
+        // declared itself modified before you had touched anything, and asked to be saved on close.
+        public bool HasUnsavedChanges => CaptureContentSnapshot() != _savedContent;
+
+        public void MarkSaved()
+        {
+            _savedSnapshot = CaptureSnapshot();
+            _savedContent = CaptureContentSnapshot();
+        }
+
+        private string CaptureContentSnapshot()
+        {
+            var data = new ProjectData { SchemaVersion = CurrentSchemaVersion, Tracks = Tracks };
+            return System.Text.Json.JsonSerializer.Serialize(data, _snapshotOptions);
+        }
 
         public bool CanUndo => _undo.Count > 0;
         public bool CanRedo => _redo.Count > 0;
@@ -1135,6 +1192,7 @@ namespace VideoDirector.ViewModels
             _redo.Clear();
             _settled = CaptureSnapshot();
             _savedSnapshot = _settled; // a load or a new project is a clean slate, not a change
+            _savedContent = CaptureContentSnapshot();
             RaiseHistoryChanged();
         }
 

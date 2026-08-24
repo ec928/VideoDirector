@@ -19,6 +19,7 @@
             <local:NullToVisConverter x:Key="NullToVisConverter" />
             <local:NullToBoolConverter x:Key="NullToBoolConverter" />
             <local:ColorToBrushConverter x:Key="ColorToBrushConverter" />
+            <local:SpeedToLabelConverter x:Key="SpeedToLabelConverter" />
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -38,7 +39,7 @@
         <KeyboardAccelerator Key="Z" Modifiers="Control,Shift" Invoked="RedoAccelerator_Invoked" />
     </UserControl.KeyboardAccelerators>
 
-    <Grid Background="Black" AllowDrop="True" DragOver="Grid_DragOver" Drop="Grid_Drop">
+    <Grid x:Name="ShellGrid" Background="Black" AllowDrop="True" DragOver="Grid_DragOver" Drop="Grid_Drop">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />    <!-- Canvas area (player + right panel + floating pill) -->
             <RowDefinition Height="Auto" /> <!-- Bottom track dock (collapses when hidden) -->
@@ -212,7 +213,7 @@
 
                                         <!-- Opacity -->
                                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Opacity" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                                        <Slider Grid.Row="1" Grid.Column="1" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}" Minimum="0" Maximum="1" StepFrequency="0.05" IsEnabled="{Binding IsOverlaySelected}" ToolTipService.ToolTip="Opacity (Overlay Only)" VerticalAlignment="Center" Margin="0,0,0,-8" />
+                                        <Slider Grid.Row="1" Grid.Column="1" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}" Minimum="0" Maximum="1" StepFrequency="0.05" ToolTipService.ToolTip="Opacity - applies to any clip, including Track 1" VerticalAlignment="Center" Margin="0,0,0,-8" />
                                         <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding SelectedClip.Opacity, FallbackValue=1.0}" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
                                     </Grid>
                                 </Expander>
@@ -289,98 +290,55 @@
                 BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" 
                 BorderThickness="1" CornerRadius="16"
                 Visibility="{x:Bind ViewModel.IsControlsVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
-                RequestedTheme="Dark"
                 PointerEntered="FloatingPill_PointerEntered"
                 PointerExited="FloatingPill_PointerExited">
             <StackPanel Spacing="4">
-                <!-- Edit Mode Only: Clip Range Scrubber, Frame-Stepping, and Trim controls.
-                     Quarantined from Arrange Mode to prevent duration mutations and scrubber glitches during story playback. -->
-                <Grid Margin="0,0,0,4" Padding="0" ColumnSpacing="8"
-                      Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <local:TimelineRangeSlider x:Name="ClipScrubber" Grid.Column="0"
-                                               Maximum="{Binding SelectedClip.ScrubMaxSeconds, FallbackValue=1.0}"
-                                               Position="{x:Bind ViewModel.CurrentOperationTimeSeconds, Mode=TwoWay}"
-                                               TrimStart="{Binding SelectedClip.VideoStartTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"
-                                               TrimEnd="{Binding SelectedClip.VideoEndTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"
-                                               TrimChanged="ClipScrubber_TrimChanged"
-                                               InteractionStarted="TimelineRangeSlider_InteractionStarted"
-                                               InteractionCompleted="TimelineRangeSlider_InteractionCompleted" />
-                    <!-- Trim & Frame-Step Controls -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <Button x:Name="FrameStepBackButton" Click="FrameStepBack_Click" Height="28" Width="32" Padding="0" FontSize="11" VerticalAlignment="Center"
-                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
-                                ToolTipService.ToolTip="Step Backward 1 Frame (Left Arrow / J)">
-                            <TextBlock Text="-1F" FontWeight="Bold" FontSize="10" />
-                        </Button>
-                        <Button x:Name="FrameStepForwardButton" Click="FrameStepForward_Click" Height="28" Width="32" Padding="0" FontSize="11" VerticalAlignment="Center"
-                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
-                                ToolTipService.ToolTip="Step Forward 1 Frame (Right Arrow / L)">
-                            <TextBlock Text="+1F" FontWeight="Bold" FontSize="10" />
-                        </Button>
-                        <Button Click="Trim_Click" IsEnabled="{Binding HasSelection}"
-                                Height="28" Padding="12,0" FontSize="11" VerticalAlignment="Center"
-                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
-                                ToolTipService.ToolTip="Preview the trimmed clip on the scrubber (double-click the scrubber to re-trim)">
-                            <TextBlock Text="Trim" />
-                        </Button>
-                        <Button x:Name="PlaybarSplitButton" Click="PlaybarSplit_Click" IsEnabled="{Binding HasSelection}"
-                                Height="28" Padding="10,0" FontSize="11" VerticalAlignment="Center"
-                                Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
-                                ToolTipService.ToolTip="Split selected clip at playhead (S / Cut)">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <SymbolIcon Symbol="Cut" />
-                                <TextBlock Text="Split" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-                </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
                     <!-- Mode Indicator directly on the Playbar. In Edit Mode, this acts as a subtle pulsing interactive button to exit back to Arrange! -->
+                    <!-- Enabled when there is something to switch INTO: in Arrange that means a
+                         selected clip to edit. In Edit it always works, because leaving needs nothing. -->
                     <Button x:Name="ModeBadgeButton" Click="ModeBadge_Click"
+                            IsEnabled="{x:Bind ViewModel.CanToggleEditMode, Mode=OneWay}"
                             Background="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToBackgroundConverter}}"
                             BorderBrush="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToForegroundConverter}}"
-                            BorderThickness="1" CornerRadius="14" Padding="12,4" VerticalAlignment="Center" MinWidth="80"
-                            ToolTipService.ToolTip="Current Mode (If in EDIT mode, click here to exit back to Arrange mode)">
+                            BorderThickness="1" CornerRadius="4" Padding="10,2" VerticalAlignment="Center" MinWidth="72" Height="28"
+                            ToolTipService.ToolTip="Current mode - click to switch between Arrange and Edit (Edit needs a selected clip)">
                         <TextBlock Text="{x:Bind ViewModel.ModeLabel, Mode=OneWay}"
                                    Foreground="{x:Bind ViewModel.ModeLabel, Mode=OneWay, Converter={StaticResource ModeLabelToForegroundConverter}}"
                                    FontSize="11" FontWeight="Black" CharacterSpacing="50" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Button>
 
-                    <Border Width="1" Height="28" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
+                    <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
 
                     <!-- Toggles Column -->
                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <ToggleButton x:Name="ShuffleButton" Width="32" Height="32" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Toggle Shuffle">
+                        <ToggleButton x:Name="ShuffleButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Toggle Shuffle">
                             <SymbolIcon Symbol="Shuffle" />
                         </ToggleButton>
-                        <ToggleButton x:Name="LoopButton" IsChecked="{x:Bind ViewModel.IsLooping, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Toggle Loop" Padding="0">
+                        <ToggleButton x:Name="LoopButton" IsChecked="{x:Bind ViewModel.IsLooping, Mode=TwoWay}" Width="28" Height="28" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Toggle Loop" Padding="0">
                             <FontIcon Glyph="&#xE8EE;" FontSize="14" />
                         </ToggleButton>
-                        <ToggleButton x:Name="AutoPlayButton" IsChecked="{x:Bind ViewModel.IsAutoPlayEnabled, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" ToolTipService.ToolTip="Toggle Auto-Play" Padding="0">
+                        <ToggleButton x:Name="AutoPlayButton" IsChecked="{x:Bind ViewModel.IsAutoPlayEnabled, Mode=TwoWay}" Width="28" Height="28" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Toggle Auto-Play" Padding="0">
                             <FontIcon Glyph="&#xE173;" FontSize="14" />
                         </ToggleButton>
-                        <ToggleButton x:Name="CinematicButton" IsChecked="{x:Bind ViewModel.IsCinematicMode, Mode=TwoWay}" Width="32" Height="32" Background="Transparent" BorderThickness="0" CornerRadius="16" Padding="0"
+                        <ToggleButton x:Name="CinematicButton" IsChecked="{x:Bind ViewModel.IsCinematicMode, Mode=TwoWay}" Width="28" Height="28" Background="Transparent" BorderThickness="0" CornerRadius="4" Padding="0"
                                       ToolTipService.ToolTip="Cinematic mode - full screen, no editor chrome (Esc to exit)">
                             <FontIcon Glyph="&#xE740;" FontSize="14" />
                         </ToggleButton>
                     </StackPanel>
 
-                    <Border Width="1" Height="32" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="8,0" />
+                    <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="6,0" />
 
                     <!-- Transport Column -->
                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <Button x:Name="PrevButton" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Prev_Click" ToolTipService.ToolTip="Previous">
-                            <SymbolIcon Symbol="Previous" />
+                        <Button x:Name="PrevButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" Click="Prev_Click" ToolTipService.ToolTip="Previous">
+                            <FontIcon Glyph="&#xE892;" FontSize="14" />
                         </Button>
-                        <Button x:Name="PlayPauseButton" Width="48" Height="48" Background="Transparent" BorderThickness="0" CornerRadius="24" Click="PlayPause_Click" ToolTipService.ToolTip="Play/Pause">
-                            <SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
+                        <Button x:Name="PlayPauseButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" Click="PlayPause_Click" ToolTipService.ToolTip="Play/Pause">
+                            <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE768;" FontSize="14" />
                         </Button>
-                        <Button x:Name="NextButton" Width="40" Height="40" Background="Transparent" BorderThickness="0" CornerRadius="20" Click="Next_Click" ToolTipService.ToolTip="Next">
-                            <SymbolIcon Symbol="Next" />
+                        <Button x:Name="NextButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" Click="Next_Click" ToolTipService.ToolTip="Next">
+                            <FontIcon Glyph="&#xE893;" FontSize="14" />
                         </Button>
                     </StackPanel>
 
@@ -388,11 +346,18 @@
 
                     <!-- Master playback speed (affects every track) -->
                     <StackPanel Spacing="4" VerticalAlignment="Center">
-                        <TextBlock Text="SPEED" FontSize="9" Foreground="Gray" FontWeight="Bold" HorizontalAlignment="Center" />
+                        <!-- No "SPEED" caption: the values now read as multipliers, and "1x" says
+                             what it is without a label above it costing a whole row of height. -->
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <ComboBox SelectedItem="{x:Bind ViewModel.PlaybackSpeed, Mode=TwoWay}"
                                       ItemsSource="{x:Bind ViewModel.AvailableSpeeds}"
-                                      Width="85" Height="28" MinHeight="28" FontSize="11" Padding="8,0" VerticalAlignment="Center" ToolTipService.ToolTip="Master playback speed (affects all tracks)" />
+                                      Width="72" Height="28" MinHeight="28" FontSize="11" Padding="8,0" VerticalAlignment="Center" ToolTipService.ToolTip="Master playback speed (affects all tracks)">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Converter={StaticResource SpeedToLabelConverter}}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                             <!-- Show/hide, not a pin. Disabled with nothing selected, because a
                                  panel with no clip to describe has nothing to show either way -
                                  better to say so than to look inert. -->
@@ -414,33 +379,34 @@
 
              They stay visible when their panel is closed, or the panel becomes unreachable. Both
              hide with the rest of the chrome in cinematic mode. -->
+        <!-- The two panel tabs are a MATCHED PAIR: same fill, same border, same corner radius, same
+             56 x 16 footprint - one rotated for the edge it lives on. They were three different
+             widths, two different fills and one of them 65% opaque, which read as three unrelated
+             smudges rather than one control repeated.
+
+             The chevron always points the way the panel will GO, so it flips with the state. It used
+             to point left permanently, which said "open me" while the panel was already open. -->
         <ToggleButton Grid.Row="0" x:Name="InspectorTab"
                       IsChecked="{x:Bind ViewModel.IsInspectorOpen, Mode=TwoWay}"
                       IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}"
                       Visibility="{x:Bind ViewModel.IsChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
                       HorizontalAlignment="Right" VerticalAlignment="Center"
-                      Width="14" Height="56" Padding="0" Margin="0,0,2,0"
-                      Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                      BorderThickness="0" CornerRadius="4" Opacity="0.65"
+                      Width="16" Height="56" MinWidth="16" MinHeight="56" Padding="0" Margin="0,0,2,0"
+                      Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                      BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                      BorderThickness="1" CornerRadius="4" Opacity="0.75"
                       ToolTipService.ToolTip="Show or hide the Properties panel for the selected clip">
-            <FontIcon Glyph="&#xE76B;" FontSize="10" />
+            <FontIcon x:Name="InspectorTabIcon" Glyph="&#xE76B;" FontSize="11" />
         </ToggleButton>
 
-        <ToggleButton Grid.Row="0" x:Name="TrackDockTab"
-                      IsChecked="{x:Bind ViewModel.IsTrackDockOpen, Mode=TwoWay}"
-                      Visibility="{x:Bind ViewModel.IsChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
-                      HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                      Width="56" Height="14" Padding="0" Margin="0,0,0,2"
-                      Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                      BorderThickness="0" CornerRadius="4" Opacity="0.65"
-                      ToolTipService.ToolTip="Show or hide the track manager">
-            <FontIcon Glyph="&#xE70D;" FontSize="10" />
-        </ToggleButton>
 
         <!-- Bottom Track Dock: horizontal arrangement lanes (one per track).
              Auto-hides during playback if no mouse movement. -->
+        <!-- The dock as a whole follows the chrome (hidden in cinematic, and during playback until
+             the mouse moves). What the toggle collapses is only the TIMELINE inside it - the toolbar
+             line stays, so the transport and the toggle itself remain reachable. -->
         <Border Grid.Row="1" x:Name="TrackDock"
-                Visibility="{x:Bind ViewModel.IsTrackDockVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                Visibility="{x:Bind ViewModel.IsChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                 BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
                 Padding="8,6"
@@ -454,8 +420,10 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     
-                    <!-- Left: History & Timeline Mode Tools -->
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <!-- Left: History & Timeline Mode Tools. Gone during a performance - the toolbar
+                         line then carries the transport and nothing else. -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                                Visibility="{x:Bind ViewModel.IsEditorChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
                         <Button Click="Undo_Click" IsEnabled="{x:Bind ViewModel.CanUndo, Mode=OneWay}" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Undo (Ctrl+Z)">
                             <SymbolIcon Symbol="Undo" />
                         </Button>
@@ -474,6 +442,12 @@
                                 ToolTipService.ToolTip="Add track">
                             <FontIcon Glyph="&#xE710;" FontSize="13" />
                         </Button>
+                        <Button x:Name="RemoveTrackButton" Click="RemoveTrack_Click"
+                                IsEnabled="{x:Bind ViewModel.CanRemoveTrack, Mode=OneWay}"
+                                Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
+                                ToolTipService.ToolTip="Remove the top track">
+                            <FontIcon Glyph="&#xE738;" FontSize="13" />
+                        </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
                         <!-- Canvas: the composition space everything is measured against. Only Auto
                              is implemented; the rest are listed so the choice is visible rather
@@ -491,16 +465,104 @@
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>
-                        <Button x:Name="RemoveTrackButton" Click="RemoveTrack_Click"
-                                IsEnabled="{x:Bind ViewModel.CanRemoveTrack, Mode=OneWay}"
-                                Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
-                                ToolTipService.ToolTip="Remove the top track">
-                            <FontIcon Glyph="&#xE738;" FontSize="13" />
-                        </Button>
                     </StackPanel>
 
-                    <!-- Right: Project, View, and Export -->
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <!-- TRANSPORT LIVES HERE, in the column that was empty.
+
+                         It used to float over the canvas, bottom centre - on top of exactly where
+                         lower thirds and centre-bottom action sit. This column is already centred
+                         under the canvas and costs no picture.
+
+                         Reparented at runtime rather than moved in markup, so cinematic - which has
+                         no dock - can take it back and float it with its pill chrome intact. -->
+                    <!-- Three columns so the panel toggle sits on the CENTRE LINE and does not drift
+                         with whatever is either side of it: playback ends at the centre, the toggle
+                         is the centre, edit controls start at the centre.
+
+                         It SPANS all three toolbar columns on purpose. Confined to the middle column
+                         its centre was the centre of whatever space the side groups left over - well
+                         right of the window centre, with a large dead gap before the transport. -->
+                    <Grid x:Name="TransportHost" Grid.Column="0" Grid.ColumnSpan="3"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- ONE control for the track manager, in ONE place. It never moves and never
+                             changes shape - only the chevron flips - so hiding and reopening are the
+                             same gesture in the same spot, which is what a disclosure control should
+                             be. It sits inside the toolbar line, immediately right of the transport.
+
+                             The toolbar LINE always stays; only the timeline below it collapses. That
+                             is what keeps this button reachable without a second floating copy of it
+                             somewhere else - and it keeps the transport available too, which a full
+                             collapse would have taken away with it. -->
+                        <!-- The same tab as the inspector's, transposed: 56x16 here against 16x56
+                             there. Same footprint, fill, border, radius, opacity and glyph size -
+                             only the axis and the chevron direction change, because those are the
+                             only things about the two that genuinely differ.
+
+                             Pulled up to sit against the dock's top edge, so it reads as belonging to
+                             the panel it opens. -6 is the dock's top padding: it lands flush on the
+                             inside of the border without crossing it. The canvas now fits ABOVE the
+                             dock, so nothing up there is its to overlap any more. -->
+                        <ToggleButton x:Name="TrackDockTab" Grid.Column="1" IsChecked="{x:Bind ViewModel.IsTrackDockOpen, Mode=TwoWay}"
+                                      Visibility="{x:Bind ViewModel.IsEditorChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
+                                      VerticalAlignment="Top" Margin="10,-6,10,0"
+                                      Width="56" Height="16" Padding="0" MinWidth="56" MinHeight="16"
+                                      Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                      BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                                      BorderThickness="1" CornerRadius="4" Opacity="0.75"
+                                      ToolTipService.ToolTip="Show or hide the timeline">
+                            <FontIcon x:Name="TrackDockTabIcon" Glyph="&#xE70D;" FontSize="11" />
+                        </ToggleButton>
+
+                        <!-- EDIT CONTROLS, beyond the panel toggle rather than stacked above the
+                             transport. As a second row inside the pill they made the whole toolbar
+                             two lines tall the moment you entered Edit, and the row floated clear of
+                             everything else. Inline, they simply extend the row.
+
+                             Split is NOT here: splitting a clip is a timeline operation and already
+                             lives on the timeline right-click menu. -->
+                    <!-- Edit Mode Only: Clip Range Scrubber, Frame-Stepping, and Trim controls.
+                         Quarantined from Arrange Mode to prevent duration mutations and scrubber glitches during story playback. -->
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Left" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                          Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
+                        <local:TimelineRangeSlider x:Name="ClipScrubber" Width="200" VerticalAlignment="Center"
+                                                   Maximum="{Binding SelectedClip.ScrubMaxSeconds, FallbackValue=1.0}"
+                                                   Position="{x:Bind ViewModel.CurrentOperationTimeSeconds, Mode=TwoWay}"
+                                                   TrimStart="{Binding SelectedClip.VideoStartTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"
+                                                   TrimEnd="{Binding SelectedClip.VideoEndTime, Mode=OneWay, Converter={StaticResource TimeSpanToDoubleSecondsConverter}}"
+                                                   TrimChanged="ClipScrubber_TrimChanged"
+                                                   InteractionStarted="TimelineRangeSlider_InteractionStarted"
+                                                   InteractionCompleted="TimelineRangeSlider_InteractionCompleted" />
+                        <!-- Trim & Frame-Step Controls -->
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <Button x:Name="FrameStepBackButton" Click="FrameStepBack_Click" Height="28" Width="32" Padding="0" FontSize="11" VerticalAlignment="Center"
+                                    Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
+                                    ToolTipService.ToolTip="Step Backward 1 Frame (Left Arrow / J)">
+                                <TextBlock Text="-1F" FontWeight="Bold" FontSize="10" />
+                            </Button>
+                            <Button x:Name="FrameStepForwardButton" Click="FrameStepForward_Click" Height="28" Width="32" Padding="0" FontSize="11" VerticalAlignment="Center"
+                                    Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
+                                    ToolTipService.ToolTip="Step Forward 1 Frame (Right Arrow / L)">
+                                <TextBlock Text="+1F" FontWeight="Bold" FontSize="10" />
+                            </Button>
+                            <Button Click="Trim_Click" IsEnabled="{Binding HasSelection}"
+                                    Height="28" Padding="12,0" FontSize="11" VerticalAlignment="Center"
+                                    Background="Transparent" BorderThickness="1" BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" CornerRadius="4"
+                                    ToolTipService.ToolTip="Preview the trimmed clip on the scrubber (double-click the scrubber to re-trim)">
+                                <TextBlock Text="Trim" />
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                    </Grid>
+
+                    <!-- Right: Project, View, and Export. Also gone during a performance. -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                                Visibility="{x:Bind ViewModel.IsEditorChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
                         <!-- About: also the home for feedback, which used to be a lone "?" on the
                              transport pill - a place people look for playback help, not for a way
                              to report a bug. -->
@@ -543,7 +605,8 @@
                      one row per upper track, drawn to scale on one shared time axis, with the
                      playhead tracking story position. Track labels sit in a fixed-width gutter on
                      the left; the Canvas keeps x=0 == time 0. Laid out in code (TimelineBar_*). -->
-                <Border Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" CornerRadius="4">
+                <Border x:Name="TimelineSection" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" CornerRadius="4"
+                        Visibility="{x:Bind ViewModel.IsTrackDockOpen, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="90" />
