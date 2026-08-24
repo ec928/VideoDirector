@@ -218,9 +218,11 @@
                                     </Grid>
                                 </Expander>
 
-                                <!-- Borders & Effects (Overlays only) -->
+                                <!-- Borders and Effects. NOT overlays-only: the engine draws a border
+                                     for every slot, Track 1 included. The gate here was a spine-era
+                                     leftover, like the opacity and transition ones. -->
                                 <Expander Header="Borders &amp; Effects" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0"
-                                          IsEnabled="{Binding IsOverlaySelected}" Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
+                                          Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>

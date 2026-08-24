@@ -22,6 +22,11 @@ namespace VideoDirector
             public int WindowHeight { get; set; } = -1;
             public int WindowX { get; set; } = -1;
             public int WindowY { get; set; } = -1;
+
+            // Which display a performance takes over. -1 is "wherever the window already is".
+            // Persisted because it is exactly the setting you configure once, before an event,
+            // and would not think to set again after a restart.
+            public int PresentDisplayIndex { get; set; } = -1;
         }
 
         private sealed class OldModernSettings
@@ -107,6 +112,7 @@ namespace VideoDirector
                     string json = File.ReadAllText(_settingsPath);
                     var loaded = JsonSerializer.Deserialize<AppSettings>(json);
                     if (loaded != null) settings = loaded;
+                    PresentDisplayIndex = settings.PresentDisplayIndex;
                 }
                 catch { }
             }
@@ -161,6 +167,9 @@ namespace VideoDirector
                 _appWindow.Move(new Windows.Graphics.PointInt32(settings.WindowX, settings.WindowY));
         }
 
+        /// <summary>Which display a performance takes over. Saved with the window settings.</summary>
+        public int PresentDisplayIndex { get; set; } = -1;
+
         private void SaveAllSettings()
         {
             try
@@ -172,6 +181,7 @@ namespace VideoDirector
                 _currentSettings.WindowHeight = _appWindow.Size.Height;
                 _currentSettings.WindowX = _appWindow.Position.X;
                 _currentSettings.WindowY = _appWindow.Position.Y;
+                _currentSettings.PresentDisplayIndex = PresentDisplayIndex;
 
                 string json = JsonSerializer.Serialize(_currentSettings, new JsonSerializerOptions
                 {

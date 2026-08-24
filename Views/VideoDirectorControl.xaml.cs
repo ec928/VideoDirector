@@ -233,8 +233,10 @@ namespace VideoDirector.Views
 
         private void PresentDisplay_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is FrameworkElement fe && fe.Tag is int idx && ViewModel != null)
-                ViewModel.PresentDisplayIndex = idx;
+            if (sender is not FrameworkElement fe || fe.Tag is not int idx || ViewModel == null) return;
+
+            ViewModel.PresentDisplayIndex = idx;
+            if (MainWindow.Instance != null) MainWindow.Instance.PresentDisplayIndex = idx;
         }
 
         private void VideoDirectorControl_Loaded(object? sender, RoutedEventArgs e)
@@ -304,6 +306,11 @@ namespace VideoDirector.Views
             DispatcherQueue.TryEnqueue(ApplyCanvasSize);
             PlayerControl.SizeChanged += (s, ev) => ApplyCanvasSize();
             SetTransportDocked(true);   // out of the picture by default
+
+            // The display choice lives with the window settings, not the project: it describes the
+            // room you are presenting in, not the piece.
+            if (MainWindow.Instance != null)
+                ViewModel.PresentDisplayIndex = MainWindow.Instance.PresentDisplayIndex;
 
             // The canvas fits the part of the pane the dock is not covering.
             TrackDock.SizeChanged += (s, ev) => UpdateChromeInset();
