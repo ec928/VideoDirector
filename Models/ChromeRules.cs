@@ -24,51 +24,30 @@ namespace VideoDirector.Models
         /// </remarks>
         public static bool IsPerforming(bool cinematic, bool playing) => cinematic && playing;
 
-        /// <summary>
-        /// Recording locks the chrome away entirely - nothing brings it back until the take ends.
-        /// </summary>
-        /// <remarks>
-        /// This is a LOCK, not a longer auto-hide timeout, and the difference is the whole point.
-        /// A recording captures whatever the window is showing, so a playbar summoned by a nudge
-        /// of the mouse is in the file for good - and you would not find out until you watched it
-        /// back. Every rule below therefore answers false while recording no matter what the other
-        /// flags say, and the pointer handler does not even try to wake anything.
-        ///
-        /// The mouse CURSOR is a separate problem solved elsewhere: the capture session is created
-        /// with IsCursorCaptureEnabled = false, so the pointer never reaches the file however much
-        /// it moves. This rule is about the chrome the pointer would otherwise summon.
-        ///
-        /// Esc ends a take. Deliberately Esc alone rather than any key, so a stray press cannot
-        /// truncate one.
-        /// </remarks>
-        public static bool IsRecordingLocked(bool recording) => recording;
-
         /// <summary>Is the editing chrome up at all.</summary>
-        public static bool IsChromeVisible(bool controlsVisible, bool recording)
-            => !recording && controlsVisible;
+        public static bool IsChromeVisible(bool controlsVisible) => controlsVisible;
 
         /// <summary>
         /// Editor furniture - undo, project, export, the panel toggles - as distinct from the
         /// transport. During a performance the transport is all that belongs on screen.
         /// </summary>
-        public static bool IsEditorChromeVisible(bool cinematic, bool playing, bool recording)
-            => !recording && !IsPerforming(cinematic, playing);
+        public static bool IsEditorChromeVisible(bool cinematic, bool playing)
+            => !IsPerforming(cinematic, playing);
 
-        public static bool IsTrackDockVisible(bool cinematic, bool playing, bool controlsVisible, bool dockOpen, bool recording)
-            => !recording && !IsPerforming(cinematic, playing) && controlsVisible && dockOpen;
+        public static bool IsTrackDockVisible(bool cinematic, bool playing, bool controlsVisible, bool dockOpen)
+            => !IsPerforming(cinematic, playing) && controlsVisible && dockOpen;
 
         /// <summary>The reopen affordance, shown only while the dock is closed.</summary>
-        public static bool IsTrackDockReopenVisible(bool controlsVisible, bool dockOpen, bool recording)
-            => IsChromeVisible(controlsVisible, recording) && !dockOpen;
+        public static bool IsTrackDockReopenVisible(bool controlsVisible, bool dockOpen)
+            => IsChromeVisible(controlsVisible) && !dockOpen;
 
         /// <summary>
         /// The inspector panel. Hidden while playing EXCEPT in Edit, where playing is how you watch
         /// the Ken Burns move the panel is used to set.
         /// </summary>
         public static bool IsInspectorVisible(bool cinematic, bool playing, bool editMode,
-                                              bool inspectorOpen, bool hasSelection, bool recording)
-            => !recording
-               && !IsPerforming(cinematic, playing)
+                                              bool inspectorOpen, bool hasSelection)
+            => !IsPerforming(cinematic, playing)
                && (!playing || editMode)
                && inspectorOpen
                && hasSelection;
@@ -77,7 +56,7 @@ namespace VideoDirector.Models
         /// The mode badge is a two-way switch. Leaving Edit always works; entering needs a clip.
         /// Playback is not a mode this control switches out of.
         /// </summary>
-        public static bool CanToggleEditMode(bool playing, bool editMode, bool hasSelection, bool recording)
-            => !recording && !playing && (editMode || hasSelection);
+        public static bool CanToggleEditMode(bool playing, bool editMode, bool hasSelection)
+            => !playing && (editMode || hasSelection);
     }
 }

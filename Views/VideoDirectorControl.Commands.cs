@@ -292,13 +292,8 @@ namespace VideoDirector.Views
         private void EscapeAccelerator_Invoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
                                                Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
         {
-            // A rolling take is the outermost state of all, and Esc is the ONLY way out of it:
-            // deliberately not any key, so a stray press cannot truncate one. Stopping the take
-            // does not also drop cinematic - a second Esc does that, same as always.
-            if (ViewModel.IsRecording) { StopRecording(); args.Handled = true; return; }
-
-            // Cinematic next: it is the outermost state otherwise, and it is the one with no
-            // visible way out once the pill has faded. Esc must always get you back to the editor.
+            // Cinematic first: it is the outermost state, and it is the one with no visible way
+            // out once the pill has faded. Esc must always be able to get you back to the editor.
             if (ViewModel.IsCinematicMode) { ViewModel.IsCinematicMode = false; args.Handled = true; return; }
             if (ViewModel.IsEditMode) { ExitEditMode(); args.Handled = true; return; }
 
@@ -306,27 +301,6 @@ namespace VideoDirector.Views
             // and with it the inspector. A keyboard route matters here because the panel covers the
             // right of the canvas and the only other way out is finding empty timeline to click.
             if (ViewModel.SelectedClip != null) { ViewModel.SelectedClip = null; args.Handled = true; }
-        }
-
-        /// <summary>
-        /// End the take. Stops playback with it, because a recording of the editor reappearing is
-        /// not something anyone wants at the end of their file.
-        /// </summary>
-        /// <remarks>
-        /// The recorder itself is not built yet; this is the state and the way out of it, which is
-        /// the half that has to be right before any frames are written. Setting IsRecording false
-        /// releases the chrome lock in ChromeRules.
-        /// </remarks>
-        private void StopRecording()
-        {
-            if (ViewModel == null || !ViewModel.IsRecording) return;
-
-            ViewModel.IsRecording = false;
-            if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback();
-
-            // The chrome was locked away, not hidden by the timer, so put it back deliberately
-            // rather than waiting for a mouse move to do it.
-            ViewModel.IsControlsVisible = true;
         }
 
         // Space = play/pause. Ignored while typing so it doesn't hijack text entry.

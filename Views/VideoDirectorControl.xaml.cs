@@ -80,11 +80,6 @@ namespace VideoDirector.Views
             double dx = p.X - _lastPointerPos.X, dy = p.Y - _lastPointerPos.Y;
             _lastPointerPos = p;
 
-            // A take is rolling: do not wake anything, and do not start the timer either. Not a
-            // longer timeout - nothing at all. Whatever the window shows is what lands in the file,
-            // and a playbar summoned by a nudge of the mouse would be in it for good.
-            if (ViewModel.IsRecording) return;
-
             // A layout shift can move the pointer a long way in control coordinates without the mouse
             // moving at all, so the settling period after entering a performance is ignored outright.
             if (DateTime.UtcNow < _chromeWakeBlockedUntil) return;
@@ -123,9 +118,6 @@ namespace VideoDirector.Views
         private void InactivityTimer_Tick(object? sender, object e)
         {
             _inactivityTimer.Stop();
-
-            // Nothing to hide during a take - the chrome is already locked away.
-            if (ViewModel.IsRecording) return;
 
             // PLAYBACK is what hides the chrome, in either mode. Cinematic on its own is just a
             // full-screen window: toggling it should do nothing but toggle it, because a paused
