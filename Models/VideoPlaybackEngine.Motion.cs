@@ -104,9 +104,15 @@ namespace VideoDirector.Models
         // baked at source resolution; until then (and for every video) the MediaPlayerElement is
         // still the surface, so a clip is never blank while a decode is in flight.
         private static OverlayRender RenderModeFor(CinematicOperation clip)
-            => clip != null && clip.IsStill && clip.StillFrame != null
-                ? OverlayRender.Still
-                : OverlayRender.Video;
+        {
+            if (clip == null) return OverlayRender.Video;
+
+            // Sound first: an audio-only clip is never a still and never has a picture, so both of
+            // the other tests would answer wrongly for it.
+            if (clip.IsAudioOnly) return OverlayRender.Sound;
+
+            return clip.IsStill && clip.StillFrame != null ? OverlayRender.Still : OverlayRender.Video;
+        }
 
         private void ApplyOverlayTransform(int slot, CinematicOperation overlay, TimeSpan currentStoryTime, OverlayRender mode)
         {
@@ -186,6 +192,9 @@ namespace VideoDirector.Models
         // frame lands, then flips to the bitmap on the next evaluation.
         private async Task EnsureStillFrameAsync(CinematicOperation op)
         {
+            // Nothing to bake from a file with no picture; the decoder refuses it outright.
+            if (op != null && op.IsAudioOnly) return;
+
             if (op == null || !op.IsStill || string.IsNullOrWhiteSpace(op.FilePath)) return;
 
             string key = op.StillFrameId;
@@ -272,7 +281,15 @@ namespace VideoDirector.Models
             TimeSpan actualPosition = player.PlaybackSession.Position;
             TimeSpan drift = (expectedPosition - actualPosition).Duration();
 
-            if (drift > TimeSpan.FromMilliseconds(200) || (!_isAnimating && drift > TimeSpan.FromMilliseconds(10)) || (_isPaused && drift > TimeSpan.FromMilliseconds(10)))
+            // Sound-only clips are corrected far more reluctantly. A seek in a picture is a frame
+            // you may not even notice; a seek in audio is an audible click, and the tolerances
+            // below would produce one whenever the transport is not animating. A music bed running
+            // a fraction of a second free is better than one that keeps being nudged.
+            bool soundOnly = overlay.IsAudioOnly;
+            var loose = TimeSpan.FromMilliseconds(soundOnly ? 750 : 200);
+            var tight = TimeSpan.FromMilliseconds(soundOnly ? 750 : 10);
+
+            if (drift > loose || (!_isAnimating && drift > tight) || (_isPaused && drift > tight))
             {
                 player.PlaybackSession.Position = expectedPosition;
             }

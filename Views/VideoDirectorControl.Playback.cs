@@ -272,6 +272,9 @@ namespace VideoDirector.Views
         private static readonly string[] SupportedMediaExtensions =
         {
             ".mp4", ".mkv", ".avi", ".mov", ".wmv",
+            // Sound-only sources: a music bed or a voiceover is a clip like any other, it simply
+            // has no picture. An .mp4 holding only audio is caught by detection, not by extension.
+            ".mp3", ".m4a", ".wav", ".aac", ".flac", ".wma", ".ogg",
             ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"
         };
 

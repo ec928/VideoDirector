@@ -88,6 +88,41 @@ namespace VideoDirector.Views
             ApplyCanvasSize();
         }
 
+        /// <summary>
+        /// Open a project by path and optionally start playing it, with no picker and no clicks.
+        /// </summary>
+        /// <remarks>
+        /// Exists so the recorder can be measured against a REAL project rather than a fixture.
+        /// Every claim about capture - does it keep up, does a held shot survive, does the file
+        /// match the preview - needs the app playing something real, unattended, repeatably.
+        /// Reached only from the command line (--play), never from the UI.
+        /// </remarks>
+        public async Task<bool> OpenAndPlayAsync(string path, bool play, bool cinematic)
+        {
+            try
+            {
+                var file = await StorageFile.GetFileFromPathAsync(path);
+                await ViewModel.LoadAsync(file);
+                AfterProjectLoaded();
+                _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
+
+                // Not awaited: it opens each source once to ask whether it has sound, and the
+                // timeline should not wait on that. Projects saved before the flag existed default
+                // to "has audio", so without this pass an old project keeps offering a live volume
+                // control on a silent clip.
+                _ = ViewModel.RefreshAudioCapabilityAsync();
+
+                if (cinematic) ViewModel.IsCinematicMode = true;
+                if (play) await (_playbackEngine?.StartPlaybackAsync(0) ?? Task.CompletedTask);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("OpenAndPlayAsync failed: " + ex.Message);
+                return false;
+            }
+        }
+
         private async void Load_Click(object? sender, RoutedEventArgs e)
         {
             var openPicker = new FileOpenPicker();
@@ -104,6 +139,7 @@ namespace VideoDirector.Views
             {
                 await ViewModel.LoadAsync(file);
                 AfterProjectLoaded();   // the project brings its own canvas, or gets one from the window
+                _ = ViewModel.RefreshAudioCapabilityAsync();   // which clips actually have sound
                 await ReportMissingMediaAsync("This project refers to files that are not where it left them.");
                 // Convert a pre-normalisation project up front rather than clip-by-clip on first
                 // draw, so marks never sit in two conventions at once.

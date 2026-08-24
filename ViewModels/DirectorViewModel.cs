@@ -369,6 +369,23 @@ namespace VideoDirector.ViewModels
         // with this control.
         public bool CanToggleEditMode => ChromeRules.CanToggleEditMode(_isPlaying, _isEditMode, _selectedClip != null, _isRecording);
 
+        // No selection means nothing is being denied to anyone, so the sections behave as they
+        // always did; only a sound-only clip removes them.
+        private bool SelectedHasPicture => _selectedClip == null || _selectedClip.HasPicture;
+
+        public bool IsMotionSectionVisible => ChromeRules.IsMotionSectionVisible(_isEditMode, SelectedHasPicture);
+        public bool IsBordersSectionVisible => ChromeRules.IsBordersSectionVisible(_isEditMode, SelectedHasPicture);
+        public bool IsTransitionsSectionVisible => ChromeRules.IsTransitionsSectionVisible(_isEditMode, SelectedHasPicture);
+        public bool IsOpacityRowVisible => ChromeRules.IsOpacityRowVisible(SelectedHasPicture);
+
+        private void RaiseInspectorSections()
+        {
+            OnPropertyChanged(nameof(IsMotionSectionVisible));
+            OnPropertyChanged(nameof(IsBordersSectionVisible));
+            OnPropertyChanged(nameof(IsTransitionsSectionVisible));
+            OnPropertyChanged(nameof(IsOpacityRowVisible));
+        }
+
         public bool IsStoryboardVisible =>
             ChromeRules.IsInspectorVisible(_isCinematicMode, _isPlaying, _isEditMode, _isInspectorOpen, HasSelection, _isRecording);
 
@@ -471,6 +488,7 @@ namespace VideoDirector.ViewModels
                     OnPropertyChanged(nameof(IsOverlaySelected));
                     OnPropertyChanged(nameof(SelectedTrackLabel));
                     OnPropertyChanged(nameof(ModeLabel));
+                    RaiseInspectorSections();   // a sound-only clip shows fewer of them
                 }
             }
         }
@@ -565,6 +583,7 @@ namespace VideoDirector.ViewModels
                 {
                     OnPropertyChanged(nameof(ModeLabel));
                     OnPropertyChanged(nameof(IsStoryboardVisible)); // panel follows edit mode
+                    RaiseInspectorSections();   // which sections apply depends on the mode too
                 }
             }
         }
@@ -787,12 +806,74 @@ namespace VideoDirector.ViewModels
             ClipPropertyChanged?.Invoke(this, EventArgs.Empty);
         }
 
+        /// <summary>Does this file actually carry an audio stream.</summary>
+        /// <remarks>
+        /// Asked once per clip and remembered on the clip, because the answer is a property of the
+        /// file. MediaClip is used rather than the shell properties because the shell reports a
+        /// bitrate of 0 for the mkv sources here and says nothing about tracks at all, whereas
+        /// GetAudioEncodingProperties is a direct answer from the decoder.
+        ///
+        /// Unknown counts as YES. Being wrong that way leaves a control enabled that does nothing;
+        /// being wrong the other way silently mutes a clip that had sound, which is much worse.
+        /// </remarks>
+        /// <summary>What streams a file actually carries. One open, both answers.</summary>
+        /// <remarks>
+        /// Unknown counts as "has both". Being wrong that way leaves a control enabled that does
+        /// nothing; being wrong the other way silently mutes a clip or hides a picture, which is
+        /// much worse.
+        /// </remarks>
+        public static async Task<(bool audio, bool video)> ProbeStreamsAsync(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return (true, true);
+
+            try
+            {
+                var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
+                var source = Windows.Media.Core.MediaSource.CreateFromStorageFile(file);
+                await source.OpenAsync();
+                var item = new Windows.Media.Playback.MediaPlaybackItem(source);
+                var result = (item.AudioTracks.Count > 0, item.VideoTracks.Count > 0);
+                source.Dispose();
+                return result;
+            }
+            catch
+            {
+                return (true, true);
+            }
+        }
+
+        /// <summary>
+        /// Fill in SourceHasAudio for every clip that has not been asked yet.
+        /// </summary>
+        /// <remarks>
+        /// Runs after a load. Projects saved before this existed carry the default (true), so
+        /// without this pass an old project would keep showing a live volume control on a silent
+        /// clip - which is the bug being fixed. Deliberately not awaited by the loader: it touches
+        /// the decoder once per clip and the timeline should not wait on it.
+        /// </remarks>
+        public async Task RefreshAudioCapabilityAsync()
+        {
+            foreach (var track in Tracks)
+            {
+                foreach (var clip in track.Clips)
+                {
+                    if (clip == null || string.IsNullOrWhiteSpace(clip.FilePath)) continue;
+                    if (clip.IsImage) { clip.SourceHasAudio = false; clip.SourceHasVideo = true; continue; }
+
+                    var streams = await ProbeStreamsAsync(clip.FilePath);
+                    clip.SourceHasAudio = streams.audio;
+                    clip.SourceHasVideo = streams.video;
+                }
+            }
+        }
+
         public async Task AddFilesAsync(IEnumerable<string> filePaths)
         {
             foreach (var path in filePaths)
             {
                 TimeSpan duration = TimeSpan.FromSeconds(10);
                 double sourceAspect = 0;
+                bool hasAudio = true, hasVideo = true;
                 Microsoft.UI.Xaml.Media.Imaging.BitmapImage? thumbnail = null;
                 try
                 {
@@ -820,6 +901,11 @@ namespace VideoDirector.ViewModels
                     // the decoder, and an image has no decoder to backfill from.
                     if (sourceAspect <= 0 && props != null && props.Width > 0 && props.Height > 0)
                         sourceAspect = (double)props.Width / props.Height;
+
+                    // Whether there is any sound to offer. An image never has any; anything else
+                    // gets asked, so a silent video shows a disabled volume rather than a live one.
+                    if (CinematicOperation.IsImageFile(path)) { hasAudio = false; hasVideo = true; }
+                    else { var st = await ProbeStreamsAsync(path); hasAudio = st.audio; hasVideo = st.video; }
 
                     // Get Thumbnail
                     var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, 480, Windows.Storage.FileProperties.ThumbnailOptions.UseCurrentScale);
@@ -856,6 +942,8 @@ namespace VideoDirector.ViewModels
                     OpDuration = duration,
                     VideoEndTime = duration,
                     SourceAspect = sourceAspect,
+                    SourceHasAudio = hasAudio,   // a silent source gets a disabled volume, not a live one
+                    SourceHasVideo = hasVideo,   // sound-only clips draw nothing and say so
                     StartTime = TimeSpan.FromSeconds(newStartTime),
                     TransitionDuration = TimeSpan.Zero, // Default 0s transition for the new last clip
                     Thumbnail = thumbnail,
@@ -964,6 +1052,11 @@ namespace VideoDirector.ViewModels
             }
             catch { }
 
+            // Same question as the Track 1 path: is there any sound to offer at all.
+            bool hasAudio = true, hasVideo = true;
+            if (CinematicOperation.IsImageFile(filePath)) { hasAudio = false; }
+            else { var st = await ProbeStreamsAsync(filePath); hasAudio = st.audio; hasVideo = st.video; }
+
             // An upper-track clip is a normal CinematicOperation placed at the current playhead.
             // Content framing defaults to full-frame (marks at scale 1); the clip appears as a
             // 30% corner PiP via its placement (PlacementScale/Center defaults on the clip).
@@ -983,7 +1076,9 @@ namespace VideoDirector.ViewModels
                 VideoEndTime = duration,
                 StartTime = startTime,
                 SourceAspect = sourceAspect,
-                Volume = trackIndex == 0 ? 1.0 : 0.0,
+                SourceHasAudio = hasAudio,
+                SourceHasVideo = hasVideo,
+                Volume = (trackIndex == 0 && hasAudio) ? 1.0 : 0.0,
                 PlacementCenterX = track.DefaultCenterX,
                 PlacementCenterY = track.DefaultCenterY,
                 DefaultPlacementCenterX = track.DefaultCenterX,

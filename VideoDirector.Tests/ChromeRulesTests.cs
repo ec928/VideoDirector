@@ -162,6 +162,37 @@ namespace VideoDirector.Tests
             }
         }
 
+        // A sound-only clip has no picture, so framing, borders and fades have nothing to act on.
+        // Offering them anyway is the same fault as a live volume slider on a silent clip, just
+        // pointing the other way: a control that moves and changes nothing.
+        [Theory]
+        [InlineData(true,  true,  true,  false, false, true)]   // Edit, has picture
+        [InlineData(false, true,  false, true,  true,  true)]   // Arrange, has picture
+        [InlineData(true,  false, false, false, false, false)]  // Edit, sound only
+        [InlineData(false, false, false, false, false, false)]  // Arrange, sound only
+        public void InspectorSectionsFollowWhetherThereIsAPicture(
+            bool editMode, bool hasPicture,
+            bool motion, bool borders, bool transitions, bool opacity)
+        {
+            Assert.Equal(motion,      ChromeRules.IsMotionSectionVisible(editMode, hasPicture));
+            Assert.Equal(borders,     ChromeRules.IsBordersSectionVisible(editMode, hasPicture));
+            Assert.Equal(transitions, ChromeRules.IsTransitionsSectionVisible(editMode, hasPicture));
+            Assert.Equal(opacity,     ChromeRules.IsOpacityRowVisible(hasPicture));
+        }
+
+        // Timing and volume are never hidden: both mean exactly the same for sound as for picture.
+        [Fact]
+        public void SoundOnlyKeepsNothingButTimingAndVolume()
+        {
+            foreach (var edit in new[] { false, true })
+            {
+                Assert.False(ChromeRules.IsMotionSectionVisible(edit, hasPicture: false));
+                Assert.False(ChromeRules.IsBordersSectionVisible(edit, hasPicture: false));
+                Assert.False(ChromeRules.IsTransitionsSectionVisible(edit, hasPicture: false));
+            }
+            Assert.False(ChromeRules.IsOpacityRowVisible(hasPicture: false));
+        }
+
         // Ordinary playback outside cinematic leaves the editor alone - only the auto-hide timer
         // takes the chrome, and that is a separate mechanism from these rules.
         [Fact]

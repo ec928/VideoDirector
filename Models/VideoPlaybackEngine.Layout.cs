@@ -31,6 +31,10 @@ namespace VideoDirector.Models
         // so a caller can never transform geometry that was never laid out.
         private bool ApplyOverlayBox(int slot, CinematicOperation overlay, bool editMode)
         {
+            // Sound has no rectangle. Laying one out would size a surface that draws nothing and,
+            // worse, would report a box that the border and hit-testing then believe in.
+            if (overlay != null && overlay.IsAudioOnly) return false;
+
             var grid = _playerControl.OverlayVisuals[slot].Grid;
             double aspect = AspectOf(overlay, slot);
             double vpW = _playerControl.CanvasWidth;

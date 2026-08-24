@@ -74,6 +74,26 @@ namespace VideoDirector.Models
                && hasSelection;
 
         /// <summary>
+        /// Which inspector sections apply to the selected clip.
+        /// </summary>
+        /// <remarks>
+        /// A sound-only clip has no picture, so framing, borders and fades have nothing to act on.
+        /// Showing them anyway offers controls that appear to work and change nothing, which is the
+        /// same fault as a live volume slider on a silent clip - just in the other direction.
+        ///
+        /// Timing and volume are all that remain, and both are exactly as meaningful for sound as
+        /// for picture.
+        /// </remarks>
+        public static bool IsMotionSectionVisible(bool editMode, bool hasPicture) => editMode && hasPicture;
+
+        public static bool IsBordersSectionVisible(bool editMode, bool hasPicture) => !editMode && hasPicture;
+
+        public static bool IsTransitionsSectionVisible(bool editMode, bool hasPicture) => !editMode && hasPicture;
+
+        /// <summary>Opacity is a property of a picture. Volume is not, and stays.</summary>
+        public static bool IsOpacityRowVisible(bool hasPicture) => hasPicture;
+
+        /// <summary>
         /// The mode badge is a two-way switch. Leaving Edit always works; entering needs a clip.
         /// Playback is not a mode this control switches out of.
         /// </summary>

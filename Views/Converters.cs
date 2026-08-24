@@ -82,6 +82,20 @@ namespace VideoDirector.Views
             => throw new NotImplementedException();
     }
 
+    /// <summary>true -> fully opaque, false -> dimmed. For controls that are present but unusable.</summary>
+    /// <remarks>
+    /// Disabling a control greys its glyph but leaves the row looking live. Dimming says "there is
+    /// nothing here for you" at a glance, which is the point when a clip simply has no sound.
+    /// </remarks>
+    public class BoolToOpacityConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, string language)
+            => (value is bool b && b) ? 1.0 : 0.35;
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language)
+            => throw new NotImplementedException();
+    }
+
     public class BoolToVisConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, string language)

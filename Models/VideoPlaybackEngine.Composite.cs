@@ -169,8 +169,14 @@ namespace VideoDirector.Models
                     }
 
                     SetOverlayRender(i, mode, clip);
-                    ApplyTransitionOpacity(i, clip, currentStoryTime);
-                    ApplyOverlayTransform(i, clip, currentStoryTime, mode);
+
+                    // Sound has nothing on screen, so opacity and transform have nothing to act
+                    // on. Skipping them keeps a music bed off the per-frame visual path entirely.
+                    if (mode != OverlayRender.Sound)
+                    {
+                        ApplyTransitionOpacity(i, clip, currentStoryTime);
+                        ApplyOverlayTransform(i, clip, currentStoryTime, mode);
+                    }
                 }
                 else SetOverlayRender(i, OverlayRender.Hidden, null);
             }
@@ -191,7 +197,16 @@ namespace VideoDirector.Models
         //            element, so there is no video surface at all: nothing that can blank, green,
         //            or composite over the handles when the box is resized/moved.
         //   Video  — the live MediaPlayerElement (playback, and full-screen content editing).
-        private enum OverlayRender { Hidden, Still, Video }
+        // Hidden   nothing on screen and nothing playing - the slot is empty.
+        // Still    a baked frame on the Image surface.
+        // Video    the decoder driving the video surface.
+        // Sound    PLAYING, but with no picture to show.
+        //
+        // Sound exists because an audio-only clip cannot use any of the other three. Hidden would
+        // release the slot and stop the sound. Video attaches a surface that has no picture in it,
+        // and a MediaPlayerElement with nothing to draw paints black - which on an upper track
+        // would blot out every track underneath. So: play, draw nothing, occupy no pixels.
+        private enum OverlayRender { Hidden, Still, Video, Sound }
 
         // "Playing" means actively rolling. PAUSED is not playing: pausing keeps the playback loop
         // alive (_isAnimating stays true), but a paused composite must behave like Arrange — stills
@@ -267,6 +282,24 @@ namespace VideoDirector.Models
                     v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;
 
+                case OverlayRender.Sound:
+                    // The surface goes, the PLAYER STAYS. DetachOverlayVideo would pause it, and
+                    // this runs every frame, so that pauses and resumes the audio continuously.
+                    // Everything visual is stood down - border, frame, opacity - because there is
+                    // no picture for any of it to be around.
+                    HideBorderRect(track);
+                    DetachVideoSurfaceOnly(track);
+                    ClearStillMotion(track);
+                    if (v.Still.Visibility != Microsoft.UI.Xaml.Visibility.Collapsed)
+                    {
+                        v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                        v.Still.Source = null;
+                    }
+                    if (v.Frame != null && v.Frame.Visibility != Microsoft.UI.Xaml.Visibility.Collapsed)
+                        v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    if (v.Grid.Opacity != 0) v.Grid.Opacity = 0;
+                    break;
+
                 case OverlayRender.Video:
                     ClearStillMotion(track);
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
@@ -288,6 +321,28 @@ namespace VideoDirector.Models
         // noise. Switching from a video to a still on the same track therefore left the outgoing
         // clip's audio playing underneath a silent image - the source is only replaced when the
         // next VIDEO clip loads one, and a still never does.
+        /// <summary>
+        /// Take the video surface away and LEAVE THE PLAYER RUNNING.
+        /// </summary>
+        /// <remarks>
+        /// For sound-only clips, which have a picture to hide but audio that must keep coming.
+        /// DetachOverlayVideo cannot be used for that: it pauses the player, and since render mode
+        /// is applied every frame, an mp3 was being paused and resumed about sixty times a second.
+        /// It played, technically. It sounded like a fault.
+        ///
+        /// Both writes are guarded because this runs per frame: after the first pass MediaPlayer is
+        /// already null and the surface already collapsed, so there is nothing to re-assign.
+        /// </remarks>
+        private void DetachVideoSurfaceOnly(int track)
+        {
+            var video = _playerControl.OverlayVisuals[track].Video;
+            if (video == null) return;
+
+            if (video.MediaPlayer != null) video.SetMediaPlayer(null);
+            if (video.Visibility != Microsoft.UI.Xaml.Visibility.Collapsed)
+                video.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+        }
+
         private void DetachOverlayVideo(int track)
         {
             var video = _playerControl.OverlayVisuals[track].Video;

@@ -560,6 +560,36 @@ namespace VideoDirector.Views
                     var lockColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gold);
                     var muteColor = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red);
 
+                    // WHAT THE CLIP IS, before what you did to it. A row of state markers could
+                    // never say whether a block was a photo or a piece of music, so both had to be
+                    // inferred from the file name.
+                    if (clip.IsImage)
+                    {
+                        var photo = new FontIcon
+                        {
+                            Glyph = "\uEB9F",                     // Picture
+                            FontSize = 12,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = textColor,
+                            Margin = new Thickness(4, 0, 0, 0)
+                        };
+                        ToolTipService.SetToolTip(photo, "Still image");
+                        sp.Children.Add(photo);
+                    }
+                    else if (clip.IsAudioOnly)
+                    {
+                        var music = new FontIcon
+                        {
+                            Glyph = "\uEC4F",                     // MusicNote
+                            FontSize = 12,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = textColor,
+                            Margin = new Thickness(4, 0, 0, 0)
+                        };
+                        ToolTipService.SetToolTip(music, "Audio only - no picture");
+                        sp.Children.Add(music);
+                    }
+
                     if (clip.IsLocked)
                         sp.Children.Add(new FontIcon { Glyph = "\uE72E", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = lockColor, Margin = new Thickness(4,0,0,0) });
                     
@@ -596,8 +626,48 @@ namespace VideoDirector.Views
                         sp.Children.Add(disc);
                     }
 
-                    if (clip.Volume == 0)
-                        sp.Children.Add(new FontIcon { Glyph = "\uE74F", FontSize = 14, VerticalAlignment = VerticalAlignment.Center, Foreground = muteColor, Margin = new Thickness(4,0,0,0) });
+                    // Silent and muted are different things and used to look identical. A clip with
+                    // no audio to give - an image, a file with no audio track, a frozen frame - gets
+                    // a dimmed neutral marker, not the red one that means "you turned this off".
+                    //
+                    // Not on images: the photo glyph beside it already says there is no sound, and
+                    // two marks for one fact is clutter on a 12px row.
+                    // Images get NO audio marker at all - the picture glyph already says there is
+                    // no sound, and this has to be the first branch rather than a condition on the
+                    // second. Excluding images from the "no audio" case alone dropped them through
+                    // to the muted case below, so every image wore the RED marker that means you
+                    // turned its sound off. An image has no sound to turn off.
+                    if (clip.IsImage)
+                    {
+                        // nothing: the picture glyph carries it
+                    }
+                    else if (!clip.CanHaveAudio)
+                    {
+                        var none = new FontIcon
+                        {
+                            Glyph = "\uE74F",
+                            FontSize = 14,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = textColor,
+                            Opacity = 0.35,
+                            Margin = new Thickness(4, 0, 0, 0)
+                        };
+                        ToolTipService.SetToolTip(none, clip.AudioTooltip);
+                        sp.Children.Add(none);
+                    }
+                    else if (clip.Volume == 0)
+                    {
+                        var muted = new FontIcon
+                        {
+                            Glyph = "\uE74F",
+                            FontSize = 14,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = muteColor,
+                            Margin = new Thickness(4, 0, 0, 0)
+                        };
+                        ToolTipService.SetToolTip(muted, "Muted");
+                        sp.Children.Add(muted);
+                    }
                 }
                 sp.Children.Add(label);
                 

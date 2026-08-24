@@ -60,6 +60,10 @@ namespace VideoDirector.Models
             ? Math.Max(MinClipSeconds, _opDuration.TotalSeconds)
             : SourceDurationSeconds;
 
+        /// <summary>Is this path an image, without needing a clip to ask.</summary>
+        public static bool IsImageFile(string path) =>
+            !string.IsNullOrWhiteSpace(path) && IsImagePath(path);
+
         private static bool IsImagePath(string path)
         {
             var ext = System.IO.Path.GetExtension(path);
@@ -257,6 +261,13 @@ namespace VideoDirector.Models
                 double oldSpeed = _playbackSpeed;
                 if (SetProperty(ref _playbackSpeed, value < 0 ? 0 : value))
                 {
+                    // A freeze frame has no time passing, so nothing to hear. Crossing 0 in either
+                    // direction changes whether this clip can carry audio.
+                    OnPropertyChanged(nameof(CanHaveAudio));
+                    OnPropertyChanged(nameof(VolumeLabel));
+                    OnPropertyChanged(nameof(AudioTooltip));
+                    if (!CanHaveAudio) Volume = 0;
+
                     if (!_isUpdatingTiming)
                     {
                         _isUpdatingTiming = true;
@@ -501,7 +512,93 @@ namespace VideoDirector.Models
         public double Volume
         {
             get => _volume;
-            set => SetProperty(ref _volume, Math.Clamp(value, 0.0, 1.0));
+            set
+            {
+                if (SetProperty(ref _volume, CanHaveAudio ? Math.Clamp(value, 0.0, 1.0) : 0.0))
+                    OnPropertyChanged(nameof(VolumeLabel));
+            }
+        }
+
+        // Whether the SOURCE FILE carries an audio stream at all. Persisted alongside the other
+        // things we learn from the file once (SourceDuration, SourceAspect) rather than probed on
+        // every load. Defaults true so a project saved before this existed is not silently muted;
+        // the probe corrects it when the clip is next added.
+        // Whether the SOURCE FILE carries a picture. False for an mp3 or any container holding
+        // only sound. Persisted with the other things learned from the file once; defaults true so
+        // a project saved before this existed is not suddenly treated as silent-movie-less.
+        private bool _sourceHasVideo = true;
+        public bool SourceHasVideo
+        {
+            get => _sourceHasVideo;
+            set
+            {
+                if (SetProperty(ref _sourceHasVideo, value))
+                {
+                    OnPropertyChanged(nameof(IsAudioOnly));
+                    OnPropertyChanged(nameof(HasPicture));
+                }
+            }
+        }
+
+        /// <summary>Sound with no picture - a music bed, a voiceover.</summary>
+        /// <remarks>
+        /// Detected rather than guessed from the extension: an .mp4 can hold audio alone, and an
+        /// .mp3 obviously does. The two media APIs are strictly complementary about this, which is
+        /// what makes the distinction load-bearing: MediaClip refuses an audio-only file ("source
+        /// clip cannot be audio file") and BackgroundAudioTrack refuses one with video. Anything
+        /// that picks the wrong one throws.
+        /// </remarks>
+        [JsonIgnore]
+        public bool IsAudioOnly => !_sourceHasVideo && !IsImage;
+
+        /// <summary>Is there anything to see. False for sound-only clips.</summary>
+        [JsonIgnore]
+        public bool HasPicture => !IsAudioOnly;
+
+        private bool _sourceHasAudio = true;
+        public bool SourceHasAudio
+        {
+            get => _sourceHasAudio;
+            set
+            {
+                if (SetProperty(ref _sourceHasAudio, value))
+                {
+                    OnPropertyChanged(nameof(CanHaveAudio));
+                    OnPropertyChanged(nameof(VolumeLabel));
+                    OnPropertyChanged(nameof(AudioTooltip));
+                    if (!CanHaveAudio) Volume = 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Is there any sound to hear from this clip.
+        /// </summary>
+        /// <remarks>
+        /// Three ways to have none, and the UI could previously distinguish none of them from a
+        /// clip you had simply turned down: a still image, a video with no audio track, and a
+        /// video frozen at speed 0 - which has an audio stream but no time passing to play it.
+        /// A volume control that moves but changes nothing is worse than one that is plainly
+        /// unavailable, so this drives both the enabled state and the dimming.
+        /// </remarks>
+        [JsonIgnore]
+        public bool CanHaveAudio => _sourceHasAudio && !HasNoSourceWindow;
+
+        /// <summary>What the volume readout shows - a number, or why there is no number.</summary>
+        [JsonIgnore]
+        public string VolumeLabel => CanHaveAudio ? Math.Round(_volume, 2).ToString() : "\u2014";
+
+        /// <summary>Why the volume control is unavailable, in the words that fit this clip.</summary>
+        [JsonIgnore]
+        public string AudioTooltip
+        {
+            get
+            {
+                if (CanHaveAudio) return "Volume";
+                if (IsImage) return "This is an image - there is no sound to adjust.";
+                if (_playbackSpeed <= 0) return "A frozen frame has no sound: no time passes for audio to play.";
+                return "This file has no audio track.";
+            }
         }
 
         private bool _isVideoHidden;

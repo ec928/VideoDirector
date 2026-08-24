@@ -30,11 +30,17 @@ Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImage
 
 **Variable Speed** — Per-clip playback speed, down to a full freeze-frame.
 
+**Audio Clips** — Drop in an `.mp3`, `.m4a`, `.wav`, `.flac` or any other sound file and it behaves like a clip: trim it, place it in time, set its level. A sound-only clip draws nothing, so it never covers the tracks beneath it, and the inspector shows only what applies to it — timing and volume. Video containers holding only audio are detected too.
+
+**Says What A Clip Is, And What It Has** — The timeline marks stills and audio clips with their own symbols, and distinguishes *muted by you* (red) from *no sound to give* (dimmed) — an image, a file with no audio track, or a frozen frame. Volume is disabled and dimmed where there is nothing to hear, rather than offering a control that moves and changes nothing.
+
 **Trim & Sync Tools** — Interactive edge trimming, cross-track magnetic snapping (8px threshold), and optional audio waveforms on timeline clips.
 
 **Project Management** — JSON-based project save/load and unlimited Undo/Redo history.
 
-**Export to MP4** — Renders at the project canvas size, baking cuts and trims, clip order and timing, picture-in-picture position, size and opacity, and the audio mix. It cannot carry per-frame work — Ken Burns motion, fades, per-clip speed and borders — because the Windows compositor it renders through has no working hook for that; the app says which of them your project uses before you commit to the wait. To keep everything, play in cinematic mode and screen-record that.
+**Export to MP4** — Press Export and the project plays full screen, chrome-free, while being recorded. Because it captures what the compositor actually draws, **everything survives**: Ken Burns motion, fades, per-clip speed, borders, picture-in-picture. Sound is mixed from the sources and laid on afterwards. It runs in real time — a two-minute project takes two minutes — and Esc stops a take early.
+
+> The previous export rendered through the Windows compositor and could carry none of that; worse, it refused most real projects outright. See ARCHITECTURE.md for the measurements that closed off that route.
 
 ## 🛠 Technical Stack
 
@@ -90,7 +96,7 @@ Neither path carries a `$(Platform)` segment, deliberately. The SDK only default
 
 ## 📋 Status
 
-Active development. The timeline, compositor, Ken Burns model, canvas and mode system are implemented and in daily use. Export is deliberately limited rather than unfinished — see above. The app itself is the delivery mechanism. Expect rough edges.
+Active development. The timeline, compositor, Ken Burns model, canvas and mode system are implemented and in daily use. Export records the performance and keeps everything you see; it is silent only in the sense that it takes as long as the project runs. Expect rough edges.
 
 ## 💬 Feedback
 

@@ -51,14 +51,22 @@ namespace VideoDirector.Views
             ViewModel.RemoveTopTrack();
         }
 
+        // EXPORT = RECORD THE PERFORMANCE.
+        //
+        // The old export rendered through MediaComposition, and it never worked on a real project:
+        // it could not carry Ken Burns, fades, speed or borders (invariant 6), and it refused any
+        // source with an odd width outright. Recording plays the project and photographs what the
+        // compositor draws, so everything that is right on screen is right in the file, and the
+        // source files are never touched.
+        //
+        // The cost is honest and stated up front: it runs in real time.
         private async void Export_Click(object? sender, RoutedEventArgs e)
         {
+            if (ViewModel == null || _recorder != null) return;
+
             bool hasClips = false;
-            if (ViewModel.Tracks.Count > 0)
-            {
-                foreach (var track in ViewModel.Tracks)
-                    if (track.Clips.Count > 0) { hasClips = true; break; }
-            }
+            foreach (var track in ViewModel.Tracks)
+                if (track.Clips.Count > 0) { hasClips = true; break; }
 
             if (!hasClips)
             {
@@ -66,105 +74,197 @@ namespace VideoDirector.Views
                 return;
             }
 
-            // Say what the file will be missing BEFORE the wait, not after it. Export renders
-            // through MediaComposition, which cannot carry per-frame work - see the measurement
-            // in VideoExporter. Silent when this particular project loses nothing.
-            var lost = Models.VideoExporter.WhatIsNotBaked(ViewModel.Tracks);
-            if (lost.Count > 0 && !await ConfirmExportLossAsync(lost)) return;
+            if (!Models.ScreenRecorder.IsSupported)
+            {
+                await ShowExportMessage("Cannot record",
+                    "Windows screen capture is not available on this system.");
+                return;
+            }
 
+            var total = ViewModel.TotalStoryTime;
+            if (total <= TimeSpan.Zero) total = TimeSpan.FromSeconds(10);
+
+            // Straight to the picker. There was a "are you sure" dialog here and it earned nothing:
+            // choosing a filename IS the confirmation, and the recording is interruptible with Esc.
+            // A prompt in front of an action the user just asked for is a click you have to make.
             var savePicker = new FileSavePicker();
             var window = MainWindow.Instance;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             WinRT.Interop.InitializeWithWindow.Initialize(savePicker, hwnd);
             savePicker.SuggestedStartLocation = PickerLocationId.VideosLibrary;
             savePicker.FileTypeChoices.Add("MP4 Video", new List<string>() { ".mp4" });
-            savePicker.SuggestedFileName = "Export";
+            savePicker.SuggestedFileName = string.IsNullOrWhiteSpace(ViewModel.ProjectName) ? "Recording" : ViewModel.ProjectName;
 
             StorageFile file = await savePicker.PickSaveFileAsync();
             if (file == null) return;
 
-            var bar = new Microsoft.UI.Xaml.Controls.ProgressBar { Minimum = 0, Maximum = 100, Value = 0, Width = 320 };
-            var status = new TextBlock { Text = "Rendering the composite (spine + overlays) — this can take a while for long clips." };
-            var panel = new StackPanel { Spacing = 12 };
-            panel.Children.Add(status);
-            panel.Children.Add(bar);
-            var progressDialog = new ContentDialog
-            {
-                Title = "Exporting video",
-                Content = panel,
-                XamlRoot = this.XamlRoot
-            };
-
-            var exporter = new Models.VideoExporter();
-            var progress = new Progress<double>(p => bar.Value = p);
-
-            _ = progressDialog.ShowAsync(); // non-blocking; hidden when the render finishes
-            var result = await exporter.ExportAsync(ViewModel.Tracks, file, progress,
-                                                    ViewModel.CanvasWidth, ViewModel.CanvasHeight);
-            progressDialog.Hide();
-
-            switch (result.Outcome)
-            {
-                case Models.VideoExporter.ExportOutcome.Success:
-                    var msg = $"Saved to:\n{result.Message}";
-                    if (result.SkippedFiles.Count > 0)
-                        msg += $"\n\nSkipped {result.SkippedFiles.Count} clip(s) with missing files:\n• " + string.Join("\n• ", result.SkippedFiles);
-                    await ShowExportMessage("Export complete", msg);
-                    break;
-                case Models.VideoExporter.ExportOutcome.NothingToRender:
-                    await ShowExportMessage("Nothing to export", result.Message);
-                    break;
-                default:
-                    await ShowExportMessage("Export failed", result.Message);
-                    break;
-            }
+            await RunRecordingAsync(file, hwnd, total);
         }
 
-        // What the render will drop, and the one thing that does not drop anything.
-        //
-        // The alternative is not a consolation prize: cinematic playback IS the finished piece,
-        // motion and fades and speed included, so recording it captures everything a render
-        // cannot. Worth saying plainly at the moment someone is deciding.
-        private async Task<bool> ConfirmExportLossAsync(System.Collections.Generic.List<string> lost)
+        private Models.ScreenRecorder _recorder;
+
+        /// <summary>
+        /// Record the loaded project straight to a path, with no dialog and no picker.
+        /// </summary>
+        /// <remarks>
+        /// Runs the SAME RunRecordingAsync the button runs. Reached only from the command line
+        /// (--record), so the shipping code path can be exercised end to end without a human
+        /// clicking through a file picker. The alternative is testing a copy of the logic, which
+        /// is how the old exporter came to be certified while broken.
+        /// </remarks>
+        public async Task RecordToPathAsync(string outputPath)
+        {
+            var folder = await StorageFolder.GetFolderFromPathAsync(System.IO.Path.GetDirectoryName(outputPath));
+            var file = await folder.CreateFileAsync(System.IO.Path.GetFileName(outputPath),
+                                                    CreationCollisionOption.ReplaceExisting);
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(MainWindow.Instance);
+
+            var total = ViewModel.TotalStoryTime;
+            if (total <= TimeSpan.Zero) total = TimeSpan.FromSeconds(10);
+
+            await RunRecordingAsync(file, hwnd, total);
+        }
+        private bool _telemetryBeforeRecording;
+
+        // Play the project from the top, full screen, with nothing on it, and record that.
+        private async Task RunRecordingAsync(StorageFile file, IntPtr hwnd, TimeSpan total)
+        {
+            _telemetryBeforeRecording = ViewModel.IsTelemetryVisible;
+
+            // The HUD is drawn INTO the window, so capture takes it too - it showed up in the
+            // first recording as an FPS/GPU readout across the top corner. The chrome lock cannot
+            // reach it because it is not chrome, it is content.
+            ViewModel.IsTelemetryVisible = false;
+
+            ViewModel.IsRecording = true;          // locks the chrome; see ChromeRules
+            ViewModel.IsCinematicMode = true;
+            ViewModel.IsControlsVisible = false;
+
+            // A moment for the window to reach full screen before the first frame is kept.
+            await Task.Delay(700);
+            _playbackEngine?.StopPlayback();
+            await (_playbackEngine?.StartPlaybackAsync(0) ?? Task.CompletedTask);
+
+            _recorder = new Models.ScreenRecorder();
+
+            // Stop when the project ends. Esc stops early through StopRecording.
+            var guard = DispatcherQueue.CreateTimer();
+            guard.Interval = TimeSpan.FromMilliseconds(250);
+            guard.Tick += (s, e) =>
+            {
+                if (ViewModel.IsRecording && ViewModel.CurrentStoryTime < total && ViewModel.IsPlaying) return;
+                guard.Stop();
+                _recorder?.RequestStop();
+            };
+            guard.Start();
+
+            // Record the picture to a scratch file first. The sound is mixed from the source files
+            // and laid on afterwards - capture takes pixels only, and lining up two independently
+            // clocked captures is a worse problem than mixing the audio we already have.
+            // Plain temp folder, not ApplicationData.Current - that one needs package identity
+            // and this app is unpackaged, so touching it throws.
+            var tempFolder = await StorageFolder.GetFolderFromPathAsync(System.IO.Path.GetTempPath());
+            var temp = await tempFolder.CreateFileAsync("videodirector-silent.mp4", CreationCollisionOption.ReplaceExisting);
+
+            var result = await _recorder.RecordAsync(hwnd, temp,
+                targetWidth: 1920, fps: 30,
+                maxSeconds: (int)Math.Ceiling(total.TotalSeconds) + 5);
+
+            if (result.Success)
+            {
+                var audio = await Models.PerformanceAudio.MuxAsync(
+                    temp, ViewModel.Tracks, file, ViewModel.CanvasWidth, ViewModel.CanvasHeight);
+
+                if (!audio.Success)
+                {
+                    // No sound to add, or the mix would not render. Keep the picture rather than
+                    // losing the take: copy the silent recording to where the user asked for it.
+                    await temp.CopyAndReplaceAsync(file);
+                }
+            }
+
+            guard.Stop();
+            _recorder = null;
+
+            StopRecording();                        // releases the lock, stops playback
+            ViewModel.IsCinematicMode = false;
+            ViewModel.IsTelemetryVisible = _telemetryBeforeRecording;
+
+            // Success says so in the title bar and then gets out of the way. A modal OK after
+            // something you asked for and watched happen is a click for nothing - and you already
+            // chose where the file goes, so there is nothing to tell you that you do not know.
+            // Failure still stops you, because that IS news.
+            if (!result.Success)
+            {
+                await ShowExportMessage("Recording failed", result.Message);
+                return;
+            }
+
+            ShowBanner("Recording saved",
+                       System.IO.Path.GetFileName(result.Message) + "  \u2022  "
+                       + result.Duration.TotalSeconds.ToString("F0") + "s, "
+                       + result.FramesEncoded + " frames",
+                       InfoBarSeverity.Success);
+        }
+
+        /// <summary>
+        /// Tell the user something finished, without making them dismiss it.
+        /// </summary>
+        /// <remarks>
+        /// There was a modal OK here, and it was a click for nothing after an action you asked for
+        /// and watched happen. Replacing it with a window-title change went too far the other way:
+        /// coming out of full-screen playback nobody looks at the title bar, so the recording
+        /// finished and said nothing at all. A banner inside the window is seen, needs no action,
+        /// and takes itself away.
+        /// </remarks>
+        private void ShowBanner(string title, string message, InfoBarSeverity severity)
+        {
+            if (StatusBanner == null) return;
+
+            StatusBanner.Title = title;
+            StatusBanner.Message = message;
+            StatusBanner.Severity = severity;
+            StatusBanner.IsOpen = true;
+
+            var timer = DispatcherQueue.CreateTimer();
+            timer.Interval = TimeSpan.FromSeconds(12);
+            timer.IsRepeating = false;
+            timer.Tick += (s, e) => { try { StatusBanner.IsOpen = false; } catch { } };
+            timer.Start();
+        }
+
+        private async Task<bool> ConfirmRecordAsync(TimeSpan total)
         {
             var panel = new StackPanel { Spacing = 10 };
             panel.Children.Add(new TextBlock
             {
-                Text = "Export renders through the Windows media compositor, which cannot carry "
-                     + "per-frame work. This project uses:",
-                TextWrapping = TextWrapping.Wrap
-            });
-
-            var bullets = new StackPanel { Spacing = 4, Margin = new Thickness(8, 0, 0, 0) };
-            foreach (var item in lost)
-                bullets.Children.Add(new TextBlock { Text = "\u2022  " + item, TextWrapping = TextWrapping.Wrap });
-            panel.Children.Add(bullets);
-
-            panel.Children.Add(new TextBlock
-            {
-                Text = "Everything else is baked: cuts and trims, clip order and timing, "
-                     + "picture-in-picture position, size and opacity, the audio mix, and the "
-                     + "canvas size.",
+                Text = "The project will play full screen from the beginning and be recorded as it "
+                     + "goes. Everything you see is captured \u2014 motion, fades, speed, borders and "
+                     + "picture-in-picture.",
                 TextWrapping = TextWrapping.Wrap
             });
             panel.Children.Add(new TextBlock
             {
-                Text = "To keep all of it, play the project in cinematic mode and screen-record "
-                     + "that instead \u2014 what you see there is the finished piece.",
+                Text = "This happens in real time, so it will take about "
+                     + Math.Ceiling(total.TotalSeconds) + " seconds. Press Esc to stop early.",
+                TextWrapping = TextWrapping.Wrap
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "No sound yet \u2014 the recording is silent.",
                 TextWrapping = TextWrapping.Wrap,
                 Opacity = 0.8
             });
 
             var dialog = new ContentDialog
             {
-                Title = "Some of this will not survive the render",
+                Title = "Record this project",
                 Content = panel,
-                PrimaryButtonText = "Export anyway",
+                PrimaryButtonText = "Record",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
                 XamlRoot = this.XamlRoot
             };
-
             try { return await dialog.ShowAsync() == ContentDialogResult.Primary; }
             catch { return false; }
         }
@@ -322,6 +422,7 @@ namespace VideoDirector.Views
             if (ViewModel == null || !ViewModel.IsRecording) return;
 
             ViewModel.IsRecording = false;
+            _recorder?.RequestStop();          // ends the take at the next frame boundary
             if (ViewModel.IsPlaying) _playbackEngine?.StopPlayback();
 
             // The chrome was locked away, not hidden by the timer, so put it back deliberately

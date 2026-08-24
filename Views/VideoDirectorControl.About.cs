@@ -73,6 +73,7 @@ namespace VideoDirector.Views
                 ("A fixed canvas", "— the composition has its own frame rather than borrowing the window’s, so hiding a panel, resizing or presenting full screen changes only how big it looks."),
                 ("Free placement", "with independent size, position and opacity, plus solid, soft or film-strip borders."),
                 ("Stills as first-class clips", "— images hold for a set duration and advance story time by wall clock, so mixed photo and video sequences stay in sync."),
+                ("Audio clips", "- drop in an mp3 or any other sound file and trim, place and level it like any clip. It draws nothing, so it never covers the tracks beneath, and the inspector offers only what applies to it: timing and volume."),
                 ("Fades", "in from black, out to black, or both, on any clip. A transition ADDS to the clip’s length rather than eating into it, and the timeline shades the part that is fade rather than picture."),
             });
 
@@ -95,7 +96,7 @@ namespace VideoDirector.Views
                 ("Cinematic mode", "— arm it, and playback takes over the whole screen with every trace of the editor gone. Move the mouse for the transport, stop playing and the editor returns as you left it."),
                 ("Present on any display", "— choose which screen a performance takes over, remembered between sessions. The list is built when you open it, so a projector plugged in after launch needs no restart."),
                 ("A check before you present", "— opening a project, and arming cinematic, both say plainly which clips can no longer find their files. A project is a list of paths, and that is the failure that actually bites."),
-                ("Export to MP4", "at the canvas size, with cuts, timing, picture-in-picture placement and the audio mix. Motion, fades and speed cannot be carried by the Windows compositor it renders through; the app tells you which of them your project uses before you start. Screen-record a cinematic performance to keep all of it."),
+                ("Export to MP4", "by recording the performance. The project plays full screen with no chrome and is captured as it goes, so motion, fades, speed, borders and picture-in-picture all survive - it photographs what the compositor draws rather than trying to re-render it. Sound is mixed from the sources and laid on afterwards. Runs in real time; Esc stops a take early."),
             });
 
             // ---- footer

@@ -12,6 +12,9 @@ namespace VideoDirector
     public sealed partial class MainWindow : Window
     {
         public static MainWindow Instance { get; private set; } = null!;
+
+        /// <summary>The editor control, so startup arguments can drive it.</summary>
+        public Views.VideoDirectorControl Director => DirectorControl;
         private readonly AppWindow _appWindow;
         public new AppWindow AppWindow => _appWindow;
 

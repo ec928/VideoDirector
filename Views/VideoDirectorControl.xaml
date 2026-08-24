@@ -20,6 +20,7 @@
             <local:NullToBoolConverter x:Key="NullToBoolConverter" />
             <local:ColorToBrushConverter x:Key="ColorToBrushConverter" />
             <local:SpeedToLabelConverter x:Key="SpeedToLabelConverter" />
+            <local:BoolToOpacityConverter x:Key="BoolToOpacityConverter" />
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -130,7 +131,7 @@
                             <StackPanel Spacing="2">
                                 <!-- 1. Zoom & Motion Controls (Contains Zoom/Motion & PiP) -->
                                 <Expander Header="Zoom &amp; Motion Controls" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="4,4,0,0" ToolTipService.ToolTip="Scroll/drag the video to frame it, then set Start / Mid / End. Same on every track."
-                                          Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
+                                          Visibility="{x:Bind ViewModel.IsMotionSectionVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
                                     <StackPanel Spacing="8">
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
@@ -207,14 +208,21 @@
                                         </Grid.RowDefinitions>
 
                                         <!-- Volume -->
-                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Vol" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                                        <Slider Grid.Row="0" Grid.Column="1" Value="{Binding SelectedClip.Volume, Mode=TwoWay, FallbackValue=1.0}" Minimum="0" Maximum="1" StepFrequency="0.05" ToolTipService.ToolTip="Volume" VerticalAlignment="Center" Margin="0,0,0,-8" />
-                                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SelectedClip.Volume, FallbackValue=1.0}" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                                        <!-- Volume is unavailable, not merely zero, when the clip has no sound to give: a still, a video with no audio track, or a frozen frame. Disabled AND dimmed, because a control that moves without doing anything is worse than one that plainly cannot be used. -->
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Vol" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"
+                                                   Opacity="{Binding SelectedClip.CanHaveAudio, Converter={StaticResource BoolToOpacityConverter}, FallbackValue=1.0}"/>
+                                        <Slider Grid.Row="0" Grid.Column="1" Value="{Binding SelectedClip.Volume, Mode=TwoWay, FallbackValue=1.0}" Minimum="0" Maximum="1" StepFrequency="0.05" VerticalAlignment="Center" Margin="0,0,0,-8"
+                                                IsEnabled="{Binding SelectedClip.CanHaveAudio, FallbackValue=True}"
+                                                Opacity="{Binding SelectedClip.CanHaveAudio, Converter={StaticResource BoolToOpacityConverter}, FallbackValue=1.0}"
+                                                ToolTipService.ToolTip="{Binding SelectedClip.AudioTooltip, FallbackValue=Volume}" />
+                                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SelectedClip.VolumeLabel, FallbackValue=1.0}" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"
+                                                   Opacity="{Binding SelectedClip.CanHaveAudio, Converter={StaticResource BoolToOpacityConverter}, FallbackValue=1.0}"/>
 
-                                        <!-- Opacity -->
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Opacity" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                                        <Slider Grid.Row="1" Grid.Column="1" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}" Minimum="0" Maximum="1" StepFrequency="0.05" ToolTipService.ToolTip="Opacity - applies to any clip, including Track 1" VerticalAlignment="Center" Margin="0,0,0,-8" />
-                                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding SelectedClip.Opacity, FallbackValue=1.0}" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                                        <!-- Opacity. Hidden for sound-only clips: there is no picture to make more or less transparent, and
+                                             a control that moves without doing anything is the same fault as a live volume on a silent clip. -->
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Opacity" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="{x:Bind ViewModel.IsOpacityRowVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}" />
+                                        <Slider Grid.Row="1" Grid.Column="1" Value="{Binding SelectedClip.Opacity, Mode=TwoWay, FallbackValue=1.0}" Minimum="0" Maximum="1" StepFrequency="0.05" ToolTipService.ToolTip="Opacity - applies to any clip, including Track 1" VerticalAlignment="Center" Margin="0,0,0,-8" Visibility="{x:Bind ViewModel.IsOpacityRowVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding SelectedClip.Opacity, FallbackValue=1.0}" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="{x:Bind ViewModel.IsOpacityRowVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}" />
                                     </Grid>
                                 </Expander>
 
@@ -222,7 +230,7 @@
                                      for every slot, Track 1 included. The gate here was a spine-era
                                      leftover, like the opacity and transition ones. -->
                                 <Expander Header="Borders &amp; Effects" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0"
-                                          Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
+                                          Visibility="{x:Bind ViewModel.IsBordersSectionVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
@@ -262,7 +270,7 @@
 
                                 <!-- 4. Transitions (Track 1 only) -->
                                 <Expander Header="Transitions" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" CornerRadius="0,0,4,4"
-                                          ToolTipService.ToolTip="Fade this clip in from black, out to black, or both. Adds to the clip length rather than trimming it." Visibility="{x:Bind ViewModel.IsEditMode, Mode=OneWay, Converter={StaticResource BoolToVisConverter}, ConverterParameter=Reverse}">
+                                          ToolTipService.ToolTip="Fade this clip in from black, out to black, or both. Adds to the clip length rather than trimming it." Visibility="{x:Bind ViewModel.IsTransitionsSectionVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
                                     <StackPanel Spacing="4">
                                         <TextBlock Text="Transition Style / Length (s)" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         <Grid ColumnSpacing="8">
@@ -624,7 +632,7 @@
 
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
                         <!-- Export -->
-                        <Button Click="Export_Click" Height="28" Padding="12,0" CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Background="{ThemeResource AccentFillColorDefaultBrush}" Foreground="White"
+                        <Button Click="Export_Click" AutomationProperties.Name="Export" Height="28" Padding="12,0" CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Background="{ThemeResource AccentFillColorDefaultBrush}" Foreground="White"
                                 ToolTipService.ToolTip="Export composite to MP4 video">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <SymbolIcon Symbol="Video" Foreground="White" />
@@ -697,6 +705,14 @@
                 </Border>
             </StackPanel>
         </Border>
+
+        <!-- Completion banner. Says the recording finished without making anyone dismiss it:
+             a modal OK after something you asked for and watched happen is a click for nothing,
+             but saying nothing at all leaves you wondering whether it worked. Sits above
+             everything, closes itself, and is never on screen while a take is rolling. -->
+        <InfoBar x:Name="StatusBanner" IsOpen="False" IsClosable="True"
+                 VerticalAlignment="Top" HorizontalAlignment="Center"
+                 Margin="0,48,0,0" MinWidth="420" MaxWidth="760" Canvas.ZIndex="2000" />
     </Grid>
 </UserControl>
 
