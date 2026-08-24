@@ -290,8 +290,7 @@
                 BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" 
                 BorderThickness="1" CornerRadius="16"
                 Visibility="{x:Bind ViewModel.IsControlsVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}"
-                PointerEntered="FloatingPill_PointerEntered"
-                PointerExited="FloatingPill_PointerExited">
+>
             <StackPanel Spacing="4">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
                     <!-- Mode Indicator directly on the Playbar. In Edit Mode, this acts as a subtle pulsing interactive button to exit back to Arrange! -->

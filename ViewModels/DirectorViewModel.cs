@@ -162,6 +162,7 @@ namespace VideoDirector.ViewModels
                 if (SetProperty(ref _isPlaying, value))
                 {
                     OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsPerforming));
                     OnPropertyChanged(nameof(ModeLabel));
                     OnPropertyChanged(nameof(IsStoryboardVisible));
                     OnPropertyChanged(nameof(CanToggleEditMode));
@@ -191,6 +192,7 @@ namespace VideoDirector.ViewModels
                     OnPropertyChanged(nameof(IsTrackDockVisible));
                     OnPropertyChanged(nameof(IsChromeVisible));
                     OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsPerforming));
                     OnPropertyChanged(nameof(IsTrackDockReopenVisible));
                     // Only on the way OUT. Forcing it on the way in undid the hide that entering a
                     // performance had just applied - the chrome vanished for a frame and came
@@ -203,7 +205,7 @@ namespace VideoDirector.ViewModels
         // The dock follows the pill EXCEPT in cinematic mode, where it stays down for good - and
         // except when you have closed it yourself, which is what IsTrackDockOpen is for. Auto-hide
         // during playback is a convenience; this is a decision, and a decision outranks it.
-        public bool IsTrackDockVisible => !_isCinematicMode && _isControlsVisible && _isTrackDockOpen;
+        public bool IsTrackDockVisible => !IsPerforming && _isControlsVisible && _isTrackDockOpen;
 
         // Whether the editing chrome is up at all. The panel TABS follow this rather than
         // IsTrackDockVisible: a tab that disappeared when its own panel closed would be a panel
@@ -217,7 +219,14 @@ namespace VideoDirector.ViewModels
         // EDITOR chrome - undo, project, export, the panel toggles - as distinct from the transport.
         // During a performance the transport is all that should be on screen: the rest is editing
         // furniture and has no business in front of an audience.
-        public bool IsEditorChromeVisible => !(_isCinematicMode && _isPlaying);
+        // THE ONLY THING CINEMATIC CHANGES IS A PERFORMANCE.
+        //
+        // Arming it must do nothing at all - not full screen, not the chrome, not the view lock, not
+        // the inspector. Everything that used to test _isCinematicMode on its own tests this instead,
+        // so a rule cannot be added later that forgets the playing half.
+        public bool IsPerforming => _isCinematicMode && _isPlaying;
+
+        public bool IsEditorChromeVisible => !IsPerforming;
 
         // The REOPEN affordance, and only that. While the dock is open its collapse control lives
         // inside the dock toolbar, where it cannot collide with the transport sitting in the middle
@@ -237,6 +246,7 @@ namespace VideoDirector.ViewModels
                 }
                     OnPropertyChanged(nameof(IsChromeVisible));
                     OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsPerforming));
                     OnPropertyChanged(nameof(IsTrackDockReopenVisible));
             }
         }
@@ -295,7 +305,7 @@ namespace VideoDirector.ViewModels
         public bool CanToggleEditMode => !_isPlaying && (_isEditMode || _selectedClip != null);
 
         public bool IsStoryboardVisible =>
-            !_isCinematicMode && (!_isPlaying || _isEditMode) && _isInspectorOpen && HasSelection;
+            !IsPerforming && (!_isPlaying || _isEditMode) && _isInspectorOpen && HasSelection;
 
         private bool _isControlsVisible = true;
         public bool IsControlsVisible
@@ -307,6 +317,7 @@ namespace VideoDirector.ViewModels
                     OnPropertyChanged(nameof(IsTrackDockVisible));
                     OnPropertyChanged(nameof(IsChromeVisible));
                     OnPropertyChanged(nameof(IsEditorChromeVisible));
+                    OnPropertyChanged(nameof(IsPerforming));
                     OnPropertyChanged(nameof(IsTrackDockReopenVisible));
             }
         }

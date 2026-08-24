@@ -88,9 +88,30 @@ namespace VideoDirector.Views
             _inactivityTimer.Start();
         }
 
-        private bool _isPointerOverPill = false;
-        private void FloatingPill_PointerEntered(object? sender, PointerRoutedEventArgs e) => _isPointerOverPill = true;
-        private void FloatingPill_PointerExited(object? sender, PointerRoutedEventArgs e) => _isPointerOverPill = false;
+        // Whether the pointer is over the transport, worked out from its BOUNDS rather than latched
+        // from enter/exit events.
+        //
+        // The latch broke when the transport moved into the dock: hiding the chrome while the pointer
+        // was over it meant PointerExited never fired, the flag stayed true for the rest of the
+        // session, and the timer could never hide anything again. Geometry cannot get stuck.
+        private bool PointerIsOverTransport()
+        {
+            if (FloatingPill == null) return false;
+            if (FloatingPill.Visibility != Visibility.Visible) return false;
+            if (FloatingPill.ActualWidth <= 0 || FloatingPill.ActualHeight <= 0) return false;
+
+            try
+            {
+                var origin = FloatingPill.TransformToVisual(this)
+                                         .TransformPoint(new Windows.Foundation.Point(0, 0));
+                return _lastPointerPos.X >= origin.X
+                    && _lastPointerPos.X <= origin.X + FloatingPill.ActualWidth
+                    && _lastPointerPos.Y >= origin.Y
+                    && _lastPointerPos.Y <= origin.Y + FloatingPill.ActualHeight;
+            }
+            catch { return false; }
+        }
+
 
         private void InactivityTimer_Tick(object? sender, object e)
         {
@@ -99,7 +120,7 @@ namespace VideoDirector.Views
             // PLAYBACK is what hides the chrome, in either mode. Cinematic on its own is just a
             // full-screen window: toggling it should do nothing but toggle it, because a paused
             // frame you are still working on is not a performance.
-            if (!_isPointerOverPill && ViewModel.IsPlaying)
+            if (!PointerIsOverTransport() && ViewModel.IsPlaying)
             {
                 ViewModel.IsControlsVisible = false;
             }
@@ -164,6 +185,7 @@ namespace VideoDirector.Views
                 if (ev.PropertyName == nameof(ViewModel.IsPlaying))
                 {
                     PlayerControl.SetPlaybackView(ViewModel.IsPlaying);
+                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode && ViewModel.IsPlaying);
                     ApplyCinematicPlaybackChrome();
                     ApplyCinematicPresenter(ViewModel.IsCinematicMode);
                 }
@@ -171,7 +193,9 @@ namespace VideoDirector.Views
                 // Cinematic goes further: it locks the view to the whole canvas as well.
                 if (ev.PropertyName == nameof(ViewModel.IsCinematicMode))
                 {
-                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode);
+                    // The view lock belongs to the PERFORMANCE, like full screen and the chrome.
+                    // Arming cinematic on its own must leave zoom and pan alone.
+                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode && ViewModel.IsPlaying);
                     ApplyCinematicPlaybackChrome();
                 }
             };
