@@ -12,7 +12,7 @@
     <!-- Drives the version shown in About, and the one publish.bat stamps into the release.
          Read from the assembly at runtime rather than duplicated in the UI, so the number in
          the dialog is always the number that shipped. Bump before cutting a release tag. -->
-    <Version>0.7.0</Version>
+    <Version>0.7.1</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
@@ -56,6 +56,15 @@
          Including Platform here sent publish to bin\x64\Release instead — a fourth
          folder nothing else in the project ever looked at. -->
     <PublishDir>bin\$(Configuration)\</PublishDir>
+
+    <!-- Pinned for the same reason, from the other direction. The SDK default is
+         bin\$(Configuration)\ ONLY while Platform is AnyCPU; the moment a platform is named
+         it becomes bin\$(Platform)\$(Configuration)\. The .slnx maps every solution platform
+         to x64, so building from the IDE quietly grew a second 170MB bind\Debug tree
+         beside the real one - the exact "test a stale binary" hazard this layout exists to
+         prevent. obj is left to split by platform: it is disposable, and keeping the
+         intermediates apart is the honest thing for a project that lists three platforms. -->
+    <OutputPath>bin\$(Configuration)\</OutputPath>
   
     <!--
       Ship English resources only. Note this handles .NET satellite assemblies but NOT

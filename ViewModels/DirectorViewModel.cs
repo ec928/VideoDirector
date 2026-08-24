@@ -776,21 +776,20 @@ namespace VideoDirector.ViewModels
                 }
                 catch { }
 
-                // Update previous clip's transition if it doesn't have one, if dropping on Track 1 and it's gapless.
+                // Dropping a clip does NOT touch the one before it.
+                //
+                // This used to give the previous clip a one-second Crossfade whenever Track 1 was
+                // gapless and it had no transition yet. Both halves were wrong. Crossfade is not
+                // implemented - it needs two clips on screen at once, which the compositor cannot
+                // express - so it rendered as nothing. And since transitions became ADDITIVE, the
+                // assignment silently grew the previous clip by a second on every drop, which reads
+                // as the timeline shifting under you for no reason. A transition is a choice you
+                // make in the inspector, not something a drop makes on your behalf.
                 var mainTrack = Tracks[0];
                 double newStartTime = 0;
                 
                 if (mainTrack.Clips.Count > 0)
                 {
-                    var lastNode = mainTrack.Clips[^1];
-                    if (mainTrack.IsGapless && lastNode.TransitionDuration == TimeSpan.Zero)
-                    {
-                        lastNode.TransitionDuration = TimeSpan.FromSeconds(1);
-                        if (lastNode.TransitionStyle == TransitionStyle.HardSnap)
-                        {
-                            lastNode.TransitionStyle = TransitionStyle.Crossfade;
-                        }
-                    }
                     newStartTime = mainTrack.ClampToFreeSlot(null, mainTrack.Clips[^1].StartTimeSeconds + mainTrack.Clips[^1].OpDuration.TotalSeconds, duration.TotalSeconds);
                 }
 
