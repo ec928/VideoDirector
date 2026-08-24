@@ -66,6 +66,12 @@ namespace VideoDirector.Views
                 return;
             }
 
+            // Say what the file will be missing BEFORE the wait, not after it. Export renders
+            // through MediaComposition, which cannot carry per-frame work - see the measurement
+            // in VideoExporter. Silent when this particular project loses nothing.
+            var lost = Models.VideoExporter.WhatIsNotBaked(ViewModel.Tracks);
+            if (lost.Count > 0 && !await ConfirmExportLossAsync(lost)) return;
+
             var savePicker = new FileSavePicker();
             var window = MainWindow.Instance;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
@@ -93,7 +99,8 @@ namespace VideoDirector.Views
             var progress = new Progress<double>(p => bar.Value = p);
 
             _ = progressDialog.ShowAsync(); // non-blocking; hidden when the render finishes
-            var result = await exporter.ExportAsync(ViewModel.Tracks, file, progress);
+            var result = await exporter.ExportAsync(ViewModel.Tracks, file, progress,
+                                                    ViewModel.CanvasWidth, ViewModel.CanvasHeight);
             progressDialog.Hide();
 
             switch (result.Outcome)
@@ -111,6 +118,55 @@ namespace VideoDirector.Views
                     await ShowExportMessage("Export failed", result.Message);
                     break;
             }
+        }
+
+        // What the render will drop, and the one thing that does not drop anything.
+        //
+        // The alternative is not a consolation prize: cinematic playback IS the finished piece,
+        // motion and fades and speed included, so recording it captures everything a render
+        // cannot. Worth saying plainly at the moment someone is deciding.
+        private async Task<bool> ConfirmExportLossAsync(System.Collections.Generic.List<string> lost)
+        {
+            var panel = new StackPanel { Spacing = 10 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Export renders through the Windows media compositor, which cannot carry "
+                     + "per-frame work. This project uses:",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var bullets = new StackPanel { Spacing = 4, Margin = new Thickness(8, 0, 0, 0) };
+            foreach (var item in lost)
+                bullets.Children.Add(new TextBlock { Text = "\u2022  " + item, TextWrapping = TextWrapping.Wrap });
+            panel.Children.Add(bullets);
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Everything else is baked: cuts and trims, clip order and timing, "
+                     + "picture-in-picture position, size and opacity, the audio mix, and the "
+                     + "canvas size.",
+                TextWrapping = TextWrapping.Wrap
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "To keep all of it, play the project in cinematic mode and screen-record "
+                     + "that instead \u2014 what you see there is the finished piece.",
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.8
+            });
+
+            var dialog = new ContentDialog
+            {
+                Title = "Some of this will not survive the render",
+                Content = panel,
+                PrimaryButtonText = "Export anyway",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            try { return await dialog.ShowAsync() == ContentDialogResult.Primary; }
+            catch { return false; }
         }
 
         private async Task ShowExportMessage(string title, string message)

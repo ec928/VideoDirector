@@ -32,7 +32,9 @@ Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImage
 
 **Trim & Sync Tools** — Interactive edge trimming, cross-track magnetic snapping (8px threshold), and optional audio waveforms on timeline clips.
 
-**Project Management** — JSON-based project save/load, infinite Undo/Redo history, and direct MP4 export using the Windows Media Foundation compositor.
+**Project Management** — JSON-based project save/load and unlimited Undo/Redo history.
+
+**Export to MP4** — Renders at the project canvas size, baking cuts and trims, clip order and timing, picture-in-picture position, size and opacity, and the audio mix. It cannot carry per-frame work — Ken Burns motion, fades, per-clip speed and borders — because the Windows compositor it renders through has no working hook for that; the app says which of them your project uses before you commit to the wait. To keep everything, play in cinematic mode and screen-record that.
 
 ## 🛠 Technical Stack
 
@@ -88,7 +90,7 @@ Neither path carries a `$(Platform)` segment, deliberately. The SDK only default
 
 ## 📋 Status
 
-Active development. The timeline, compositor, Ken Burns model, canvas and mode system are implemented and in daily use. Export writes 1080p MP4, but motion, per-clip speed and fades are preview-only and are not yet baked into the render — the app itself is the delivery mechanism. Expect rough edges.
+Active development. The timeline, compositor, Ken Burns model, canvas and mode system are implemented and in daily use. Export is deliberately limited rather than unfinished — see above. The app itself is the delivery mechanism. Expect rough edges.
 
 ## 💬 Feedback
 

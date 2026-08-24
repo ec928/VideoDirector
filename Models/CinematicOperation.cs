@@ -71,8 +71,11 @@ namespace VideoDirector.Models
         // Deliberately narrower than IsStill: that one also returns true for a blank path, and the
         // timing setters run during deserialisation before FilePath has landed. Keying trim and
         // duration off IsStill would therefore treat every clip as a still for part of a load.
+        // internal, not private: the exporter has to ask the same question when it works out
+        // whether a speed setting is a real modification or just what makes a still a still.
+        // Duplicating the rule there is how one rule quietly becomes two that disagree.
         [JsonIgnore]
-        private bool HasNoSourceWindow =>
+        internal bool HasNoSourceWindow =>
             _playbackSpeed <= 0 || (!string.IsNullOrWhiteSpace(_filePath) && IsImagePath(_filePath));
 
         private BitmapImage? _thumbnail;

@@ -16,19 +16,87 @@ namespace VideoDirector.Models
     // their Duration) plus overlay PiPs — one MediaOverlayLayer per overlay track, each PiP placed
     // by its box (position/size) and opacity, delayed to its timeline position.
     //
-    // NOT yet in the export (all working in the live preview): per-clip Speed (needs a retiming
-    // effect — the hardest), Ken Burns motion, and Transitions. Overlay PiPs are stretched into
-    // their box rather than crop-filled as in the preview; matching UniformToFill is a refinement.
+    // WHAT THIS CANNOT DO, AND WHY IT IS NOT A TODO.
+    //
+    // Ken Burns motion, fades, per-clip speed, borders and crop-fill are all per-frame work, and
+    // MediaComposition has exactly one hook for that: a video effect on the clip. Measured on this
+    // machine, unpackaged .NET 8, three renders of the same five seconds:
+    //
+    //     no effects                              -> None, 4,884,432 bytes
+    //     VideoTransformEffectDefinition (crop)   -> 0xC00DA7FC "stream is not in a state..."
+    //     the same effect with NOTHING set        -> 0xC00DA7FC
+    //     custom managed IBasicVideoEffect        -> 0x80040154 "class not registered"
+    //
+    // So the custom effect will not activate (a managed type is not WinRT-activatable from an
+    // unpackaged process), and even the SYSTEM-provided transform effect breaks the render - a
+    // no-op instance of it is enough to kill it. The baseline render is fine, which is what makes
+    // this attributable rather than a guess.
+    //
+    // Everything this exporter does NOT bake is therefore blocked on the API, not on effort:
+    // getting it would mean a second renderer (Win2D frame server -> MediaStreamSource, with its
+    // own audio mixing), not a few more lines here. The app itself is the delivery mechanism; this
+    // is for handing someone a file. WhatIsNotBaked() below tells the user which of it applies to
+    // the project in front of them, BEFORE they wait for a render.
     public class VideoExporter
     {
-        // The export renders at 1080p, so overlay positions are in this output pixel space.
-        private const double OutputWidth = 1920;
-        private const double OutputHeight = 1080;
+        // The output frame, and therefore the pixel space overlay positions are resolved into.
+        // Taken from the project canvas rather than pinned at 1080p: a 9:16 or 2.39:1 project used
+        // to be squeezed into 16:9 and letterboxed by a renderer that had been told the wrong shape.
+        private double _outputWidth = 1920;
+        private double _outputHeight = 1080;
 
         private static readonly string[] ImageExtensions =
             { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff" };
 
         public enum ExportOutcome { Success, NothingToRender, Failed }
+
+        /// <summary>
+        /// The features this project uses that the render cannot carry, in the user's words.
+        /// Empty when the export will match what is on screen.
+        /// </summary>
+        /// <remarks>
+        /// Checked against the actual clips rather than listed as a blanket disclaimer, so a
+        /// project with no motion and no fades gets no warning at all and the ones that do get a
+        /// list they can act on - before the wait, not after it.
+        /// </remarks>
+        public static List<string> WhatIsNotBaked(IEnumerable<TimelineTrack> tracks)
+        {
+            bool motion = false, speed = false, fade = false, border = false, pip = false;
+
+            var list = tracks?.ToList();
+            if (list != null)
+            {
+                for (int t = 0; t < list.Count; t++)
+                {
+                    if (list[t]?.Clips == null) continue;
+                    foreach (var op in list[t].Clips)
+                    {
+                        if (op == null) continue;
+
+                        if (op.StartMark.Scale != 1.0f || op.StartMark.X != 0 || op.StartMark.Y != 0 ||
+                            op.EndMark.Scale != 1.0f || op.EndMark.X != 0 || op.EndMark.Y != 0)
+                            motion = true;
+
+                        if (!op.HasNoSourceWindow && op.PlaybackSpeed != 1.0) speed = true;
+
+                        if (op.TransitionStyle != TransitionStyle.HardSnap && op.TransitionDuration > TimeSpan.Zero)
+                            fade = true;
+
+                        if (op.BorderType != BorderType.None) border = true;
+
+                        if (t > 0) pip = true;
+                    }
+                }
+            }
+
+            var lost = new List<string>();
+            if (motion) lost.Add("Ken Burns pan and zoom - clips render on their opening frame");
+            if (fade)   lost.Add("Fades - cuts will be hard");
+            if (speed)  lost.Add("Per-clip speed - everything plays at 1x");
+            if (border) lost.Add("Borders");
+            if (pip)    lost.Add("Picture-in-picture is stretched into its box rather than cropped to fill");
+            return lost;
+        }
 
         public class ExportResult
         {
@@ -103,10 +171,10 @@ namespace VideoDirector.Models
                         var clip = await CreateClipAsync(op);
                         if (clip == null) { skipped?.Add(System.IO.Path.GetFileName(op.FilePath)); continue; }
 
-                        double boxW = Math.Clamp(op.PlacementWidth, 0.01, 1.0) * OutputWidth;
-                        double boxH = Math.Clamp(op.PlacementHeight, 0.01, 1.0) * OutputHeight;
-                        double cx = Math.Clamp(op.PlacementCenterX, 0, 1) * OutputWidth;
-                        double cy = Math.Clamp(op.PlacementCenterY, 0, 1) * OutputHeight;
+                        double boxW = Math.Clamp(op.PlacementWidth, 0.01, 1.0) * _outputWidth;
+                        double boxH = Math.Clamp(op.PlacementHeight, 0.01, 1.0) * _outputHeight;
+                        double cx = Math.Clamp(op.PlacementCenterX, 0, 1) * _outputWidth;
+                        double cy = Math.Clamp(op.PlacementCenterY, 0, 1) * _outputHeight;
 
                         var overlay = new MediaOverlay(clip)
                         {
@@ -129,8 +197,13 @@ namespace VideoDirector.Models
         // cases (missing files, nothing to render) — returns a described ExportResult.
         public async Task<ExportResult> ExportAsync(
             IEnumerable<TimelineTrack> tracks,
-            StorageFile output, IProgress<double> progress)
+            StorageFile output, IProgress<double> progress,
+            double canvasWidth = 1920, double canvasHeight = 1080)
         {
+            // H.264 wants even dimensions, and a canvas can be any odd size the user typed.
+            _outputWidth  = Math.Max(2, Math.Round(canvasWidth  / 2) * 2);
+            _outputHeight = Math.Max(2, Math.Round(canvasHeight / 2) * 2);
+
             var skipped = new List<string>();
             MediaComposition composition;
             try
@@ -145,7 +218,18 @@ namespace VideoDirector.Models
             if (composition.Clips.Count == 0)
                 return new ExportResult { Outcome = ExportOutcome.NothingToRender, Message = "No renderable Track 1 clips.", SkippedFiles = skipped };
 
-            var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
+            // Start from the tier nearest the canvas height, then state the real frame size. The
+            // tier still sets the bitrate, which is why it is picked by size rather than fixed.
+            var tier = _outputHeight >= 2000 ? VideoEncodingQuality.Uhd2160p
+                     : _outputHeight >= 1000 ? VideoEncodingQuality.HD1080p
+                     : _outputHeight >=  700 ? VideoEncodingQuality.HD720p
+                     :                         VideoEncodingQuality.Wvga;
+            var profile = MediaEncodingProfile.CreateMp4(tier);
+            if (profile.Video != null)
+            {
+                profile.Video.Width  = (uint)_outputWidth;
+                profile.Video.Height = (uint)_outputHeight;
+            }
 
             try
             {

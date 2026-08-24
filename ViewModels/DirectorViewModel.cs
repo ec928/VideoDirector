@@ -723,12 +723,45 @@ namespace VideoDirector.ViewModels
 
         public event EventHandler ClipPropertyChanged;
 
+        // Guards the ripple below against its own writes: ResolveOverlaps assigns StartTime, which
+        // comes straight back through here.
+        private bool _rippling;
+
         private void CinematicOperation_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            if (e.PropertyName == nameof(CinematicOperation.OpDuration) || e.PropertyName == nameof(CinematicOperation.TransitionDuration) || e.PropertyName == nameof(CinematicOperation.StartTime))
+            bool lengthChanged = e.PropertyName == nameof(CinematicOperation.OpDuration)
+                              || e.PropertyName == nameof(CinematicOperation.TransitionDuration);
+
+            if (lengthChanged || e.PropertyName == nameof(CinematicOperation.StartTime))
             {
                 OnPropertyChanged(nameof(TotalStoryTime));
             }
+
+            // RIPPLE. A gapless track is defined by having no gaps, so when a clip changes length
+            // the ones after it have to move - that is what "ripple" means, and it is the only
+            // trim rule this app needs (roll, dragging a shared boundary between two clips, is a
+            // separate gesture that does not exist here).
+            //
+            // It was already happening after a drag and after add/remove, but not after a TRIM,
+            // which changes OpDuration just as surely: OpDuration == (VideoEnd - VideoStart) /
+            // Speed. So shortening a clip on a gapless track opened a hole in a track that is not
+            // supposed to have any, and it stayed there until some later edit happened to re-lay
+            // the track. Doing it here rather than in the trim handler catches every route to a
+            // length change at once - the scrubber, a duration typed into the inspector, a speed
+            // change, adding a fade.
+            if (lengthChanged && !_rippling && sender is CinematicOperation clip)
+            {
+                _rippling = true;
+                try
+                {
+                    foreach (var track in Tracks)
+                    {
+                        if (track.IsGapless && track.Clips.Contains(clip)) { track.ResolveOverlaps(); break; }
+                    }
+                }
+                finally { _rippling = false; }
+            }
+
             ClipPropertyChanged?.Invoke(this, EventArgs.Empty);
         }
 

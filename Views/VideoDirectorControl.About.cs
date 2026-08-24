@@ -95,7 +95,7 @@ namespace VideoDirector.Views
                 ("Cinematic mode", "— arm it, and playback takes over the whole screen with every trace of the editor gone. Move the mouse for the transport, stop playing and the editor returns as you left it."),
                 ("Present on any display", "— choose which screen a performance takes over, remembered between sessions. The list is built when you open it, so a projector plugged in after launch needs no restart."),
                 ("A check before you present", "— opening a project, and arming cinematic, both say plainly which clips can no longer find their files. A project is a list of paths, and that is the failure that actually bites."),
-                ("Export to MP4", "at 1080p. Motion, per-clip speed and transitions are preview-only for now and are not yet baked into the render."),
+                ("Export to MP4", "at the canvas size, with cuts, timing, picture-in-picture placement and the audio mix. Motion, fades and speed cannot be carried by the Windows compositor it renders through; the app tells you which of them your project uses before you start. Screen-record a cinematic performance to keep all of it."),
             });
 
             // ---- footer
