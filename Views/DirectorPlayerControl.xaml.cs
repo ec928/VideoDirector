@@ -337,17 +337,36 @@ namespace VideoDirector.Views
         /// A NEGATIVE allowance means the content is smaller than its box (zoomed below fit), where
         /// black is unavoidable and centred is the only sensible place to be.
         /// </remarks>
+        /// <summary>The boundary: the picture moves until it reaches the limit, then goes no further.</summary>
+        /// <remarks>
+        /// THE LIMIT IS CONTACT WITH THE FRAME, not coverage of it. Those are two different numbers
+        /// and picking the wrong one is a regression, so both are written out:
+        ///
+        ///     coverage  (content x scale - box) / 2     the frame stays FULL
+        ///     contact   (content x scale + box) / 2     the picture stays TOUCHING the frame
+        ///
+        /// Coverage is ClipGeometry.Allowance, and it is wrong here. It is exactly 0 at scale 1,
+        /// where the picture is the same size as the frame - so the picture could not be moved at
+        /// all - and it forbids a framing that starts outside the picture, which is how a push-in
+        /// from off-frame is authored. Black at the edges is a legitimate thing to want.
+        ///
+        /// Contact allows all of that and stops the one thing that is genuinely broken: the picture
+        /// travelling away from the frame into space it cannot be recovered from. At scale 1 it is a
+        /// full frame-width of travel in each direction, so nothing about normal panning changes.
+        ///
+        /// A hard stop. The picture halts on the axis that hit the limit and stays free on the other.
+        /// </remarks>
         private void ClampFraming()
         {
             if (ActiveTransform == null) return;
             if (FramingContentW <= 0 || FramingBoxW <= 0) return;
 
             double scale = ActiveTransform.ScaleX;
-            var (ax, ay) = VideoDirector.Models.ClipGeometry.Allowance(
-                FramingContentW, FramingContentH, FramingBoxW, FramingBoxH, scale);
+            double ax = (FramingContentW * scale + FramingBoxW) / 2;
+            double ay = (FramingContentH * scale + FramingBoxH) / 2;
 
-            ActiveTransform.TranslateX = ax <= 0 ? 0 : Math.Clamp(ActiveTransform.TranslateX, -ax, ax);
-            ActiveTransform.TranslateY = ay <= 0 ? 0 : Math.Clamp(ActiveTransform.TranslateY, -ay, ay);
+            ActiveTransform.TranslateX = Math.Clamp(ActiveTransform.TranslateX, -ax, ax);
+            ActiveTransform.TranslateY = Math.Clamp(ActiveTransform.TranslateY, -ay, ay);
         }
 
         private PlayerInputMode _inputMode = PlayerInputMode.Content;
@@ -619,11 +638,7 @@ namespace VideoDirector.Views
             if (ActiveTransform == null) return;
             ActiveTransform.TranslateX += deltaX;
             ActiveTransform.TranslateY += deltaY;
-            // NO CLAMP. A Ken Burns framing is allowed to sit past the edge of the source - that is
-            // how you push in from off-frame, or end on a corner. Holding it inside the box made the
-            // edges unreachable, and forcing it by dragging a rectangle instead landed the framing
-            // somewhere the pan could not follow, which read as the window shrinking and sliding
-            // right. Black beyond the edge is the author's business, not something to prevent.
+            ClampFraming();
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -842,11 +857,7 @@ namespace VideoDirector.Views
             ActiveTransform.ScaleX = newScale;
             ActiveTransform.ScaleY = newScale;
 
-            // NO CLAMP. A Ken Burns framing is allowed to sit past the edge of the source - that is
-            // how you push in from off-frame, or end on a corner. Holding it inside the box made the
-            // edges unreachable, and forcing it by dragging a rectangle instead landed the framing
-            // somewhere the pan could not follow, which read as the window shrinking and sliding
-            // right. Black beyond the edge is the author's business, not something to prevent.
+            ClampFraming();
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 

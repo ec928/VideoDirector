@@ -559,6 +559,19 @@ namespace VideoDirector.Models
                 mark.Y = (float)(-(cy - H / 2 - tyc) / (Sc / newSt) / H);
             }
 
+            // THE SAME BOUNDARY THE PICTURE HAS (§2.C). A rectangle drag writes a framing just as
+            // the wheel and the pan do, so leaving it out would put a hole straight through the
+            // limit - and dragging a rectangle past what the pan could reach is exactly how the
+            // framing previously ended up somewhere it could not be brought back from.
+            //
+            // Contact, not coverage: (content x scale + box) / 2, expressed as a fraction of the fit
+            // because that is how marks are stored. See ClampFraming for why coverage is wrong.
+            (double bContentW, double bContentH) = ClipGeometry.Content(boxW, boxH, aspect);
+            double limX = (bContentW * mark.Scale + boxW) / 2 / W;
+            double limY = (bContentH * mark.Scale + boxH) / 2 / H;
+            mark.X = (float)System.Math.Clamp(mark.X, -limX, limX);
+            mark.Y = (float)System.Math.Clamp(mark.Y, -limY, limY);
+
 
             UpdateWysiwygOverlay();
         }

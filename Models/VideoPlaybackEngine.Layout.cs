@@ -68,6 +68,30 @@ namespace VideoDirector.Models
                 grid.Width = boxW;
                 grid.Height = boxH;
                 _overlayContentAspect[slot] = aspect;
+            }
+
+            // IN EDIT THE PICTURE IS NEVER CUT (§2.C rule 1). It is the working material there, and a
+            // crop that hides everything outside the frame cannot be used to choose a framing.
+            // Nothing spills onto anything: EnterEditMode isolates the clip into slot 0 and releases
+            // every other slot. What stops the picture being lost is the boundary in ClampFraming,
+            // not this crop - the crop was doing two jobs badly, cutting the picture AND being the
+            // only thing that limited it.
+            //
+            // Everywhere else the crop is load-bearing: it is what turns a covering surface into a
+            // CROP, and it keeps a 30% PiP inside its own box instead of drawing its whole frame
+            // across the canvas over other tracks.
+            //
+            // Driven by the mode and NOT by the size guard above: switching modes need not change
+            // the box, and a stale crop would make this work only sometimes. Both branches compare
+            // before assigning, so a steady state allocates nothing - this runs every frame from
+            // CompositionTarget.Rendering, where unconditional writes retrigger measure up the tree.
+            if (editMode)
+            {
+                if (grid.Clip != null) grid.Clip = null;
+            }
+            else if (!(grid.Clip is Microsoft.UI.Xaml.Media.RectangleGeometry rg
+                       && rg.Rect.Width == boxW && rg.Rect.Height == boxH))
+            {
                 grid.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
                 {
                     Rect = new Windows.Foundation.Rect(0, 0, boxW, boxH)
