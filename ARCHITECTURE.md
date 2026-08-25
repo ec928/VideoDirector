@@ -76,6 +76,42 @@ This section is **normative**. The rules below are requirements, not description
 
 **9. No clamp.** A framing may sit past the edge of the source. Black there is an authorial choice — a push-in from off-frame, an end on a corner — and preventing it makes the edges unreachable.
 
+#### The mechanism — what a rebuild actually needs
+
+The rules above say what Edit mode must do. They are not sufficient to rebuild it; this is.
+
+**Geometry chain** (`Models/ClipGeometry.cs`, pure and unit-tested):
+
+* `Fit(aspect, vpW, vpH)` — the source contained in the canvas, preserving aspect. This is the **scale-1 reference**: a mark of 1.0 means exactly this.
+* `Box(...)` — the output frame. In Edit, placement is **bypassed** (`editMode ? 1.0 : placeW`), so the box IS the fit. In Arrange it is the PiP rectangle, and the video crop-fills it.
+* `Content(boxW, boxH, aspect)` — the smallest surface at the source aspect that fully covers the box. Always `>=` the box; the surplus is what a pan consumes.
+* `Allowance(contentW, contentH, boxW, boxH, scale)` = `((contentW*scale - boxW)/2, (contentH*scale - boxH)/2)` — how far a framing may travel before the box stops being covered. Used by the Ken Burns replay to bound a mark. **It is not an interactive limit**: see rule 9.
+
+**Element tree and where the transform lives.** The grid is box-sized and carries `Margin = (left, top)`. Inside it the surfaces sit in an unconstrained `Canvas`, sized to `contentW x contentH`, offset by `(-padX, -padY)` where `pad = (content - box)/2`, so the oversized surface is centred on the box by hand. `RenderTransformOrigin` is `0.5,0.5` and the `RenderTransform` is the framing. **The Canvas is load-bearing**: a sizing parent layout-clips an overflowing child BEFORE `RenderTransform` runs, which silently discards the surplus a pan needs (§5.5). Debug asserts guard it.
+
+**Marks are normalised.** `SpatialMark` is `(Scale, X, Y)` with `X`/`Y` as fractions of the fit, so reopening a project at a different window size reproduces the framing instead of shifting it. `CaptureMark` divides by `fitW`/`fitH`; `EnsureMarksNormalized` converts legacy clips stored in raw pane pixels, on first draw rather than at load, because the pane size is not trustworthy until then. `MidMark` is nullable — absent means a two-point Start->End move.
+
+**Rectangles are drawn at `Sc/St`** — the live framing scale over the mark's own — plus the live translation:
+
+```
+left  = (-boxW/2 - txt) * (Sc/St) + W/2 + txc + (vpW - W)/2
+width = boxW * (Sc/St)
+```
+
+so a mark at the live framing draws exactly on the box edge, and one at a wider framing draws outside it. `CaptureMark` is the inverse of this and must stay so: if the two disagree, a rectangle placed visibly inside the picture writes a mark outside it.
+
+**Aspect has one source of truth.** `AspectOf` prefers the clip's persisted `SourceAspect` and falls back to the live `_overlayAspect`; it returns 0 for genuinely unknown and callers must hold off rather than assume 16:9. Three separate fallbacks once disagreed, and on a 2.39:1 source the rects were drawn 34% out.
+
+**Preview.** The live framing follows `ApplyMarksAtProgress` at the playhead. `SeekForMark` moves the playhead to a mark's time — this is what implements rule 7. `BeginEdit` must NOT be called from a Set handler: it re-enters edit mode and re-runs the placement bypass, which resizes the window and violates the window invariant.
+
+**Lifecycle.** `EnterEditMode` isolates the clip into slot 0 and releases every other slot, seeds the transform from the mark being edited, and applies the box with `editMode: true`. `editMode` is derived from engine state — `_mode == EditorMode.Edit && ReferenceEquals(overlay, _editClip)` — never passed as a literal, because the per-frame path once hardcoded `false` and overwrote the box every frame.
+
+**Input map in Edit.** Wheel magnifies the framing inside the fixed window. Left-drag on the picture pans the framing. A rectangle's tab moves that mark, its corner handles resize it, and both mark their events handled so they never reach the input layer. Right-click the Mid button clears it.
+
+**Hit-testing.** `InputLayer` owns all pointer input; every render surface is `IsHitTestVisible = false`. **A Grid with any Background becomes hit-testable** and will swallow events meant for `InputLayer` — this killed drag and wheel in both modes when a background was put on `CanvasHost`. The pasteboard grey therefore lives on the control and `RootLayer` only.
+
+**Diagnosis.** The telemetry HUD (`VideoPlaybackEngine.Telemetry.cs`) reports box, surface, motion, the source range visible, black on each edge, the grid's laid-out size against the wanted box, and the canvas host/transform. When geometry is in doubt, read it rather than infer from a screenshot — see §4.
+
 ---
 
 ## 3. UI Layout & Control Topography
