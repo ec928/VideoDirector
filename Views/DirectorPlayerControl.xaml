@@ -110,6 +110,23 @@
                 <CompositeTransform x:Name="CanvasTransform" x:FieldModifier="public" />
             </Grid.RenderTransform>
 
+            <!-- THE CANVAS ITSELF, so it reads as a surface rather than a hole in the pasteboard.
+                 Black because that is genuinely what renders wherever no clip covers, which also
+                 makes a reduced-opacity clip blend against the colour it will really blend against.
+
+                 A DEDICATED, HIT-TEST-DISABLED ELEMENT - not a Background on CanvasHost. Putting a
+                 brush on that Grid once made it hit-testable, and it then swallowed the pointer
+                 events InputLayer owns, killing drag and wheel in BOTH Arrange and Edit. The colour
+                 was never the problem; the element was.
+
+                 ZIndex -1 puts it behind the tracks regardless of child order, which matters
+                 because the track host is inserted from code at index 0.
+
+                 Hidden in Edit, where there is no canvas to represent - only the clip being framed,
+                 and a black field behind it would be exactly the frame fill that was rejected. -->
+            <Rectangle x:Name="CanvasBackdrop" x:FieldModifier="public" Fill="Black"
+                       IsHitTestVisible="False" Canvas.ZIndex="-1" />
+
             <!-- Track render surfaces are built in code and INSERTED HERE at 0..MaxTracks-1, so
                  they land beneath everything declared below and stack in track order among
                  themselves. Built rather than declared so the slot count and the visual count

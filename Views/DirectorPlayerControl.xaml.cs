@@ -289,6 +289,15 @@ namespace VideoDirector.Views
             bool show = !_isPlaybackView && !_isCinematicView && !_isEditView;
             var want = show ? Visibility.Visible : Visibility.Collapsed;
             if (CanvasEdge.Visibility != want) CanvasEdge.Visibility = want;
+
+            // The backdrop follows a DIFFERENT rule from the outline: it stays through playback and
+            // cinematic, because black behind the composition is what actually renders and hiding it
+            // there would put pasteboard grey where the output is black. Only Edit drops it.
+            if (CanvasBackdrop != null)
+            {
+                var backdrop = _isEditView ? Visibility.Collapsed : Visibility.Visible;
+                if (CanvasBackdrop.Visibility != backdrop) CanvasBackdrop.Visibility = backdrop;
+            }
         }
 
         /// <summary>Back to fit-the-pane, centred. Bound to middle-click.</summary>
