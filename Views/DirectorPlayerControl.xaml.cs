@@ -619,7 +619,11 @@ namespace VideoDirector.Views
             if (ActiveTransform == null) return;
             ActiveTransform.TranslateX += deltaX;
             ActiveTransform.TranslateY += deltaY;
-            ClampFraming();          // the picture stops at the edge instead of disappearing past it
+            // NO CLAMP. A Ken Burns framing is allowed to sit past the edge of the source - that is
+            // how you push in from off-frame, or end on a corner. Holding it inside the box made the
+            // edges unreachable, and forcing it by dragging a rectangle instead landed the framing
+            // somewhere the pan could not follow, which read as the window shrinking and sliding
+            // right. Black beyond the edge is the author's business, not something to prevent.
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -819,16 +823,31 @@ namespace VideoDirector.Views
                 return;
             }
 
-            // THE WHEEL IS PASSIVE. It magnifies the view and changes NOTHING about the clip.
+            // THE WHEEL MAGNIFIES THE CONTENT INSIDE A FIXED WINDOW.
             //
-            // It used to write ActiveTransform, which IS the clip's framing, so every click was a
-            // destructive edit: the picture reframed and the keyframe rectangles - drawn at Sc/St -
-            // pulled away from the clip border as you scrolled. Zooming the canvas magnifies the
-            // picture and all three rectangles together, so their alignment cannot change.
+            // The box does not move: scrolling changes what you see of the source, not how big the
+            // clip window is. That makes it navigation - it writes no mark and nothing is saved by
+            // turning it - while leaving exactly one magnification in the render path.
             //
-            // The framing is written only by the Set buttons, which read this view, and by dragging
-            // a rectangle. Both are deliberate acts; turning a wheel is not.
-            ZoomCanvas(delta > 0 ? 1.1 : 1.0 / 1.1);
+            // Which is what makes Set non-destructive. CaptureMark records this same transform, so
+            // pressing Set stores the framing already on screen and the picture cannot change:
+            // source x mark is what you were already looking at. A canvas zoom here would be a
+            // SECOND multiplier, and pressing Set would then crop to 2.14x while you were still
+            // viewing at 2.14x - the double magnification that ate half the clip.
+            //
+            // A selected rectangle no longer steals this. Marks are resized by dragging a corner.
+            if (ActiveTransform == null) return;
+            double zoomFactor = delta > 0 ? 1.1 : (1.0 / 1.1);
+            double newScale = Math.Clamp(ActiveTransform.ScaleX * zoomFactor, 0.1, 10.0);
+            ActiveTransform.ScaleX = newScale;
+            ActiveTransform.ScaleY = newScale;
+
+            // NO CLAMP. A Ken Burns framing is allowed to sit past the edge of the source - that is
+            // how you push in from off-frame, or end on a corner. Holding it inside the box made the
+            // edges unreachable, and forcing it by dragging a rectangle instead landed the framing
+            // somewhere the pan could not follow, which read as the window shrinking and sliding
+            // right. Black beyond the edge is the author's business, not something to prevent.
+            ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void InputLayer_DoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)

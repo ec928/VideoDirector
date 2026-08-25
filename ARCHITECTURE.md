@@ -39,10 +39,42 @@ To prevent interaction collisions and UI clutter, VideoDirector enforces a non-n
 * **Behavior**: The composite is paused at the current playhead position.
 * **Input Rules**: Users scrub the timeline, reorder clips across tracks, and directly manipulate PiP bounding boxes on the canvas (left-click drag to move, edge/corner drag to resize, mouse wheel to scale).
 
-### C. EDIT Mode (Red Badge)
-* **Purpose**: Micro-framing and motion design.
-* **Behavior**: Isolates and displays **one clip full-frame** on a clean canvas without redundant outer borders.
-* **Input Rules**: Canvas manipulation adjusts the clip's internal Ken Burns content framing (drag to pan content, mouse wheel to zoom content). Entered by single-clicking a timeline clip or double-clicking a canvas PiP; cleanly exited via the interactive mode badge on the playbar, the Done button, or pressing Esc.
+### C. EDIT Mode (Red Badge) — NORMATIVE
+
+**Purpose**: author one clip's Ken Burns move — a framing at Start, an optional Mid, and an End, interpolated over the clip's duration by the curve profile.
+
+Entered by single-clicking a timeline clip or double-clicking a canvas PiP; exited via the mode badge on the playbar, the Done button, or Esc.
+
+This section is **normative**. The rules below are requirements, not descriptions of current behaviour, and every one of them has been violated by a change that seemed locally reasonable. §5.9 states them as invariants; the failure modes are recorded in §4 so they are not rediscovered.
+
+#### The four objects
+
+| Object | What it is | May it change? |
+|---|---|---|
+| **Visible clip size window** | The output frame. Geometry, derived from the canvas and the clip's placement — placement is bypassed in Edit, so it is the video fit. | Only when the user navigates. Never as a result of zoom, a keyframe, or pressing anything. |
+| **Source picture** | The clip's frame, positioned and scaled by the live framing. | Position and scale, yes. It is never cropped, hidden, dimmed or partially drawn. |
+| **Marks** | Start / Mid / End, each a scale plus an offset. Data. | Only by a Set button or by dragging a rectangle. |
+| **Live framing** | What is rendered right now. | Follows navigation while authoring, and the interpolation at the playhead during preview. |
+
+#### The rules
+
+**1. The picture is always whole.** It is never clipped to the output frame in Edit. Pan the framing far enough and the picture sits mostly outside the frame — and stays entirely visible while it does. A frame edge that eats the picture breaks the core requirement; this is what was called *the invisible barrier*.
+
+**2. The zoom rectangles are overlay, nothing more.** They indicate where each mark sits. Drawing one, selecting one, or looking at one changes nothing about the clip.
+
+**3. Full opacity outside the frame — no ghosting.** A clip has THREE frames across its lifetime and none of them outranks the others. Dimming what falls outside one of them lets a single keyframe dictate how the picture reads for all three. Same objection applies to filling the frame with a colour to make its edge legible: it degrades the picture to mark a boundary.
+
+**4. Exactly one multiplier.** What is rendered is `source x mark`. The wheel drives that same transform, inside the fixed window. A canvas zoom layered on top is a SECOND multiplier and is forbidden: it makes Set either capture nothing or crop to twice what the user was looking at, depending on which value Set reads.
+
+**5. Zoom and pan are navigation.** They change what you are looking at and write nothing. Non-destructive means literally nothing is stored by turning a wheel.
+
+**6. Set is a recording, not an edit.** Set Start/Mid/End stores the framing already on screen. Because `source x mark` after the press equals what was rendered before it, pressing Set cannot move the picture. If pressing Set changes what you see, something is reading a value other than the rendered framing.
+
+**7. Selecting a mark switches the content, never the window.** Pressing Mid jumps the picture to the Mid state, End to the End state — this is essential, not incidental. The window keeps its size and position throughout; only what is inside it changes.
+
+**8. Exactly two things write a framing:** a Set button, and dragging a rectangle's corner or tab. Nothing else may.
+
+**9. No clamp.** A framing may sit past the edge of the source. Black there is an authorial choice — a push-in from off-frame, an end on a corner — and preventing it makes the edges unreachable.
 
 ---
 
@@ -96,6 +128,22 @@ This chronological ledger records all established solutions and performance opti
   The lesson is the one this project keeps relearning, one level up from "a green build proves nothing": **a passing test against a fixture you wrote yourself proves nothing either.** Export verification must run the projects in `Tests/`, which is what anyone actually loads.
 * **The Warning Is Computed, Not Boilerplate.** `WhatIsNotBaked()` walks the actual clips and names only what THIS project loses, shown before the file picker. A project with no motion and no fades gets no warning at all. It also names the alternative that loses nothing: cinematic playback is the finished piece, so recording it captures what a render cannot.
 
+### 🪟 Edit Mode Framing — Five Regressions And What Measured Them
+
+A long session of changes to the Edit-mode wheel, `CaptureMark` and the layout produced five distinct regressions. Each is recorded with the evidence that identified it, because in every case reasoning from screenshots produced a confident wrong answer and one number settled it.
+
+**The per-frame layout hardcoded `editMode: false`.** Entering Edit called `ApplyOverlayBox(0, overlay, true)` and set the full-fit box; the motion path then called `ApplyOverlayBox(slot, overlay, false)` every frame and put the PiP placement box straight back. A 30% overlay was drawn into a 30% window at any zoom while every calculation used the full box. Found by adding a HUD line reporting the grid's `ActualWidth` against the box: *laid out grid 2752 x 1146, want 2752 x 1147* — correct — while the visible picture stayed the same size at `Z:0.96` and `Z:10.00`. **A window that does not change with zoom is a box, not a clip artifact.** `grid.Clip`, the standing suspect, was never involved. `editMode` is now derived from engine state, never passed as a literal.
+
+**A canvas zoom was added as a second multiplier.** The wheel was changed from driving `ActiveTransform` to zooming the canvas, so nothing wrote the transform `CaptureMark` reads and every Set stored a full-frame mark. Making Set read the view instead produced the opposite failure: `motion zoom 2.14x` while the view was also at 2.14, cropping to twice what was on screen. See §2.C rule 4 — there is one multiplier.
+
+**A framing clamp made the edges unreachable.** Added to stop black appearing when panning; black past the edge is an authorial choice, and the clamp also silently killed the left-drag gesture entirely, because at scale 1.0 the allowance is `(box x 1.0 - box) / 2 = 0` exactly.
+
+**Resetting the canvas view inside a Set handler** kept the picture steady but shrank the on-screen window by the zoom factor, violating the one thing the window must never do.
+
+**A `Background` on `CanvasHost`** made that Grid hit-testable, and it swallowed the pointer events `InputLayer` needs — killing drag and wheel in both Arrange and Edit. The pasteboard grey lives on the control and `RootLayer` only.
+
+The lesson is procedural rather than technical: the telemetry HUD resolved in one screenshot what hours of inference from screenshots did not. When geometry is in question, add the number and read it.
+
 ### 🧹 Housekeeping That Was Load-Bearing
 * **One `bin`, Not Three.** `bin\x64\Debug` had quietly grown into a second full 170MB output tree, with 95MB of matching intermediates. The SDK defaults to `bin\$(Configuration)\` only while the platform is `AnyCPU`; the `.slnx` maps every solution platform to x64, so every IDE build went somewhere the publish pipeline never looks. That is the "tested a stale binary" failure waiting to happen, and this project has already lost an afternoon to one. `OutputPath` is now pinned so no platform can fork it, and the README table that documented the wrong two folders was corrected. `obj` is left to split by platform: it is disposable, and separate intermediates are the honest thing for a project that lists three.
 * **Dropping A Clip No Longer Edits The One Before It.** Adding to a gapless Track 1 gave the previous clip a one-second `Crossfade`. Both halves were wrong: Crossfade is not implemented, so it rendered as nothing; and once transitions became additive in 0.7.0 the assignment silently grew that clip by a second on every drop. A transition is a choice made in the inspector, not something a drop makes on your behalf.
@@ -141,6 +189,8 @@ This chronological ledger records all established solutions and performance opti
 6. **Export Cannot Do Per-Frame Work, And This Is Measured** (`Models/VideoExporter.cs`): `MediaComposition` offers exactly one hook for per-frame rendering — a video effect on the clip — and it does not work here. A custom managed `IBasicVideoEffect` fails to activate at all (`0x80040154`, a managed type is not WinRT-activatable from an unpackaged process), and the SYSTEM-provided `VideoTransformEffectDefinition` breaks the render (`0xC00DA7FC`) even when constructed with nothing set. The baseline render succeeds, which is what makes this attributable rather than a guess. So Ken Burns, fades, speed, borders and crop-fill are blocked on the API, not on effort: obtaining them means a second renderer, not more lines in the exporter. **Do not re-open this by adding an effect and hoping.** What the exporter can and cannot carry is reported to the user before the render, from the clips actually in the project.
 7. **Commit Integrity**: Every architectural step must end in a green build and a clean git commit. Small, incremental steps ensure we are never more than one revert away from safety.
 8. **Mode Rules Are Pure Functions, Defined Once (`Models/ChromeRules.cs`)**: What a mode means — what is on screen, what is reachable — is arithmetic over seven booleans (cinematic, playing, edit, controls visible, dock open, inspector open, has selection), and it lives in one WinUI-free static class that `DirectorViewModel` delegates to. This is load-bearing history, not tidiness: cinematic mode was tested in five separate places, so each fix caught one caller and left the rest — arming it took the window full screen, disabled canvas zoom and pan, hid the inspector in Edit, and collapsed the track dock, none of which it should ever have done. **Cinematic changes exactly one thing: `IsPerforming = cinematic && playing`.** Never test the cinematic flag alone, and never inline one of these expressions at a call site — that is precisely how the rule forks again.
+
+9. **Edit Mode Is Specified In §2.C, And The Spec Wins**: The picture is always whole, the rectangles are overlay only, there is exactly ONE multiplier in the render path, Set records what is rendered rather than changing it, and the visible clip size window moves for navigation and nothing else. Every one of those has been broken by a change that looked locally sensible — clipping the surface to the frame, adding a canvas zoom on top of the framing transform, resetting the view inside a Set handler, clamping the pan to the box, and hardcoding `editMode: false` in the per-frame layout. Before touching the wheel, `CaptureMark`, `ApplyOverlayBox`, or `grid.Clip`, read §2.C and check the change against all nine rules. A fix that satisfies eight of them is a regression.
 
 ---
 

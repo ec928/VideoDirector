@@ -67,22 +67,20 @@ namespace VideoDirector.Models
         // framing rather than shifting it.
         public SpatialMark CaptureMark(CinematicOperation op, Microsoft.UI.Xaml.Media.CompositeTransform t)
         {
+            if (t == null) return new SpatialMark(1f, 0, 0);
+
             EnsureMarksNormalized(op);
 
-            // READS THE VIEW, because the wheel no longer writes the framing. Inverted from
-            // DrawRect so the two cannot disagree: a rectangle is centred at canvasCentre - txt/St,
-            // the pane centre looks at -pan/effective with effective = fit x zoom, and equating
-            // them at St = zoom gives txt = pan / fit - which is what TryGetViewFraming returns.
-            if (!_playerControl.TryGetViewFraming(out double zoom, out double panX, out double panY)
-                || zoom <= 0)
-                return new SpatialMark(1f, 0, 0);
-
+            // RECORDS WHAT IS ON SCREEN. The wheel magnifies this very transform inside a fixed
+            // window, so storing it makes Set a visual no-op: the framing saved is the framing
+            // already rendered. Reading the canvas view instead added a second magnification and
+            // pressing Set visibly cropped the clip.
             if (!TryGetMarkSpace(op, out double fitW, out double fitH) || fitW <= 0 || fitH <= 0)
-                return new SpatialMark((float)zoom, 0, 0);
+                return new SpatialMark((float)t.ScaleX, 0, 0);
 
-            return new SpatialMark((float)zoom,
-                                   (float)(panX / fitW),
-                                   (float)(panY / fitH));
+            return new SpatialMark((float)t.ScaleX,
+                                   (float)(t.TranslateX / fitW),
+                                   (float)(t.TranslateY / fitH));
 
         }
 
@@ -256,12 +254,16 @@ namespace VideoDirector.Models
         {
             if (rect != null)
             {
-                double opacity = selected ? 1.0 : 0.42;
+                // 0.42 was too faint to find against a bright picture in daylight, and it is not
+                // the only thing marking an unselected rectangle: the dashes and the thinner stroke
+                // already say which one the inspector is acting on, so the opacity does not have to
+                // carry that distinction as well.
+                double opacity = selected ? 1.0 : 0.75;
                 if (Math.Abs(rect.Opacity - opacity) > 0.001) rect.Opacity = opacity;
             }
             if (frame == null) return;
 
-            double thickness = selected ? 3.0 : 1.5;
+            double thickness = selected ? 3.0 : 2.0;
             if (Math.Abs(frame.StrokeThickness - thickness) > 0.001) frame.StrokeThickness = thickness;
 
             // Solid for the selected one; the dashes are what make an unselected rectangle read as
