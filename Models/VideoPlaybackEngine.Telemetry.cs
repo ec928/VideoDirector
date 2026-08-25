@@ -222,6 +222,37 @@ private void UpdateTelemetryOverlay(bool isEditMode = false)
                 sb.AppendLine($"   box     ({left:F0},{top:F0}) to ({left + boxW:F0},{top + boxH:F0})   {boxW:F0} x {boxH:F0}" +
                               $"   pane {vpW:F0} x {vpH:F0}");
                 sb.AppendLine($"   motion  zoom {S:F2}x   pan {tx:+0;-0;0},{ty:+0;-0;0}   surface {contentW:F0} x {contentH:F0}");
+                // WHAT IS ON SCREEN vs WHAT THE MATHS THINKS. Every other line here reports the
+                // intended geometry, and they have all read "all inside" while the picture was
+                // visibly cut off - so the disagreement is between the box we compute and the box
+                // WinUI actually laid out. ActualWidth is the only number that can show that.
+                var g = vis.Grid;
+                if (g != null)
+                {
+                    string flag = (System.Math.Abs(g.ActualWidth - boxW) > 1.0 ||
+                                   System.Math.Abs(g.ActualHeight - boxH) > 1.0) ? "   <-- MISMATCH" : "";
+                    sb.AppendLine($"   laid out grid {g.ActualWidth:F0} x {g.ActualHeight:F0}" +
+                                  $"   want {boxW:F0} x {boxH:F0}" +
+                                  $"   clip {(g.Clip is Microsoft.UI.Xaml.Media.RectangleGeometry rg ? $"{rg.Rect.Width:F0} x {rg.Rect.Height:F0}" : "none")}" +
+                                  $"   surface actual {(surface != null ? $"{surface.ActualWidth:F0} x {surface.ActualHeight:F0}" : "none")}{flag}");
+                }
+                // THE LAYER OUTSIDE THE BOX. Everything from the box inward now measures correct
+                // while the picture still sits smaller than the pane with grey around it, so the
+                // discrepancy has to be in how the canvas itself is sized, scaled and positioned.
+                if (slot == 0)
+                {
+                    var ch = _playerControl.CanvasHost;
+                    var ct = ch?.RenderTransform as Microsoft.UI.Xaml.Media.CompositeTransform;
+                    sb.AppendLine($"   canvas  host {ch?.ActualWidth ?? 0:F0} x {ch?.ActualHeight ?? 0:F0}" +
+                                  $"   logical {_playerControl.CanvasWidth:F0} x {_playerControl.CanvasHeight:F0}" +
+                                  $"   xform {(ct != null ? $"S{ct.ScaleX:F3} T{ct.TranslateX:F0},{ct.TranslateY:F0}" : "none")}" +
+                                  $"   control {_playerControl.ActualWidth:F0} x {_playerControl.ActualHeight:F0}");
+                    sb.AppendLine($"   grid    margin {g?.Margin.Left ?? 0:F0},{g?.Margin.Top ?? 0:F0}" +
+                                  $"   parent {g?.Parent?.GetType().Name ?? "none"}" +
+                                  $"   offset {(g != null ? $"{Microsoft.UI.Xaml.Controls.Canvas.GetLeft(g):F0},{Microsoft.UI.Xaml.Controls.Canvas.GetTop(g):F0}" : "none")}");
+                }
+
+
                 sb.AppendLine($"   showing source x {x0:F0}..{x1:F0} of {srcW:F0}   y {y0:F0}..{y1:F0} of {srcH:F0}" +
                               (over.Count == 0 ? "   (all inside)" : "   BLACK: " + string.Join(", ", over)));
             }

@@ -67,15 +67,23 @@ namespace VideoDirector.Models
         // framing rather than shifting it.
         public SpatialMark CaptureMark(CinematicOperation op, Microsoft.UI.Xaml.Media.CompositeTransform t)
         {
-            if (t == null) return new SpatialMark(1f, 0, 0);
-
             EnsureMarksNormalized(op);
-            if (!TryGetMarkSpace(op, out double fitW, out double fitH) || fitW <= 0 || fitH <= 0)
-                return new SpatialMark((float)t.ScaleX, 0, 0);
 
-            return new SpatialMark((float)t.ScaleX,
-                                   (float)(t.TranslateX / fitW),
-                                   (float)(t.TranslateY / fitH));
+            // READS THE VIEW, because the wheel no longer writes the framing. Inverted from
+            // DrawRect so the two cannot disagree: a rectangle is centred at canvasCentre - txt/St,
+            // the pane centre looks at -pan/effective with effective = fit x zoom, and equating
+            // them at St = zoom gives txt = pan / fit - which is what TryGetViewFraming returns.
+            if (!_playerControl.TryGetViewFraming(out double zoom, out double panX, out double panY)
+                || zoom <= 0)
+                return new SpatialMark(1f, 0, 0);
+
+            if (!TryGetMarkSpace(op, out double fitW, out double fitH) || fitW <= 0 || fitH <= 0)
+                return new SpatialMark((float)zoom, 0, 0);
+
+            return new SpatialMark((float)zoom,
+                                   (float)(panX / fitW),
+                                   (float)(panY / fitH));
+
         }
 
         // Convert a legacy clip's marks from raw pane pixels to fractions of the fit.

@@ -5,9 +5,13 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Background="Black">
+    Background="#1E1E1E">
 
-    <Grid x:Name="RootLayer" Background="Black">
+    <!-- The pasteboard is NEUTRAL GREY, not black, so a clip with black in it has a visible
+         edge against the area outside the canvas. Only these two: putting a brush on
+         CanvasHost makes that Grid hit-testable, and it then swallows the pointer events
+         InputLayer needs - which killed drag and wheel in BOTH Arrange and Edit. -->
+    <Grid x:Name="RootLayer" Background="#1E1E1E">
         <!-- Input sits UNDERNEATH everything on purpose. The track surfaces, the borders and the
              canvas edge are all hit-test-invisible, so pointer input falls straight through to
              here; only the WYSIWYG handles above it consume anything. It stays in PANE space

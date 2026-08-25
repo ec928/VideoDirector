@@ -137,6 +137,24 @@ namespace VideoDirector.Views
         private double _canvasPanX, _canvasPanY;
 
         public double CanvasZoom => _canvasZoom;
+
+        private double _canvasFit = 1.0;
+
+        /// <summary>The view as a framing: what the pane is currently looking at.</summary>
+        /// <remarks>
+        /// ZOOM IS PASSIVE. It magnifies the view and alters nothing, so the Set buttons read it at
+        /// the moment they are pressed instead of the wheel writing the clip framing as it turns.
+        /// Pan arrives in pane pixels; marks live in canvas units, hence the divide by the fit.
+        /// </remarks>
+        public bool TryGetViewFraming(out double zoom, out double panX, out double panY)
+        {
+            zoom = _canvasZoom;
+            panX = 0; panY = 0;
+            if (_canvasFit <= 0 || double.IsNaN(_canvasFit) || double.IsInfinity(_canvasFit)) return false;
+            panX = _canvasPanX / _canvasFit;
+            panY = _canvasPanY / _canvasFit;
+            return true;
+        }
         public bool IsCanvasViewDefault => _canvasZoom == 1.0 && _canvasPanX == 0 && _canvasPanY == 0;
 
         /// <summary>Raised when the canvas size changes, so the composite can be re-laid out.</summary>
@@ -177,6 +195,7 @@ namespace VideoDirector.Views
             double fit = Math.Min(paneW / CanvasWidth, visibleH / CanvasHeight);
             if (fit <= 0 || double.IsNaN(fit) || double.IsInfinity(fit)) fit = 1;
 
+            _canvasFit = fit;
             double effective = fit * _canvasZoom;
 
             CanvasTransform.ScaleX = effective;
@@ -800,24 +819,16 @@ namespace VideoDirector.Views
                 return;
             }
 
-            // THE WHEEL ALWAYS ZOOMS THE VIEW IN EDIT. It used to be captured by a selected
-            // framing rectangle, so the same gesture did two different things depending on a
-            // selection you could easily forget you had made - and the one it did was the one you
-            // were less likely to want, since you generally select a keyframe in order to look at
-            // it more closely. Marks are resized by dragging their corners, which is visible and
-            // unambiguous; the wheel stays on the picture.
-
-            if (ActiveTransform == null) return;
-            double zoomFactor = delta > 0 ? 1.1 : (1.0 / 1.1);
-            double newScale = Math.Clamp(ActiveTransform.ScaleX * zoomFactor, 0.1, 10.0);
-            ActiveTransform.ScaleX = newScale;
-            ActiveTransform.ScaleY = newScale;
-
-            // Zooming OUT shrinks the allowance, so a framing that was legal at the old scale can
-            // be outside the box at the new one. Re-clamping here is what stops a zoom-out from
-            // revealing the black a pan is no longer able to reach.
-            ClampFraming();
-            ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
+            // THE WHEEL IS PASSIVE. It magnifies the view and changes NOTHING about the clip.
+            //
+            // It used to write ActiveTransform, which IS the clip's framing, so every click was a
+            // destructive edit: the picture reframed and the keyframe rectangles - drawn at Sc/St -
+            // pulled away from the clip border as you scrolled. Zooming the canvas magnifies the
+            // picture and all three rectangles together, so their alignment cannot change.
+            //
+            // The framing is written only by the Set buttons, which read this view, and by dragging
+            // a rectangle. Both are deliberate acts; turning a wheel is not.
+            ZoomCanvas(delta > 0 ? 1.1 : 1.0 / 1.1);
         }
 
         private void InputLayer_DoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)

@@ -128,7 +128,15 @@ namespace VideoDirector.Models
             // wrote a zoom/pan sized for one rectangle onto whatever the last clip left behind.
             // Parking at identity shows the clip un-framed for the frame or two until geometry
             // lands, which is a neutral picture rather than a mostly-black one.
-            if (!ApplyOverlayBox(slot, overlay, false))
+            // EDIT MODE IS STATE, NOT A LITERAL. Entering Edit sets this slot to the full-fit box
+            // via ApplyOverlayBox(0, overlay, true) - and then this line, which runs EVERY FRAME,
+            // put the placement box straight back. On a 30% overlay the picture was confined to a
+            // 30% window from the next frame onward, at any zoom: the telemetry showed "laid out
+            // grid 2752 x 1146, want 2752 x 1147" - the geometry was right and being overwritten.
+            // That is the clip window that appeared to cut the picture off.
+            bool editingThisClip = _mode == EditorMode.Edit && ReferenceEquals(overlay, _editClip);
+
+            if (!ApplyOverlayBox(slot, overlay, editingThisClip))
             {
                 if (mode == OverlayRender.Still)
                     KenBurnsMotion.Reset(_playerControl.OverlayVisuals[slot].StillTransform);
