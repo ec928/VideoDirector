@@ -244,6 +244,16 @@ The bug was that `ResolveOverlaps()` ran after a drag and after add/remove but *
 
 **Roll trimming** — dragging the shared boundary between two adjacent clips so one grows as the other shrinks — is a separate gesture that does not exist here, and is not owed until someone misses it.
 
+### E. Arrange Travel Stops Short Of Contact — **OWED, cause not found**
+
+`ClipGeometry.ContactCentre` is the single anchor rule for placement: the centre runs `-w/2 .. 1 + w/2`, so a clip may rest its edge exactly on the canvas boundary line and go no further. Thirteen tests pin that, including the units trap — the centre is a fraction of the CANVAS while `PlacementWidth` is a fraction of the clip's own FIT, and the two coincide only when the source aspect matches the canvas.
+
+**Observed behaviour disagrees**: a dragged clip stops around 75% out rather than at contact. The rule computes correctly in isolation, so something further down the drag path is tighter and bites first.
+
+Where to look: `OnOverlayBoxDragged` derives `left`/`right`/`top`/`bottom` in canvas pixels, applies a `minPx` floor, and only then converts to a centre for the clamp. A limit expressed on those edges — or an overlap resolver acting afterwards — would never appear in the placement arithmetic, which is why the tests pass while the app does not. Confirm with the telemetry HUD before changing anything: read `box` and the placement centre at the moment travel stops, and compare against `-w/2` for that clip.
+
+Directionally correct and accepted as good enough on 2026-08-25; explicitly not finished.
+
 ### D. Deep Data Schema Unification — **DONE** Track 1 (`TimelineNodes`) and tracks 2–4 (`OverlayTracks`) used to be distinct collection wrappers. They are now one `ObservableCollection<TimelineTrack>`, and `OverlayTrack.cs` became `TimelineTrack.cs`. No `TrackRole` discriminator was needed in the end: the roles were dropped rather than modelled, which is why tracks are interchangeable above.
 
 The old `TimelineNodes` and `OverlayTracks` names survive only in the project-file deserialiser, so that projects saved before the change still load.
