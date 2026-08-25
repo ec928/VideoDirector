@@ -299,6 +299,38 @@ namespace VideoDirector.Views
 
         // Setting this abandons any view drag in progress. Edit has no view controls, so a pan
         // that survived the mode change would keep swallowing pointer moves that Edit needs.
+        // The geometry the framing is allowed to move within, published by the engine each time it
+        // lays the edit box out. Held here because the pan and the wheel both happen in this class
+        // and both have to respect it - clamping in one place and not the other just moves the
+        // problem to the other gesture.
+        public double FramingContentW, FramingContentH, FramingBoxW, FramingBoxH;
+
+        /// <summary>
+        /// Hold the framing inside its box: the picture may not be pushed past the edge.
+        /// </summary>
+        /// <remarks>
+        /// The box is clipped (ApplyOverlayBox sets grid.Clip), so without this a drag could carry
+        /// the picture off the edge and leave black behind it - a hard, unmarked wall that nothing
+        /// on screen explained. Rather than draw the wall, do not let the picture reach it.
+        ///
+        /// ClipGeometry.Allowance is the same arithmetic the Ken Burns replay uses to decide how
+        /// far a mark may travel, so the interactive limit and the animated one cannot disagree.
+        /// A NEGATIVE allowance means the content is smaller than its box (zoomed below fit), where
+        /// black is unavoidable and centred is the only sensible place to be.
+        /// </remarks>
+        private void ClampFraming()
+        {
+            if (ActiveTransform == null) return;
+            if (FramingContentW <= 0 || FramingBoxW <= 0) return;
+
+            double scale = ActiveTransform.ScaleX;
+            var (ax, ay) = VideoDirector.Models.ClipGeometry.Allowance(
+                FramingContentW, FramingContentH, FramingBoxW, FramingBoxH, scale);
+
+            ActiveTransform.TranslateX = ax <= 0 ? 0 : Math.Clamp(ActiveTransform.TranslateX, -ax, ax);
+            ActiveTransform.TranslateY = ay <= 0 ? 0 : Math.Clamp(ActiveTransform.TranslateY, -ay, ay);
+        }
+
         private PlayerInputMode _inputMode = PlayerInputMode.Content;
         public PlayerInputMode InputMode
         {
@@ -568,6 +600,7 @@ namespace VideoDirector.Views
             if (ActiveTransform == null) return;
             ActiveTransform.TranslateX += deltaX;
             ActiveTransform.TranslateY += deltaY;
+            ClampFraming();          // the picture stops at the edge instead of disappearing past it
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -779,6 +812,11 @@ namespace VideoDirector.Views
             double newScale = Math.Clamp(ActiveTransform.ScaleX * zoomFactor, 0.1, 10.0);
             ActiveTransform.ScaleX = newScale;
             ActiveTransform.ScaleY = newScale;
+
+            // Zooming OUT shrinks the allowance, so a framing that was legal at the old scale can
+            // be outside the box at the new one. Re-clamping here is what stops a zoom-out from
+            // revealing the black a pan is no longer able to reach.
+            ClampFraming();
             ViewportTransformChanged?.Invoke(this, EventArgs.Empty);
         }
 

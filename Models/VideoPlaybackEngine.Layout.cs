@@ -115,6 +115,16 @@ namespace VideoDirector.Models
             // needed. Inside a Canvas nothing constrains the child, so no layout clip is issued and
             // the transform pans a surface that still holds the entire frame; grid.Clip above then
             // crops at RENDER time, which is a mask rather than a constraint.
+            // Publish what the framing may move within, so the interactive pan and wheel can hold
+            // the picture inside the box instead of letting it slide off the clipped edge.
+            if (editMode)
+            {
+                _playerControl.FramingContentW = contentW;
+                _playerControl.FramingContentH = contentH;
+                _playerControl.FramingBoxW = boxW;
+                _playerControl.FramingBoxH = boxH;
+            }
+
             double padX = (contentW - boxW) / 2;
             double padY = (contentH - boxH) / 2;
 
