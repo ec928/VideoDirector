@@ -415,8 +415,9 @@ namespace VideoDirector.Views
                 // itself sits beneath the borders, the canvas outline and the WYSIWYG overlay.
                 trackHost.Children.Insert(i, OverlayVisuals[i].Grid);
 
-                // One border per slot, in slot order, so BorderHost.Children[i] is always slot i.
+                // One border and one frame per slot, in slot order.
                 BorderHost.Children.Add(OverlayVisuals[i].Border);
+                FrameHost.Children.Add(OverlayVisuals[i].Frame);
                 StyleOverlayFrame(OverlayVisuals[i].Frame,
                                   i == 0 ? TrackPalette.Spine : TrackPalette.Overlay(i - 1),
                                   "T" + (i + 1));
@@ -489,9 +490,9 @@ namespace VideoDirector.Views
                 VerticalAlignment = VerticalAlignment.Top
             };
             grid.Children.Add(surfaces);
-            grid.Children.Add(frame);
-            // NOTE: `border` is deliberately NOT added here. It goes into BorderHost, above every
-            // track, because a shape underneath a video surface gets erased rather than blended.
+            // NOTE: neither `frame` nor `border` is added here. Both go into hosts above every track
+            // picture, because a shape underneath a video surface gets erased rather than blended,
+            // and because a child of the clip can never be above a HIGHER track.
 
             return new OverlayVisual
             {

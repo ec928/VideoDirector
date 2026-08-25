@@ -232,6 +232,15 @@ namespace VideoDirector.Models
                 }
             }
 
+            // THE FRAME, from the same call site and the same values as the border above, so the
+            // two cannot disagree about where a clip is or what covers it. ShowFrameRect sets
+            // geometry AND visibility together - splitting those across two code paths is how a
+            // frame ends up positioned correctly and collapsed, or visible and stale.
+            if (editMode || !ShowClipFrames || !anyVisible)
+                HideFrameRect(slot);
+            else
+                ShowFrameRect(slot, left, top, boxW, boxH, visibleBorder);
+
             return true;
         }
 
@@ -259,15 +268,80 @@ namespace VideoDirector.Models
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(el, top);
         }
 
-        // The single border overlay for a clip, whatever its style. A child of the clip's own
-        // grid, so its z-layer is the clip's: over this picture, under anything on a higher track.
-        // Built once with the rest of the clip's surfaces rather than created on demand.
+        // The single border overlay for a clip, whatever its style. It lives in BorderHost, ABOVE
+        // every track picture - not in the clip's grid, where its z-layer would be the clip's and a
+        // higher track would erase it. Built once with the rest of the clip's surfaces rather than
+        // created on demand.
         private Microsoft.UI.Xaml.Shapes.Rectangle GetBorderRect(int slot)
         {
             if (_playerControl == null) return null;
             var visuals = _playerControl.OverlayVisuals;
             if (visuals == null || slot < 0 || slot >= visuals.Length) return null;
             return visuals[slot]?.Border;
+        }
+
+        // The editing frame for a clip - dashed outline plus its T1..T6 badge. Lives in FrameHost,
+        // above the borders and every picture, for the same reason the border does.
+        private Microsoft.UI.Xaml.Controls.Grid GetFrameRect(int slot)
+        {
+            if (_playerControl == null) return null;
+            var visuals = _playerControl.OverlayVisuals;
+            if (visuals == null || slot < 0 || slot >= visuals.Length) return null;
+            return visuals[slot]?.Frame;
+        }
+
+        private void HideFrameRect(int slot)
+        {
+            var frame = GetFrameRect(slot);
+            if (frame != null && frame.Visibility != Microsoft.UI.Xaml.Visibility.Collapsed)
+                frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+        }
+
+        /// <summary>Place and show a clip's editing frame. Geometry and visibility set together.</summary>
+        /// <remarks>
+        /// DRIVEN EXACTLY LIKE THE BORDER, and from the same call site, because the frame has the
+        /// same problem: it sits above every picture, so it has no parent to inherit the box from and
+        /// stacking can no longer say "something covers this". Splitting those two jobs across two
+        /// code paths is how a frame ends up correctly positioned and invisible, or visible and stale.
+        ///
+        /// It takes the SAME visible region the border does, so a fully opaque clip on a higher track
+        /// hides the frame exactly as it hides the border. 100% opacity behaves like 100% opacity,
+        /// and the two pieces of chrome cannot disagree about what is covered.
+        ///
+        /// Writes are delta-guarded: this runs from the per-frame render path.
+        /// </remarks>
+        private void ShowFrameRect(int slot, double left, double top, double w, double h,
+                                   ClipGeometry.GeoRect visible)
+        {
+            var frame = GetFrameRect(slot);
+            if (frame == null) return;
+            if (w <= 0 || h <= 0) { HideFrameRect(slot); return; }
+
+            if (frame.Visibility != Microsoft.UI.Xaml.Visibility.Visible)
+                frame.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+
+            if (frame.Width != w) frame.Width = w;
+            if (frame.Height != h) frame.Height = h;
+            if (Microsoft.UI.Xaml.Controls.Canvas.GetLeft(frame) != left)
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(frame, left);
+            if (Microsoft.UI.Xaml.Controls.Canvas.GetTop(frame) != top)
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(frame, top);
+
+            // Trim to what a higher opaque clip leaves visible, in the frame's own coordinates.
+            bool trimmed = visible.W < w - 0.5 || visible.H < h - 0.5
+                           || visible.X > left + 0.5 || visible.Y > top + 0.5;
+            if (!trimmed)
+            {
+                if (frame.Clip != null) frame.Clip = null;
+            }
+            else
+            {
+                frame.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
+                {
+                    Rect = new Windows.Foundation.Rect(visible.X - left, visible.Y - top,
+                                                       Math.Max(0, visible.W), Math.Max(0, visible.H))
+                };
+            }
         }
 
         // The box a slot's active clip occupies in the pane. Same call the clip's own layout uses.
@@ -318,19 +392,43 @@ namespace VideoDirector.Models
                 if (ob.Right <= visible.X || ob.X >= visible.Right ||
                     ob.Bottom <= visible.Y || ob.Y >= visible.Bottom) continue;
 
-                // What is left is an L-shape in general, and UIElement.Clip only takes a rectangle,
-                // so keep the largest rectangular strip that survives. For the case this exists to
-                // handle - a full-frame clip above a PiP that overhangs one edge - the remainder IS
-                // that strip, exactly.
+                // ONLY A CLIP THAT SPANS AN AXIS CAN BE REDUCED TO A STRIP. What is left after an
+                // overlap is an L-shape in general, and UIElement.Clip takes only a rectangle, so a
+                // strip is kept - but a strip is the exact remainder ONLY when the covering clip
+                // runs the full width or the full height of what is left.
+                //
+                // Without this test a small opaque clip sitting in the MIDDLE of a larger one - which
+                // covers none of its border at all - still reduced that border to one edge strip and
+                // clipped the other three sides away. Erring toward showing the chrome is right: a
+                // border drawn where the picture is hidden is a cosmetic slip, a border missing where
+                // the picture is visible is a clip you cannot find.
+                // COVERED OUTRIGHT is its own case and has to be tested FIRST. It used to fall out
+                // of the strip arithmetic - all four remainders come out negative, so the best area
+                // is zero - but the spanning gate below runs before that and would skip the occluder
+                // entirely, leaving a frame drawn over a clip that is completely hidden.
+                //
+                // Tolerance is a pixel rather than half: these boxes are derived through a chain of
+                // scaling, and a full-frame clip over another full-frame clip should read as covering
+                // it even if the two disagree in the last decimal.
+                const double eps = 1.0;
+                if (ob.X <= visible.X + eps && ob.Y <= visible.Y + eps
+                    && ob.Right >= visible.Right - eps && ob.Bottom >= visible.Bottom - eps)
+                    return false;
+
+                bool spansWidth  = ob.X <= visible.X + eps && ob.Right >= visible.Right - eps;
+                bool spansHeight = ob.Y <= visible.Y + eps && ob.Bottom >= visible.Bottom - eps;
+                if (!spansWidth && !spansHeight) continue;
+
                 double leftW   = ob.X - visible.X;
                 double rightW  = visible.Right - ob.Right;
                 double topH    = ob.Y - visible.Y;
                 double bottomH = visible.Bottom - ob.Bottom;
 
-                double leftA   = Math.Max(0, leftW)   * visible.H;
-                double rightA  = Math.Max(0, rightW)  * visible.H;
-                double topA    = Math.Max(0, topH)    * visible.W;
-                double bottomA = Math.Max(0, bottomH) * visible.W;
+                // Only the strips along the axis it spans are exact; the others are not candidates.
+                double leftA   = spansHeight ? Math.Max(0, leftW)   * visible.H : 0;
+                double rightA  = spansHeight ? Math.Max(0, rightW)  * visible.H : 0;
+                double topA    = spansWidth  ? Math.Max(0, topH)    * visible.W : 0;
+                double bottomA = spansWidth  ? Math.Max(0, bottomH) * visible.W : 0;
 
                 double best = Math.Max(Math.Max(leftA, rightA), Math.Max(topA, bottomA));
                 if (best <= 0) return false; // this clip swallows what was left

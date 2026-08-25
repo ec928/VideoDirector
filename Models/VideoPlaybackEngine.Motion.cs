@@ -94,6 +94,8 @@ namespace VideoDirector.Models
             if (vis.Still != null) { Microsoft.UI.Xaml.Controls.Canvas.SetLeft(vis.Still, 0); Microsoft.UI.Xaml.Controls.Canvas.SetTop(vis.Still, 0); }
             grid.Clip = null;
             grid.Margin = new Microsoft.UI.Xaml.Thickness(0);
+            // The frame is outside this grid, so it no longer vanishes when the opacity drops.
+            HideFrameRect(slot);
 
             _activeOverlay[slot] = null;
             _overlayAspect[slot] = 0;

@@ -215,6 +215,11 @@ namespace VideoDirector.Models
 
         // Idempotent: safe to call every frame. This is the ONLY place the still/video choice is
         // made — the seven failed attempts all inferred it as a side effect somewhere else.
+        /// <summary>Frames belong to Arrange, and only while nothing is rolling.</summary>
+        /// <remarks>One definition, because ApplyOverlayBox needs the same rule to decide whether to
+        /// place a frame, and two copies of it would drift.</remarks>
+        private bool ShowClipFrames => !IsActivelyPlaying && _mode == EditorMode.Arrange;
+
         private void SetOverlayRender(int track, OverlayRender mode, CinematicOperation clip)
         {
             var v = _playerControl.OverlayVisuals[track];
@@ -245,12 +250,6 @@ namespace VideoDirector.Models
                     frameRect.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
             }
 
-            // Frames belong to Arrange, and only while nothing is rolling: they are a handle for
-            // composing, and clutter over a screening. Both render paths use the same rule - the
-            // video case used to collapse the frame unconditionally, so a video clip never got one
-            // at all and only stills were outlined.
-            bool showFrame = !IsActivelyPlaying && _mode == EditorMode.Arrange;
-
             switch (mode)
             {
                 case OverlayRender.Hidden:
@@ -261,7 +260,7 @@ namespace VideoDirector.Models
                     ClearStillMotion(track);
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     v.Still.Source = null;
-                    if (v.Frame != null) v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    HideFrameRect(track);
                     v.Grid.Opacity = 0;
                     break;
 
@@ -277,10 +276,6 @@ namespace VideoDirector.Models
                     // A frame marks every arrangeable PiP. No drawn handles: reshape grab-zones
                     // are geometric edge/corner bands on the InputLayer, so handles were decoration
                     // that also made chrome depend on a selection you cannot make while arranging.
-                    if (v.Frame != null)
-                        v.Frame.Visibility = showFrame
-                            ? Microsoft.UI.Xaml.Visibility.Visible
-                            : Microsoft.UI.Xaml.Visibility.Collapsed;
                     v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;
 
@@ -297,18 +292,13 @@ namespace VideoDirector.Models
                         v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                         v.Still.Source = null;
                     }
-                    if (v.Frame != null && v.Frame.Visibility != Microsoft.UI.Xaml.Visibility.Collapsed)
-                        v.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    HideFrameRect(track);
                     if (v.Grid.Opacity != 0) v.Grid.Opacity = 0;
                     break;
 
                 case OverlayRender.Video:
                     ClearStillMotion(track);
                     v.Still.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-                    if (v.Frame != null)
-                        v.Frame.Visibility = showFrame
-                            ? Microsoft.UI.Xaml.Visibility.Visible
-                            : Microsoft.UI.Xaml.Visibility.Collapsed;
                     AttachOverlayVideo(track);
                     v.Grid.Opacity = clip != null && clip.IsVideoHidden ? 0.0 : (clip?.Opacity ?? 1.0);
                     break;

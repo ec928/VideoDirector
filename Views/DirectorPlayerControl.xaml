@@ -137,6 +137,16 @@
                  a clip at 35% opacity on a higher track wiped a lower border out completely. -->
             <Canvas x:Name="BorderHost" x:FieldModifier="public" IsHitTestVisible="False" />
 
+            <!-- Clip FRAMES, above the borders and above every picture, for the same reasons the
+                 borders are (see the block in ApplyOverlayBox). A frame used to live inside its own
+                 clip grid, where its z-layer was the clip's - over its own picture, under anything
+                 on a higher track - so a large clip hid the chrome of everything beneath it, and the
+                 point of a frame is to let you find a clip.
+
+                 ZIndex only sorts SIBLINGS, which is why one shared host is needed at all: setting it
+                 on a frame inside its own clip could never lift it above a different clip. -->
+            <Canvas x:Name="FrameHost" x:FieldModifier="public" IsHitTestVisible="False" Canvas.ZIndex="20" />
+
             <!-- Where the frame ends.
 
                  A 1px near-transparent hairline was effectively invisible against video. This is a
