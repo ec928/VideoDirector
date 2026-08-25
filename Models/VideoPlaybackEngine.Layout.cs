@@ -48,6 +48,21 @@ namespace VideoDirector.Models
 
             // Edit mode: box fills the video fit (framing at full size). Arrange: independent
             // width/height so the PiP can be reshaped; the video crop-fills (UniformToFill).
+            // THE ANCHOR RULE REACHES A LOADED PROJECT TOO. Placement comes straight off the JSON
+            // into the properties, bypassing every writer that applies ContactCentre, so a project
+            // saved before the rule - or hand-edited - could open with a clip clean off the canvas
+            // and no way to reach it. Correcting it here is the one place that sees a clip after the
+            // canvas size is known.
+            //
+            // Self-limiting rather than a per-frame write: the comparison is false once the value is
+            // inside the rule, so this fires at most once per clip and never again.
+            double anchoredX = ClipGeometry.ContactCentre(
+                overlay.PlacementCenterX, fitW, overlay.PlacementWidth, vpW);
+            double anchoredY = ClipGeometry.ContactCentre(
+                overlay.PlacementCenterY, fitH, overlay.PlacementHeight, vpH);
+            if (Math.Abs(anchoredX - overlay.PlacementCenterX) > 1e-9) overlay.PlacementCenterX = anchoredX;
+            if (Math.Abs(anchoredY - overlay.PlacementCenterY) > 1e-9) overlay.PlacementCenterY = anchoredY;
+
             var box = ClipGeometry.Box(fitW, fitH, vpW, vpH,
                                        overlay.PlacementWidth, overlay.PlacementHeight,
                                        overlay.PlacementCenterX, overlay.PlacementCenterY, editMode);

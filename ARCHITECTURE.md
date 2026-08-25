@@ -246,15 +246,17 @@ The bug was that `ResolveOverlaps()` ran after a drag and after add/remove but *
 
 **Roll trimming** — dragging the shared boundary between two adjacent clips so one grows as the other shrinks — is a separate gesture that does not exist here, and is not owed until someone misses it.
 
-### E. Arrange Travel Stops Short Of Contact — **OWED, cause not found**
+### E. Arrange Travel Stopped At Half A Clip — **FIXED, and the cause was a fourth clamp**
 
-`ClipGeometry.ContactCentre` is the single anchor rule for placement: the centre runs `-w/2 .. 1 + w/2`, so a clip may rest its edge exactly on the canvas boundary line and go no further. Thirteen tests pin that, including the units trap — the centre is a fraction of the CANVAS while `PlacementWidth` is a fraction of the clip's own FIT, and the two coincide only when the source aspect matches the canvas.
+`ClipGeometry.ContactCentre` is the anchor rule: the centre runs `-w/2 .. 1 + w/2`, so a clip may rest its edge on the canvas boundary and go no further. It was applied at all three placement writers and the app still refused to let a clip past halfway.
 
-**Observed behaviour disagrees**: a dragged clip stops around 75% out rather than at contact. The rule computes correctly in isolation, so something further down the drag path is tighter and bites first.
+**The cause was in the MODEL, not the engine.** `PlacementCenterX` and `PlacementCenterY` clamped to `[0, 1]` in their own setters. The centre is a fraction of the canvas, so pinning it to `1.0` holds the centre on the canvas edge — exactly half the clip on, every side, however far you drag. `ContactCentre` computed the right value and the setter discarded it.
 
-Where to look: `OnOverlayBoxDragged` derives `left`/`right`/`top`/`bottom` in canvas pixels, applies a `minPx` floor, and only then converts to a centre for the clamp. A limit expressed on those edges — or an overlap resolver acting afterwards — would never appear in the placement arithmetic, which is why the tests pass while the app does not. Confirm with the telemetry HUD before changing anything: read `box` and the placement centre at the moment travel stops, and compare against `-w/2` for that clip.
+Two reported symptoms, one clamp: dragging to an edge stopped at 50%, and pushing a CORNER stopped at "about 75%" — because 50% off the right and 50% off the top leave only the bottom-left quadrant on canvas, which is 25% on and 75% off. Corner drags also disguised it further, since the width lands and the centre is snapped back, so the clip appears to slide rather than resize.
 
-Directionally correct and accepted as good enough on 2026-08-25; explicitly not finished.
+**The limit cannot live in the model.** Contact depends on how wide the clip is on the canvas, which needs the fit and the canvas size, and the model knows neither. The setters now guard only against non-finite values — storage and sanity, not policy — and `ContactCentre` owns the rule. `ApplyOverlayBox` also applies it once per clip, because placement is deserialised straight into those properties and so bypasses every writer; without that, an old or hand-edited project could open with a clip out of reach.
+
+The general lesson is the one that cost the most time this week: **two owners with different rules for one value, and the one that knows least wins because it runs last.** Before adding a guard, check whether something downstream already has an opinion.
 
 ### D. Deep Data Schema Unification — **DONE** Track 1 (`TimelineNodes`) and tracks 2–4 (`OverlayTracks`) used to be distinct collection wrappers. They are now one `ObservableCollection<TimelineTrack>`, and `OverlayTrack.cs` became `TimelineTrack.cs`. No `TrackRole` discriminator was needed in the end: the roles were dropped rather than modelled, which is why tracks are interchangeable above.
 

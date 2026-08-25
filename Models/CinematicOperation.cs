@@ -703,18 +703,34 @@ namespace VideoDirector.Models
         }
 
         // Box centre as a fraction of the viewport (0.5,0.5 = centre). Default lower-right.
+        //
+        // NO RANGE CLAMP HERE. It used to be Math.Clamp(value, 0, 1), which pinned the centre to the
+        // canvas edge and therefore held HALF of every clip on the canvas, on all four sides, however
+        // far you dragged. A corner drag hid it further: the width landed and the centre was snapped
+        // back, so the clip appeared to slide instead of resize.
+        //
+        // The limit cannot live here. Contact depends on how wide the clip is on the canvas, which
+        // needs the fit and the canvas size - neither of which the model knows. ClipGeometry.
+        // ContactCentre owns it and is applied at every writer, plus once in ApplyOverlayBox so a
+        // project loaded straight into these properties is brought inside the rule as well.
+        //
+        // What is guarded is sanity, not policy: a non-finite value would poison every layout
+        // calculation downstream and cannot be dragged back.
+        private static double Finite(double v, double fallback) =>
+            double.IsNaN(v) || double.IsInfinity(v) ? fallback : v;
+
         private double _placementCenterX = 0.72;
         public double PlacementCenterX
         {
             get => _placementCenterX;
-            set => SetProperty(ref _placementCenterX, Math.Clamp(value, 0.0, 1.0));
+            set => SetProperty(ref _placementCenterX, Finite(value, _placementCenterX));
         }
 
         private double _placementCenterY = 0.72;
         public double PlacementCenterY
         {
             get => _placementCenterY;
-            set => SetProperty(ref _placementCenterY, Math.Clamp(value, 0.0, 1.0));
+            set => SetProperty(ref _placementCenterY, Finite(value, _placementCenterY));
         }
 
         private SpatialMark _startMark = new();
