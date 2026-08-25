@@ -209,6 +209,19 @@ namespace VideoDirector.Views
 
             // Keyframe tabs carry the inverse, so their text is never drawn at a fractional scale.
             double inv = effective > 0 ? 1.0 / effective : 1.0;
+
+            // The canvas outline gets the same treatment, floored so it can never render thinner
+            // than a pixel. Below 100% a plain thickness of 1 is scaled DOWN - 0.68px at 68% zoom,
+            // 0.25px at 25% - and a sub-pixel line is anti-aliased into a partial-coverage wash,
+            // not a line. It faded out precisely when you zoom out to see everything, which is when
+            // the boundary matters most. Max() rather than a bare inverse so nothing changes at or
+            // above 100%, where the line is already at least a pixel.
+            if (CanvasEdgeStroke != null)
+            {
+                double stroke = Math.Max(1.0, inv);
+                if (Math.Abs(CanvasEdgeStroke.StrokeThickness - stroke) > 0.001)
+                    CanvasEdgeStroke.StrokeThickness = stroke;
+            }
             if (WysiwygStartTabScale != null) { WysiwygStartTabScale.ScaleX = inv; WysiwygStartTabScale.ScaleY = inv; }
             if (WysiwygMidTabScale != null)   { WysiwygMidTabScale.ScaleX = inv;   WysiwygMidTabScale.ScaleY = inv; }
             if (WysiwygEndTabScale != null)   { WysiwygEndTabScale.ScaleX = inv;   WysiwygEndTabScale.ScaleY = inv; }

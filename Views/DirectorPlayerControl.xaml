@@ -149,10 +149,15 @@
 
             <!-- Where the frame ends.
 
-                 A 1px near-transparent hairline was effectively invisible against video. This is a
-                 translucent cool white-blue at 2px, deliberately a colour no track uses so it never
-                 reads as a clip outline, plus a badge in the same idiom as the T1..T6 track badges
-                 so the two are obviously the same kind of label.
+                 A cool grey-blue, deliberately a colour no track uses so it never reads as a clip
+                 outline, plus a badge in the same idiom as the T1..T6 track badges so the two are
+                 obviously the same kind of label.
+
+                 THE STROKE NEVER RENDERS THINNER THAN A PIXEL. It sits inside CanvasHost, which is
+                 scaled by fit x canvasZoom, so a plain 1 would be drawn at 0.68px at 68% zoom and
+                 0.25px at 25% - anti-aliased into a faint wash rather than a line, fading out exactly
+                 when you zoom out to see the whole layout and most need the boundary. UpdateCanvasLayout
+                 divides by that scale to hold it at a pixel, the same inverse the keyframe tabs use.
 
                  The badge sits INSIDE the canvas, top centre. Track badges are all top-LEFT, so the
                  centre is never mistaken for one, and inside means it cannot be clipped away when
