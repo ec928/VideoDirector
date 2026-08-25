@@ -72,6 +72,8 @@ namespace VideoDirector.Views
                 ("Up to six equal tracks", "composited by Z-order — no privileged “spine”, and any clip on any track can be a picture-in-picture. Add and remove them as a project needs."),
                 ("A fixed canvas", "— the composition has its own frame rather than borrowing the window’s, so hiding a panel, resizing or presenting full screen changes only how big it looks."),
                 ("Free placement", "with independent size, position and opacity, plus solid, soft or film-strip borders."),
+                ("Clips may hang off the canvas", "as far as their edge meeting the boundary line, so a full bleed or an entry from off screen is authorable. They draw whole while you place them, and cannot be pushed somewhere unreachable."),
+                ("Chrome that stays findable", "— every clip carries a dashed outline in its track colour above every picture, so a clip hidden behind a larger one can still be found. A fully opaque clip on a higher track hides it, exactly as it hides the picture."),
                 ("Stills as first-class clips", "— images hold for a set duration and advance story time by wall clock, so mixed photo and video sequences stay in sync."),
                 ("Audio clips", "- drop in an mp3 or any other sound file and trim, place and level it like any clip. It draws nothing, so it never covers the tracks beneath, and the inspector offers only what applies to it: timing and volume."),
                 ("Fades", "in from black, out to black, or both, on any clip. A transition ADDS to the clip’s length rather than eating into it, and the timeline shades the part that is fade rather than picture."),
@@ -80,7 +82,9 @@ namespace VideoDirector.Views
             AddSection(body, "Motion", new[]
             {
                 ("Ken Burns pan and zoom", "on any clip, video or still, from Start, optional Mid, and End framing keyframes with easing curves."),
-                ("Frame it on the canvas", "— drag the keyframe rectangles directly, or select one and scroll to resize it about its centre."),
+                ("Frame it on the canvas", "— the wheel magnifies the clip inside a window that never changes size, and Set Start, Mid or End records the framing already on screen. Pressing Set cannot move the picture, because what it stores is what you were already looking at."),
+                ("Shape a keyframe by dragging it", "— a rectangle’s tab moves that framing, its corners resize it. Selecting one never steals the wheel."),
+                ("The picture is never cut off", "while you frame it. It may sit past the edge of its frame - that is how a push-in from off-frame is authored - and stops only when its edge reaches the boundary, so it can never be lost off screen."),
                 ("Source-resolution stills", "so a slow push-in resamples real pixels instead of a flattened screen-sized copy."),
             });
 

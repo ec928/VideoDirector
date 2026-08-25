@@ -166,6 +166,26 @@ This chronological ledger records all established solutions and performance opti
   The lesson is the one this project keeps relearning, one level up from "a green build proves nothing": **a passing test against a fixture you wrote yourself proves nothing either.** Export verification must run the projects in `Tests/`, which is what anyone actually loads.
 * **The Warning Is Computed, Not Boilerplate.** `WhatIsNotBaked()` walks the actual clips and names only what THIS project loses, shown before the file picker. A project with no motion and no fades gets no warning at all. It also names the alternative that loses nothing: cinematic playback is the finished piece, so recording it captures what a render cannot.
 
+### 🧭 One Boundary Rule, In Both Modes (`0.9.0`)
+
+Edit and Arrange now obey the same law, stated once in each place: **a thing may travel until its edge meets the boundary, and no further.** The picture may leave its frame, a clip may leave the canvas, and neither can be lost.
+
+That replaced four different limits. Edit clamped the framing to COVERAGE — `(content x scale - box) / 2`, which is exactly 0 at scale 1, so the picture could not be moved at all and a push-in from off-frame was unauthorable. Arrange had three: the grid snap clamped the centre to the canvas, a size preset kept the whole clip inside it, and a drag clamped nothing. Underneath all of that, `PlacementCenterX/Y` clamped to `[0, 1]` in the MODEL, which held half of every clip on canvas no matter what the engine computed.
+
+Contact — `(content x scale + box) / 2`, or `-w/2 .. 1 + w/2` for placement — permits everything an author needs and forbids only losing something. Verified against the running app rather than asserted: in Edit, at zoom 2.81 the limit is 5243 and the pan stopped at exactly -5243; in Arrange, all four clips landed on their computed corner limits to four decimals.
+
+The two supporting changes were dropping the clips that made the boundary necessary in the first place. `grid.Clip` no longer crops in Edit, so the picture is whole while you frame it, and `CanvasHost` no longer layout-clips its children, so a clip past the canvas draws whole. Both were sizing parents cutting content before a transform could use it — the same trap invariant §5.5 already recorded one level down.
+
+The recurring cause across all of it: **two owners with different rules for one value, and the one that knows least wins because it runs last.**
+
+### 🖼️ Chrome That Can Be Found (`0.9.0`)
+
+Clip frames moved into a host above every picture, at `Canvas.ZIndex` 20. A frame used to live inside its own clip's grid, so its z-layer was the clip's and any higher track drew over it — and `Canvas.ZIndex` only sorts SIBLINGS, so no z-order tweak inside the clip could ever have fixed it. They are driven from the same call site as the borders, with the same box values and the same visible region, so geometry and visibility are set together by one owner.
+
+Two occlusion faults surfaced there and were fixed for borders as well: a small opaque clip in the MIDDLE of a larger one covered none of its border yet trimmed it to one edge strip, and a clip covered outright kept its chrome because the containment case fell out of arithmetic that a later gate skipped.
+
+The canvas is now a black surface against a lighter pasteboard, and its outline never renders thinner than a pixel — it lives inside the scaled canvas, so a plain 1px stroke was drawn at 0.25px when zoomed out to 25%, fading precisely when the boundary mattered most.
+
 ### 🪟 Edit Mode Framing — Five Regressions And What Measured Them
 
 A long session of changes to the Edit-mode wheel, `CaptureMark` and the layout produced five distinct regressions. Each is recorded with the evidence that identified it, because in every case reasoning from screenshots produced a confident wrong answer and one number settled it.
