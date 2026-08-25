@@ -7,6 +7,7 @@
     xmlns:local="using:VideoDirector.Views"
     xmlns:models="using:VideoDirector.Models"
     RequestedTheme="Dark"
+    KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
 
     <UserControl.Resources>
@@ -24,6 +25,10 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
+    <!-- KeyboardAcceleratorPlacementMode="Hidden" on the root, above: WinUI renders a floating key
+         badge for accelerators of its own accord, which is the "Esc" that kept appearing over the
+         canvas. These accelerators are app-wide rather than attached to a visible control, so the
+         badge has nothing to point at and simply lands mid-canvas. -->
     <UserControl.KeyboardAccelerators>
         <!-- Escape leaves Edit mode; Space toggles play/pause; Delete removes the selected clip.
              Space/Delete are ignored while a text field has focus (see the handlers). -->
