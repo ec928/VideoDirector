@@ -382,13 +382,29 @@ namespace VideoDirector.Views
 
             RootLayer.SizeChanged += (s, e) => UpdateCanvasLayout();
 
+            // TRACKS LIVE IN A CANVAS, not directly in CanvasHost.
+            //
+            // CanvasHost is a Grid with an explicit Width and Height, and a SIZING PARENT
+            // layout-clips an overflowing child - the same trap invariant 5.5 records one level
+            // down, where it destroyed the pan surplus inside a clip. Out here it cut every clip
+            // that extended past the canvas, which is what made Arrange look inconsistent: the
+            // crop followed the canvas on two sides and the window edge on the others, so the
+            // rule appeared to change when the window was resized.
+            //
+            // A Canvas constrains nothing and issues no layout clip, so a clip positioned past the
+            // edge draws whole and the canvas outline says what is in scope. Margin still
+            // positions each grid, because a Canvas child is offset from the Canvas origin, and no
+            // Background means it cannot intercept pointer input.
+            var trackHost = new Canvas();
+            CanvasHost.Children.Insert(0, trackHost);
+
             OverlayVisuals = new OverlayVisual[ViewModels.DirectorViewModel.MaxTracks];
             for (int i = 0; i < OverlayVisuals.Length; i++)
             {
                 OverlayVisuals[i] = BuildOverlayVisual();
-                // Insert at i so the tracks land beneath everything declared inside CanvasHost
-                // and stack among themselves in track order.
-                CanvasHost.Children.Insert(i, OverlayVisuals[i].Grid);
+                // Insert at i so the tracks stack among themselves in track order; trackHost
+                // itself sits beneath the borders, the canvas outline and the WYSIWYG overlay.
+                trackHost.Children.Insert(i, OverlayVisuals[i].Grid);
 
                 // One border per slot, in slot order, so BorderHost.Children[i] is always slot i.
                 BorderHost.Children.Add(OverlayVisuals[i].Border);

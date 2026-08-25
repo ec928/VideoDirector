@@ -123,8 +123,9 @@ namespace VideoDirector.Models
 
             clip.PlacementWidth = Math.Clamp(boxW / fitW, 0.05, 1.0);
             clip.PlacementHeight = Math.Clamp(boxH / fitH, 0.05, 1.0);
-            clip.PlacementCenterX = Math.Clamp(cell.cx, 0, 1);
-            clip.PlacementCenterY = Math.Clamp(cell.cy, 0, 1);
+            // One anchor rule for every placement writer (ClipGeometry.ContactCentre).
+            clip.PlacementCenterX = ClipGeometry.ContactCentre(cell.cx, fitW, clip.PlacementWidth, vpW);
+            clip.PlacementCenterY = ClipGeometry.ContactCentre(cell.cy, fitH, clip.PlacementHeight, vpH);
         }
 
         // The source's real pixel dimensions: the decoder for a video, the baked bitmap for a
@@ -220,9 +221,14 @@ namespace VideoDirector.Models
             }
             else
             {
-                // Keep it on screen: the centre can sit no closer to an edge than half the box.
-                overlay.PlacementCenterX = Math.Clamp(overlay.PlacementCenterX, f / 2, 1 - f / 2);
-                overlay.PlacementCenterY = Math.Clamp(overlay.PlacementCenterY, f / 2, 1 - f / 2);
+                // Contact, not containment. Keeping the whole clip inside the canvas forbade a
+                // deliberate bleed off the edge; contact only forbids losing it entirely.
+                if (TryGetMarkSpace(overlay, out double pfW, out double pfH) && pfW > 0 && pfH > 0)
+                {
+                    double pcW = _playerControl.CanvasWidth, pcH = _playerControl.CanvasHeight;
+                    overlay.PlacementCenterX = ClipGeometry.ContactCentre(overlay.PlacementCenterX, pfW, f, pcW);
+                    overlay.PlacementCenterY = ClipGeometry.ContactCentre(overlay.PlacementCenterY, pfH, f, pcH);
+                }
             }
 
             _dispatcher.TryEnqueue(() => ApplyOverlayBox(e.slot, overlay, false));
@@ -367,8 +373,13 @@ namespace VideoDirector.Models
 
             overlay.PlacementWidth = (right - left) / fitW;
             overlay.PlacementHeight = (bottom - top) / fitH;
-            overlay.PlacementCenterX = ((left + right) / 2) / vpW;
-            overlay.PlacementCenterY = ((top + bottom) / 2) / vpH;
+            // This writer had NO limit, which is how a clip could be dragged clean off the canvas
+            // and lost. A resize needs it as much as a move: shrink a clip that is sitting far out
+            // and it pulls clear without ever being dragged.
+            overlay.PlacementCenterX = ClipGeometry.ContactCentre(
+                ((left + right) / 2) / vpW, fitW, overlay.PlacementWidth, vpW);
+            overlay.PlacementCenterY = ClipGeometry.ContactCentre(
+                ((top + bottom) / 2) / vpH, fitH, overlay.PlacementHeight, vpH);
             ApplyOverlayBox(e.slot, overlay, false);
         }
 

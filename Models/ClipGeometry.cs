@@ -75,6 +75,31 @@ namespace VideoDirector.Models
                                                      double boxW, double boxH, double scale)
             => ((contentW * scale - boxW) / 2, (contentH * scale - boxH) / 2);
 
+        /// <summary>Hold a clip in contact with the canvas: it may travel until its edge meets the
+        /// canvas edge, and no further.</summary>
+        /// <remarks>
+        /// THE ANCHOR RULE. A clip may bleed off any edge, or sit entirely outside with its edge
+        /// resting on the boundary line - zero overlap is fine. What it may never do is stand clear
+        /// of the canvas altogether, because then nothing on screen says where it went.
+        ///
+        /// Two rectangles touch while their centres are at most half the sum of their sizes apart,
+        /// so with the clip w wide as a fraction of the canvas, the centre runs -w/2 .. 1 + w/2.
+        ///
+        /// UNITS ARE THE TRAP HERE. The centre is a fraction of the CANVAS; PlacementWidth is a
+        /// fraction of the clip's own FIT. They are only the same number when the source aspect
+        /// matches the canvas, so the conversion has to be explicit.
+        ///
+        /// This replaced three different rules at three writers: the grid snap clamped the centre
+        /// to the canvas, a size preset kept the whole clip inside it, and a drag clamped nothing
+        /// at all - so a clip could be dragged clean off and lost.
+        /// </remarks>
+        public static double ContactCentre(double centre, double fitSize, double placeFraction, double canvasSize)
+        {
+            if (canvasSize <= 0 || fitSize <= 0) return centre;
+            double w = fitSize * placeFraction / canvasSize;
+            return Math.Clamp(centre, -w / 2, 1 + w / 2);
+        }
+
         // Marks are captured against the fit but replayed against the content, which is the fit
         // scaled by this. It has to be ONE uniform number because the zoom is uniform, and it is
         // max(w, h) because that is the axis on which Content() lands flush with the box.

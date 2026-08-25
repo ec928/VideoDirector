@@ -130,8 +130,13 @@
                  The badge sits INSIDE the canvas, top centre. Track badges are all top-LEFT, so the
                  centre is never mistaken for one, and inside means it cannot be clipped away when
                  the canvas reaches the edge of the pane - which is what happened when it hung in
-                 the void above the canvas. -->
-            <Grid x:Name="CanvasEdge" x:FieldModifier="public" IsHitTestVisible="False">
+                 the void above the canvas.
+
+                 Canvas.ZIndex puts it in front of everything: clips may now be positioned past the
+                 canvas, and the outline is the only thing saying which of them will render, so it
+                 must never end up behind one. Declaration order already achieved this, but that is
+                 an accident of ordering rather than a stated guarantee. -->
+            <Grid x:Name="CanvasEdge" x:FieldModifier="public" IsHitTestVisible="False" Canvas.ZIndex="10">
                 <Rectangle x:Name="CanvasEdgeStroke" Fill="Transparent" Stroke="#7C838D" StrokeThickness="1" />
                 <Border x:Name="CanvasBadge" Background="#E6353A42" CornerRadius="3" Padding="8,2" MinWidth="96"
                         HorizontalAlignment="Center" VerticalAlignment="Top" Margin="4">
