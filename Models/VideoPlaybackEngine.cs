@@ -68,7 +68,6 @@ namespace VideoDirector.Models
             _playerControl.OverlayBoxDragged += OnOverlayBoxDragged;
             _playerControl.WysiwygBoxManipulated += OnWysiwygBoxManipulated;
             _playerControl.WysiwygBoxGrabbed += OnWysiwygBoxGrabbed;
-            _playerControl.SelectedMarkWheel += OnSelectedMarkWheel;
             _playerControl.CanvasCleared += (s, e) => SetSelectedMark(null);
             _playerControl.OverlayBoxWheel += OnOverlayBoxWheel;
             _playerControl.OverlayBoxPointerPressed += OnOverlayBoxPointerPressed;

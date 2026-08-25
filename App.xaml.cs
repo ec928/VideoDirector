@@ -33,7 +33,7 @@ namespace VideoDirector
             // on a project someone actually saved.
             var argv = Environment.GetCommandLineArgs();
             string? project = null, record = null;
-            bool cinematic = false;
+            bool cinematic = false, paused = false;
             for (int i = 1; i < argv.Length; i++)
             {
                 if (string.Equals(argv[i], "--play", StringComparison.OrdinalIgnoreCase) && i + 1 < argv.Length)
@@ -42,14 +42,16 @@ namespace VideoDirector
                     record = argv[++i];
                 else if (string.Equals(argv[i], "--cinematic", StringComparison.OrdinalIgnoreCase))
                     cinematic = true;
+                else if (string.Equals(argv[i], "--paused", StringComparison.OrdinalIgnoreCase))
+                    paused = true;
             }
 
-            if (project != null) StartProject(project, cinematic, record);
+            if (project != null) StartProject(project, cinematic, record, paused);
         }
 
         // Deferred to the dispatcher: the control has to be loaded and sized before a project can
         // establish its canvas, and OnLaunched runs before that.
-        private void StartProject(string project, bool cinematic, string? record = null)
+        private void StartProject(string project, bool cinematic, string? record = null, bool paused = false)
         {
             var queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
             var timer = queue.CreateTimer();
@@ -62,7 +64,7 @@ namespace VideoDirector
 
                 // When recording, do not start playback here - RunRecordingAsync starts it itself,
                 // from the top, once the window is full screen and the chrome is locked away.
-                await director.OpenAndPlayAsync(project, play: record == null, cinematic: cinematic);
+                await director.OpenAndPlayAsync(project, play: record == null && !paused, cinematic: cinematic);
 
                 if (record != null)
                 {

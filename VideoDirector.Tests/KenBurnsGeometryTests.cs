@@ -213,8 +213,9 @@ namespace VideoDirector.Tests
         // A mark's offset is stored relative to its own zoom - the sampled centre comes out of
         // tx/scale - so changing scale alone slides the framing, by an amount proportional to how
         // far off-centre it already sat. Left-of-frame crept left, right-of-frame crept right.
-        // OnSelectedMarkWheel scales X and Y by the same ratio as the scale to hold tx/scale
-        // constant; this is that invariant.
+        // Whatever changes a mark's scale must move X and Y by the same ratio to hold tx/scale
+        // constant; this is that invariant. The corner-drag resize in OnWysiwygBoxManipulated
+        // is what relies on it now - the wheel no longer resizes marks at all.
         [Fact]
         public void Scaling_a_mark_with_its_offset_keeps_the_sampled_centre_fixed()
         {

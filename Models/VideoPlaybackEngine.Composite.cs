@@ -234,7 +234,9 @@ namespace VideoDirector.Models
                 // how the keyframe rectangles distinguish the one being worked on.
                 frameRect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(
                     isSelected ? colour : Views.TrackPalette.At(colour, 0xB0));
-                frameRect.StrokeThickness = isSelected ? 3 : 2;
+                // The frame IS the resize surface in Arrange, so it is drawn heavy enough to aim
+                // at. A hairline told you where the edge was without suggesting you could grab it.
+                frameRect.StrokeThickness = isSelected ? 4 : 3;
 
                 bool dashed = frameRect.StrokeDashArray != null && frameRect.StrokeDashArray.Count > 0;
                 if (isSelected && dashed)

@@ -463,47 +463,6 @@ namespace VideoDirector.Models
             try { sb.Begin(); } catch { }
         }
 
-        // Wheel over a selected rectangle resizes THAT keyframe, about its own centre. Smaller
-        // rectangle = tighter framing = higher mark scale, which is why the factor is inverted.
-        //
-        // X AND Y MUST TRACK THE SCALE. A mark's offset is stored relative to its own zoom: the
-        // rectangle is drawn at (-boxW/2 - mark.X*W) * (Sc/St), so its centre lands at
-        // -mark.X*W*(Sc/St). Change St on its own and that centre moves — by an amount proportional
-        // to how far off-centre the rectangle already was, so one sitting left of frame crept
-        // further left as it grew and right-of-frame crept right. Holding mark.X/St constant (i.e.
-        // scaling X and Y by the same ratio as the scale) pins the centre and resizes about it,
-        // which is what a zoom is expected to do. Moving the rectangle stays a separate gesture:
-        // drag its title tab.
-        private void OnSelectedMarkWheel(object? sender, int delta)
-        {
-            if (_mode != EditorMode.Edit) return;
-            var target = _viewModel.SelectedMark;
-            if (!target.HasValue) return;
-            if (_viewModel.SelectedClip is not CinematicOperation op) return;
-
-            var mark = target.Value switch
-            {
-                EditTarget.Start => op.StartMark,
-                EditTarget.Mid => op.MidMark,
-                _ => op.EndMark
-            };
-            if (mark == null) return;
-
-            float current = mark.Scale;
-            if (current <= 0) current = 1f;
-
-            double factor = delta > 0 ? 1.08 : 1.0 / 1.08;
-            float next = (float)Math.Clamp(current * factor, 0.1, 10.0);
-            if (Math.Abs(next - current) < 0.0001f) return;
-
-            float ratio = next / current;
-            mark.Scale = next;
-            mark.X *= ratio;
-            mark.Y *= ratio;
-
-            UpdateWysiwygOverlay();
-        }
-
         private void OnWysiwygBoxManipulated(object? sender, (string markType, string action, double dx, double dy) e)
         {
             if (_mode != EditorMode.Edit || _viewModel.SelectedClip == null) return;

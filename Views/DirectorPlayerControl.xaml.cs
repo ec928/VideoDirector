@@ -71,7 +71,13 @@ namespace VideoDirector.Views
         public OverlayVisual[] OverlayVisuals { get; private set; }
 
         // How close (px) to an edge counts as grabbing that edge for a resize.
-        private const double HandleThreshold = 20.0;
+        // How far INSIDE a box counts as grabbing its edge rather than its middle.
+        private const double HandleThreshold = 24.0;
+
+        // ...and how far OUTSIDE. Without this the band was inside-only, so aiming at a 2px dashed
+        // line meant roughly half of every attempt landed outside the box and hit nothing at all.
+        // The visible line now sits in the middle of the grab zone rather than at its edge.
+        private const double GrabOutset = 10.0;
 
         public event EventHandler ViewportTransformChanged;
         public Microsoft.UI.Xaml.Media.CompositeTransform ActiveTransform { get; set; }
@@ -80,10 +86,6 @@ namespace VideoDirector.Views
         public event EventHandler<(int slot, BoxGrab grab, double dx, double dy)> OverlayBoxDragged;
         public event EventHandler<(string markType, string action, double dx, double dy)> WysiwygBoxManipulated;
         public event EventHandler<string> WysiwygBoxGrabbed;
-
-        // Raised when the wheel turns while a framing rectangle is selected. The engine owns the
-        // resize maths, so the control only reports the gesture.
-        public event EventHandler<int>? SelectedMarkWheel;
 
         // Set by the engine. The control needs it only to decide where the wheel goes.
         public bool IsMarkSelected { get; set; }
@@ -370,7 +372,9 @@ namespace VideoDirector.Views
             frame.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle
             {
                 Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                StrokeThickness = 2,
+                // 3, not 2: this line is the resize surface, and it should look like something
+                // you can take hold of rather than a hairline you have to aim at.
+                StrokeThickness = 3,
                 StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 },
                 IsHitTestVisible = false
             });
@@ -442,16 +446,19 @@ namespace VideoDirector.Views
         // plain bounds test is valid.
         private int HitTestOverlaySlot(Point p)
         {
+            // Topmost first, and each box is tested with its grab outset so the edge is catchable
+            // from either side of the drawn line.
             for (int i = OverlayVisuals.Length - 1; i >= 0; i--)
-                if (IsInsideBox(OverlayVisuals[i].Grid, p)) return i;
+                if (IsInsideBox(OverlayVisuals[i].Grid, p, GrabOutset)) return i;
             return -1;
         }
 
-        private static bool IsInsideBox(Grid g, Point p)
+        private static bool IsInsideBox(Grid g, Point p, double outset = 0)
         {
             if (g == null || g.Opacity <= 0.01 || double.IsNaN(g.Width) || g.Width <= 0 || g.Height <= 0) return false;
-            double left = g.Margin.Left, top = g.Margin.Top;
-            return p.X >= left && p.X <= left + g.Width && p.Y >= top && p.Y <= top + g.Height;
+            double left = g.Margin.Left - outset, top = g.Margin.Top - outset;
+            double right = g.Margin.Left + g.Width + outset, bottom = g.Margin.Top + g.Height + outset;
+            return p.X >= left && p.X <= right && p.Y >= top && p.Y <= bottom;
         }
 
         // Classify where in the box the cursor is: near an edge/corner (resize) or interior (move).
@@ -462,6 +469,9 @@ namespace VideoDirector.Views
             double relY = p.Y - g.Margin.Top;
             // Keep the threshold below half the box so a tiny box still has a movable interior.
             double t = Math.Min(HandleThreshold, Math.Min(g.Width, g.Height) / 3.0);
+
+            // relX/relY can be NEGATIVE now: the hit test admits points just outside the edge, and
+            // those are unambiguously a grab on that edge rather than a move.
             bool nearLeft = relX <= t, nearRight = relX >= g.Width - t;
             bool nearTop = relY <= t, nearBottom = relY >= g.Height - t;
 
@@ -757,14 +767,12 @@ namespace VideoDirector.Views
                 return;
             }
 
-            // A selected framing rectangle takes the wheel: resizing it IS the zoom for that
-            // keyframe, and resizing the live view underneath at the same time would fight it.
-            // Deselect (click empty canvas) and the wheel returns to zooming the view.
-            if (IsMarkSelected)
-            {
-                SelectedMarkWheel?.Invoke(this, delta);
-                return;
-            }
+            // THE WHEEL ALWAYS ZOOMS THE VIEW IN EDIT. It used to be captured by a selected
+            // framing rectangle, so the same gesture did two different things depending on a
+            // selection you could easily forget you had made - and the one it did was the one you
+            // were less likely to want, since you generally select a keyframe in order to look at
+            // it more closely. Marks are resized by dragging their corners, which is visible and
+            // unambiguous; the wheel stays on the picture.
 
             if (ActiveTransform == null) return;
             double zoomFactor = delta > 0 ? 1.1 : (1.0 / 1.1);
