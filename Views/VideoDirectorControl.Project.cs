@@ -113,7 +113,7 @@ namespace VideoDirector.Views
                 _ = ViewModel.RefreshAudioCapabilityAsync();
 
                 if (cinematic) ViewModel.IsCinematicMode = true;
-                if (play) await (_playbackEngine?.StartPlaybackAsync(0) ?? Task.CompletedTask);
+                if (play) await (_playbackEngine?.StartPlaybackAsync() ?? Task.CompletedTask);
                 return true;
             }
             catch (Exception ex)
@@ -146,7 +146,7 @@ namespace VideoDirector.Views
                 _playbackEngine?.NormalizeAllMarks(ViewModel.Tracks);
                 if (ViewModel.IsAutoPlayEnabled && ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
                 {
-                    _ = _playbackEngine?.StartPlaybackAsync(0);
+                    _ = _playbackEngine?.StartPlaybackAsync();
                 }
             }
         }

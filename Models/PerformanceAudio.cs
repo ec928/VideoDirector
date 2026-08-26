@@ -34,6 +34,7 @@ namespace VideoDirector.Models
             public bool Success { get; init; }
             public string Message { get; init; } = string.Empty;
             public int TracksMixed { get; init; }
+            public int SkippedSpeedChanged { get; init; }
         }
 
         /// <summary>
@@ -46,6 +47,7 @@ namespace VideoDirector.Models
         {
             var scratch = new List<StorageFile>();
             int mixed = 0;
+            int skippedSpeed = 0;
 
             try
             {
@@ -66,6 +68,11 @@ namespace VideoDirector.Models
                         if (op == null || string.IsNullOrWhiteSpace(op.FilePath)) continue;
                         if (op.Volume <= 0) continue;               // muted contributes nothing
                         if (op.HasNoSourceWindow) continue;          // a still has no sound to take
+                        if (!ClipRules.CanMixExportAudio(op.PlaybackSpeed))
+                        {
+                            skippedSpeed++;
+                            continue;
+                        }
 
                         // A sound-only source goes straight in. BackgroundAudioTrack takes it as it
                         // stands, and the extraction path cannot: MediaClip refuses an audio-only
@@ -112,21 +119,22 @@ namespace VideoDirector.Models
                 }
 
                 if (mixed == 0)
-                    return new Result { Message = "no audible clips", TracksMixed = 0 };
+                    return new Result { Message = "no audible clips", TracksMixed = 0, SkippedSpeedChanged = skippedSpeed };
 
-                double h = Math.Max(2, Math.Round(canvasHeight / 2) * 2);
-                var profile = MediaEncodingProfile.CreateMp4(
-                    h >= 2000 ? VideoEncodingQuality.Uhd2160p :
-                    h >= 1000 ? VideoEncodingQuality.HD1080p : VideoEncodingQuality.HD720p);
+                // Same sized profile as the silent take. CreateMp4(HD1080p) here would squash a
+                // 2.39:1 recording into 1920×1080 on the mux pass even if capture got the canvas.
+                int w = ScreenRecorder.Align16((int)Math.Round(canvasWidth));
+                int h = ScreenRecorder.Align16((int)Math.Round(canvasHeight));
+                var profile = ScreenRecorder.CreateSizedMp4(w, h, 30);
 
                 var reason = await composition.RenderToFileAsync(output, MediaTrimmingPreference.Fast, profile);
                 return reason == TranscodeFailureReason.None
-                    ? new Result { Success = true, Message = output.Path, TracksMixed = mixed }
-                    : new Result { Message = reason.ToString(), TracksMixed = mixed };
+                    ? new Result { Success = true, Message = output.Path, TracksMixed = mixed, SkippedSpeedChanged = skippedSpeed }
+                    : new Result { Message = reason.ToString(), TracksMixed = mixed, SkippedSpeedChanged = skippedSpeed };
             }
             catch (Exception ex)
             {
-                return new Result { Message = ex.Message, TracksMixed = mixed };
+                return new Result { Message = ex.Message, TracksMixed = mixed, SkippedSpeedChanged = skippedSpeed };
             }
             finally
             {

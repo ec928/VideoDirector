@@ -18,6 +18,14 @@ namespace VideoDirector
         {
             System.Diagnostics.Debug.WriteLine($"[CRITICAL] Unhandled Exception: {e.Exception}");
             e.Handled = true;
+            try
+            {
+                var director = MainWindow.Instance?.Director;
+                if (director == null) return;
+                string msg = e.Exception?.Message ?? "An unexpected error occurred.";
+                director.DispatcherQueue.TryEnqueue(() => director.ReportUnexpectedError(msg));
+            }
+            catch { }
         }
 
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)

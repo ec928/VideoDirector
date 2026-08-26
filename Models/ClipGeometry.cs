@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace VideoDirector.Models
 {
@@ -184,6 +185,45 @@ namespace VideoDirector.Models
             double halfH = boxH / (2 * scale);
 
             return new GeoRect((cx - halfW) * f, (cy - halfH) * f, boxW / scale * f, boxH / scale * f);
+        }
+
+        public static bool Intersects(GeoRect a, GeoRect b)
+            => a.Right > b.X && b.Right > a.X && a.Bottom > b.Y && b.Bottom > a.Y;
+
+        /// <summary>
+        /// Subtract an occluder from a thin strip (a border edge). Horizontal if W >= H.
+        /// Yields 0, 1 or 2 remaining pieces — never an L.
+        /// </summary>
+        public static void SubtractStrip(GeoRect strip, GeoRect occluder, List<GeoRect> into)
+        {
+            if (into == null || strip.W <= 0 || strip.H <= 0) return;
+            if (!Intersects(strip, occluder)) { into.Add(strip); return; }
+
+            double x = Math.Max(strip.X, occluder.X);
+            double y = Math.Max(strip.Y, occluder.Y);
+            double r = Math.Min(strip.Right, occluder.Right);
+            double b = Math.Min(strip.Bottom, occluder.Bottom);
+            if (r <= x || b <= y) { into.Add(strip); return; }
+
+            const double eps = 0.5;
+            if (x <= strip.X + eps && r >= strip.Right - eps
+                && y <= strip.Y + eps && b >= strip.Bottom - eps)
+                return;
+
+            if (strip.W >= strip.H)
+            {
+                double leftW = x - strip.X;
+                if (leftW > eps) into.Add(new GeoRect(strip.X, strip.Y, leftW, strip.H));
+                double rightW = strip.Right - r;
+                if (rightW > eps) into.Add(new GeoRect(r, strip.Y, rightW, strip.H));
+            }
+            else
+            {
+                double topH = y - strip.Y;
+                if (topH > eps) into.Add(new GeoRect(strip.X, strip.Y, strip.W, topH));
+                double botH = strip.Bottom - b;
+                if (botH > eps) into.Add(new GeoRect(strip.X, b, strip.W, botH));
+            }
         }
     }
 }

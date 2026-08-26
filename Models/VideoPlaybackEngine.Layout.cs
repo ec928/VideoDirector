@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -209,7 +210,7 @@ namespace VideoDirector.Models
 
             bool anyVisible = TryGetVisibleBorderRegion(slot, box, out var visibleBorder);
 
-            if (overlay.BorderType == BorderType.None || editMode || !anyVisible)
+            if (overlay.BorderType == BorderType.None || editMode)
             {
                 grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
                 HideBorderRect(slot);
@@ -220,31 +221,20 @@ namespace VideoDirector.Models
                 // strength over a clip that has been faded down.
                 double borderOpacity = overlay.IsVideoHidden ? 0.0 : overlay.Opacity;
                 var c = overlay.BorderColor;
-                switch (overlay.BorderType)
+                if (overlay.BorderType == BorderType.Soft)
                 {
-                    case BorderType.FilmStrip:
-                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                        ShowBorderRect(slot, c, overlay.BorderThickness,
-                                       new Microsoft.UI.Xaml.Media.DoubleCollection { 2, 1, 2, 1 }, 0,
-                                       left, top, boxW, boxH, borderOpacity, visibleBorder);
-                        break;
-
-                    case BorderType.Soft:
-                        // The rounded corner stays on the grid as well, so the PICTURE is rounded
-                        // too rather than a rounded outline sitting on a square image. Half alpha
-                        // is what makes Soft soft.
-                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(16);
-                        ShowBorderRect(slot, Windows.UI.Color.FromArgb(128, c.R, c.G, c.B),
-                                       overlay.BorderThickness, null, 16,
-                                       left, top, boxW, boxH, borderOpacity, visibleBorder);
-                        break;
-
-                    default:
-                        grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                        ShowBorderRect(slot, c, overlay.BorderThickness, null, 0,
-                                       left, top, boxW, boxH, borderOpacity, visibleBorder);
-                        break;
+                    // The rounded corner stays on the grid as well, so the PICTURE is rounded
+                    // too rather than a rounded outline sitting on a square image. Half alpha
+                    // is what makes Soft soft. The outline itself is four edges: a single
+                    // rounded stroke cannot express the L left by a partial cover.
+                    grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(16);
+                    c = Windows.UI.Color.FromArgb(128, c.R, c.G, c.B);
                 }
+                else
+                    grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
+
+                ShowBorderEdges(slot, c, overlay.BorderThickness,
+                                left, top, boxW, boxH, borderOpacity);
             }
 
             // THE FRAME, from the same call site and the same values as the border above, so the
@@ -283,16 +273,12 @@ namespace VideoDirector.Models
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(el, top);
         }
 
-        // The single border overlay for a clip, whatever its style. It lives in BorderHost, ABOVE
-        // every track picture - not in the clip's grid, where its z-layer would be the clip's and a
-        // higher track would erase it. Built once with the rest of the clip's surfaces rather than
-        // created on demand.
-        private Microsoft.UI.Xaml.Shapes.Rectangle GetBorderRect(int slot)
+        private Views.OverlayVisual GetOverlayVisual(int slot)
         {
             if (_playerControl == null) return null;
             var visuals = _playerControl.OverlayVisuals;
             if (visuals == null || slot < 0 || slot >= visuals.Length) return null;
-            return visuals[slot]?.Border;
+            return visuals[slot];
         }
 
         // The editing frame for a clip - dashed outline plus its T1..T6 badge. Lives in FrameHost,
@@ -463,71 +449,84 @@ namespace VideoDirector.Models
 
         private void HideBorderRect(int slot)
         {
-            var rect = GetBorderRect(slot);
-            if (rect != null) rect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            var v = GetOverlayVisual(slot);
+            if (v?.Border != null && v.Border.Visibility != Microsoft.UI.Xaml.Visibility.Collapsed)
+                v.Border.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
         }
 
-        // Geometry is passed in because the rect lives in BorderHost and has no parent to inherit
-        // it from. These are the SAME box values the clip's grid is sized and positioned with, so
-        // the two cannot drift apart.
-        //
-        // The rect IS the box - no inset. A stroke is centred on its path, so it straddles the box
-        // edge, which is what reads as a border sitting on the edge. Insetting it by half the
-        // stroke pushed the outline visibly inward and the picture showed all round the outside.
-        //
-        // Writes are delta-guarded: this runs from the per-frame render path.
-        private void ShowBorderRect(int slot, Windows.UI.Color color, double thickness,
-                                    Microsoft.UI.Xaml.Media.DoubleCollection dash, double radius,
-                                    double left, double top, double w, double h, double opacity,
-                                    ClipGeometry.GeoRect visible)
+        // Four filled edge strips, not one stroked outline. UIElement.Clip is a single rectangle,
+        // so an outline whose visible remainder is an L cannot be expressed — the spanning-axis
+        // gate kept the whole border (T3 over T6) and dropping it restored the "small clip in the
+        // middle eats three sides" bug. Each edge is already a rectangle, so subtracting an
+        // occluder from it is exact.
+        private void ShowBorderEdges(int slot, Windows.UI.Color color, double thickness,
+                                     double left, double top, double w, double h, double opacity)
         {
-            var rect = GetBorderRect(slot);
-            if (rect == null) return;
-            if (w <= 0 || h <= 0) { rect.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed; return; }
+            var v = GetOverlayVisual(slot);
+            if (v?.Border == null || v.BorderEdges == null) return;
+            if (w <= 0 || h <= 0 || thickness <= 0) { HideBorderRect(slot); return; }
 
-            rect.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
-            rect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
-            rect.StrokeThickness = thickness;
-            rect.RadiusX = radius;
-            rect.RadiusY = radius;
+            double t = Math.Max(1, thickness);
+            double half = t / 2;
+            var topE = new ClipGeometry.GeoRect(left - half, top - half, w + t, t);
+            var botE = new ClipGeometry.GeoRect(left - half, top + h - half, w + t, t);
+            var leftE = new ClipGeometry.GeoRect(left - half, top + half, t, Math.Max(0, h - t));
+            var rightE = new ClipGeometry.GeoRect(left + w - half, top + half, t, Math.Max(0, h - t));
 
-            if (rect.Width != w) rect.Width = w;
-            if (rect.Height != h) rect.Height = h;
-            if (Microsoft.UI.Xaml.Controls.Canvas.GetLeft(rect) != left)
-                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(rect, left);
-            if (Microsoft.UI.Xaml.Controls.Canvas.GetTop(rect) != top)
-                Microsoft.UI.Xaml.Controls.Canvas.SetTop(rect, top);
-            if (Math.Abs(rect.Opacity - opacity) > 0.001) rect.Opacity = opacity;
+            var segs = new List<ClipGeometry.GeoRect>(8);
+            OccludeStrip(slot, topE, segs);
+            OccludeStrip(slot, botE, segs);
+            OccludeStrip(slot, leftE, segs);
+            OccludeStrip(slot, rightE, segs);
 
-            // Hide the part that a higher opaque clip covers. Expanded by half the stroke on every
-            // side that is NOT being trimmed, because the stroke is centred on the path and half of
-            // it lies outside the box - clipping to the bare box would shave the whole outline.
-            double half = thickness / 2;
-            bool trimmed = visible.W < w - 0.5 || visible.H < h - 0.5
-                           || visible.X > left + 0.5 || visible.Y > top + 0.5;
-            if (!trimmed)
+            if (segs.Count == 0) { HideBorderRect(slot); return; }
+
+            if (v.Border.Visibility != Microsoft.UI.Xaml.Visibility.Visible)
+                v.Border.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            if (Math.Abs(v.Border.Opacity - opacity) > 0.001) v.Border.Opacity = opacity;
+
+            var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+            var edges = v.BorderEdges;
+            for (int i = 0; i < edges.Length; i++)
             {
-                if (rect.Clip != null) rect.Clip = null;
-            }
-            else
-            {
-                double cx = visible.X - left, cy = visible.Y - top;
-                double cw = visible.W, ch = visible.H;
-                if (cx <= 0.5) { cx -= half; cw += half; }
-                if (cy <= 0.5) { cy -= half; ch += half; }
-                if (visible.Right >= left + w - 0.5) cw += half;
-                if (visible.Bottom >= top + h - 0.5) ch += half;
-
-                rect.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
+                var el = edges[i];
+                if (el == null) continue;
+                if (i >= segs.Count)
                 {
-                    Rect = new Windows.Foundation.Rect(cx, cy, Math.Max(0, cw), Math.Max(0, ch))
-                };
-            }
+                    if (el.Visibility != Microsoft.UI.Xaml.Visibility.Collapsed)
+                        el.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    continue;
+                }
 
-            // Null clears the dashes; assigning an empty collection leaves a solid line either way,
-            // but clearing keeps the property honest about what the style is.
-            if (dash == null) rect.ClearValue(Microsoft.UI.Xaml.Shapes.Shape.StrokeDashArrayProperty);
-            else rect.StrokeDashArray = dash;
+                var s = segs[i];
+                if (el.Visibility != Microsoft.UI.Xaml.Visibility.Visible)
+                    el.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                if (el.Fill != brush) el.Fill = brush;
+                if (el.Width != s.W) el.Width = Math.Max(0, s.W);
+                if (el.Height != s.H) el.Height = Math.Max(0, s.H);
+                if (Microsoft.UI.Xaml.Controls.Canvas.GetLeft(el) != s.X)
+                    Microsoft.UI.Xaml.Controls.Canvas.SetLeft(el, s.X);
+                if (Microsoft.UI.Xaml.Controls.Canvas.GetTop(el) != s.Y)
+                    Microsoft.UI.Xaml.Controls.Canvas.SetTop(el, s.Y);
+            }
+        }
+
+        private void OccludeStrip(int slot, ClipGeometry.GeoRect strip, List<ClipGeometry.GeoRect> into)
+        {
+            var cur = new List<ClipGeometry.GeoRect> { strip };
+            for (int j = slot + 1; j < MaxOverlayTracks; j++)
+            {
+                var other = _activeOverlay[j];
+                if (other == null || other.IsVideoHidden || other.Opacity < 0.999) continue;
+                if (!TryGetSlotBox(j, out var ob)) continue;
+
+                var next = new List<ClipGeometry.GeoRect>(cur.Count * 2);
+                foreach (var s in cur)
+                    ClipGeometry.SubtractStrip(s, ob, next);
+                cur = next;
+                if (cur.Count == 0) break;
+            }
+            into.AddRange(cur);
         }
     }
 }

@@ -125,11 +125,11 @@ namespace VideoDirector.Views
             if (_timelinePxPerSec <= 0) return (null, false, 0);
             var t = TimeSpan.FromSeconds(Math.Max(0, p.X / _timelinePxPerSec));
 
-            if (p.Y >= RowSpineY && p.Y < RowSpineY + BlockH && ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Count > 0)
+            if (p.Y >= RowSpineY && p.Y < RowSpineY + BlockH && ViewModel.Tracks.Count > 0)
             {
-                int idx = ViewModel.GetTimelineIndexForStoryTime(t);
-                if (idx >= 0 && idx < ViewModel.Tracks[0].Clips.Count)
-                    return (ViewModel.Tracks[0].Clips[idx], true, ViewModel.GetSpineClipStart(idx).TotalSeconds);
+                foreach (var clip in ViewModel.Tracks[0].Clips)
+                    if (t >= clip.StartTime && t < clip.StartTime + clip.OpDuration)
+                        return (clip, true, clip.StartTimeSeconds);
             }
             else if (p.Y >= RowOvY)
             {
@@ -149,11 +149,10 @@ namespace VideoDirector.Views
             if (isSpine)
             {
                 ViewModel.SelectedTimelineNode = clip;
-                int idx = ViewModel.Tracks.Count > 0 ? ViewModel.Tracks[0].Clips.IndexOf(clip) : -1;
                 if (ViewModel.IsPlaying)
                 {
-                    if (_playbackEngine?.CurrentPlayingOperation != clip && idx >= 0)
-                        _ = _playbackEngine?.StartPlaybackAsync(idx);
+                    if (!ReferenceEquals(_playbackEngine?.CurrentPlayingOperation, clip))
+                        _ = _playbackEngine?.SeekCompositeToStoryTime(clip.StartTime);
                     return;
                 }
             }

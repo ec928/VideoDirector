@@ -12,6 +12,7 @@
        geometry can be tested with no UI, no decoder and no display. -->
   <ItemGroup>
     <Compile Include="..\Models\ClipGeometry.cs" Link="Linked\ClipGeometry.cs" />
+    <Compile Include="..\Models\ClipRules.cs" Link="Linked\ClipRules.cs" />
     <Compile Include="..\Models\Enums.cs" Link="Linked\Enums.cs" />
     <Compile Include="..\Models\ChromeRules.cs" Link="Linked\ChromeRules.cs" />
   </ItemGroup>

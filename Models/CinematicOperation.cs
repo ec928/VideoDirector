@@ -153,6 +153,7 @@ namespace VideoDirector.Models
         public bool HasModifications => 
             StartMark.Scale != 1.0f || StartMark.X != 0 || StartMark.Y != 0 ||
             EndMark.Scale != 1.0f || EndMark.X != 0 || EndMark.Y != 0 ||
+            MidMark != null ||
             TransitionDuration > TimeSpan.Zero ||
             TransitionStyle != TransitionStyle.HardSnap ||
             CurveProfile != CurveProfile.Linear ||

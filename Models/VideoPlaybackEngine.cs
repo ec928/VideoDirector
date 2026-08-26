@@ -66,6 +66,7 @@ namespace VideoDirector.Models
 
             // Arrange mode: drag/wheel the PiP under the cursor.
             _playerControl.OverlayBoxDragged += OnOverlayBoxDragged;
+            _playerControl.OverlayBoxReleased += OnOverlayBoxReleased;
             _playerControl.WysiwygBoxManipulated += OnWysiwygBoxManipulated;
             _playerControl.WysiwygBoxGrabbed += OnWysiwygBoxGrabbed;
             _playerControl.CanvasCleared += (s, e) => SetSelectedMark(null);
@@ -125,30 +126,20 @@ namespace VideoDirector.Models
 
         private void OnTimelineSequenceChanged()
         {
-            
+            if (_isPaused)
             {
-                if (_isPaused)
-                {
-                    // If paused when the timeline sequence changes, stop the stale playback loop.
-                    // Clicking Play later will start a clean loop from the current playhead position.
-                    StopPlayback();
-                    _isPaused = false;
-                    _viewModel.IsPlaying = false;
-                }
-                else if (_isAnimating)
-                {
-                    // If actively playing when the sequence changes, restart playback at the current playhead position.
-                    var at = _viewModel.CurrentStoryTime;
-                    int startIdx = _viewModel.GetTimelineIndexForStoryTime(at);
-                    var offset = at - _viewModel.GetSpineClipStart(startIdx);
-                    if (offset < TimeSpan.Zero) offset = TimeSpan.Zero;
-                    if (startIdx >= 0 && startIdx < _viewModel.Tracks.Count
-                        && offset > _viewModel.TotalStoryTime) offset = TimeSpan.Zero;
-
-                    _ = StartPlaybackAsync(startIdx, offset);
-                }
+                // If paused when the timeline sequence changes, stop the stale playback loop.
+                // Clicking Play later will start a clean loop from the current playhead position.
+                StopPlayback();
+                _isPaused = false;
+                _viewModel.IsPlaying = false;
+            }
+            else if (_isAnimating)
+            {
+                _ = StartPlaybackAsync();
             }
         }
+
         private void ViewModel_PlaybackSpeedChanged(object? sender, double speed)
         {
             if (_isPaused) return;
@@ -169,7 +160,7 @@ namespace VideoDirector.Models
                 }
             }
         }
-public void SeekActiveOperation(TimeSpan position)
+        public void SeekActiveOperation(TimeSpan position)
         {
             if (_mode == EditorMode.Edit && _overlayPlayer[0]?.PlaybackSession != null)
             {
@@ -214,19 +205,22 @@ public void SeekActiveOperation(TimeSpan position)
             _lastTickTime = TimeSpan.Zero;
             _viewModel.IsPlaying = true;
             
-            if (_viewModel.PlaybackSpeed > 0)
+            for (int i = 0; i < MaxOverlayTracks; i++)
             {
-                for (int i = 0; i < MaxOverlayTracks; i++)
+                if (_activeOverlay[i] == null || _overlayPlayer[i]?.PlaybackSession == null) continue;
+                double combined = _activeOverlay[i].PlaybackSpeed * _viewModel.PlaybackSpeed;
+                if (combined <= 0)
                 {
-                    if (_activeOverlay[i] == null || _overlayPlayer[i]?.PlaybackSession == null) continue;
-                    _overlayPlayer[i].PlaybackSession.PlaybackRate = _viewModel.PlaybackSpeed;
-                    _overlayPlayer[i].Volume = _activeOverlay[i].Volume;
-                    _overlayPlayer[i].Play();
+                    _overlayPlayer[i].Pause();
+                    continue;
                 }
+                _overlayPlayer[i].PlaybackSession.PlaybackRate = combined;
+                _overlayPlayer[i].Volume = _activeOverlay[i].Volume;
+                _overlayPlayer[i].Play();
             }
         }
 
-        public async Task StartPlaybackAsync(int startIndex = 0, TimeSpan startOffset = default)
+        public async Task StartPlaybackAsync()
         {
             if (System.Linq.Enumerable.All(_viewModel.Tracks, t => t.Clips.Count == 0)) return;
 

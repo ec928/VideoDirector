@@ -331,7 +331,7 @@ namespace VideoDirector.Models
             // IS that surface (handles hidden for the same reason). Paused counts as Arrange.
             if (IsActivelyPlaying) return;
             var overlay = _activeOverlay[e.slot];
-            if (overlay == null) return;
+            if (overlay == null || overlay.IsLocked) return;
             double vpW = _playerControl.CanvasWidth, vpH = _playerControl.CanvasHeight;
             if (vpW <= 0 || vpH <= 0) return;
 
@@ -381,6 +381,11 @@ namespace VideoDirector.Models
             overlay.PlacementCenterY = ClipGeometry.ContactCentre(
                 ((top + bottom) / 2) / vpH, fitH, overlay.PlacementHeight, vpH);
             ApplyOverlayBox(e.slot, overlay, false);
+        }
+
+        private void OnOverlayBoxReleased(object? sender, EventArgs e)
+        {
+            _viewModel.RecordIfChanged();
         }
 
         private void OnWysiwygBoxGrabbed(object? sender, string markType)
@@ -493,18 +498,10 @@ namespace VideoDirector.Models
             var transform = _playerControl.ActiveTransform;
             if (transform == null) return;
 
-            double vpW = _playerControl.CanvasWidth > 0 ? _playerControl.CanvasWidth : 1920;
-            double vpH = _playerControl.CanvasHeight > 0 ? _playerControl.CanvasHeight : 1080;
-
-            // Must resolve identically to the rect the user is dragging (see UpdateWysiwygOverlay).
-            // A drag converted in a different space than it was drawn in moves the mark somewhere
-            // other than where the pointer went.
-            double aspect = AspectOf(op, 0);
-            if (aspect <= 0) return;
-
-            double W, H;
-            if (aspect >= vpW / vpH) { W = vpW; H = vpW / aspect; }
-            else { H = vpH; W = vpH * aspect; }
+            // Same space as UpdateWysiwygOverlay and CaptureMark. Refuse until SourceAspect is
+            // known — converting a drag against another clip's cached aspect is how a rect
+            // dropped inside the picture wrote a mark outside it.
+            if (!TryGetMarkSpace(op, out double W, out double H) || W <= 0 || H <= 0) return;
 
             double videoAspect = W / H;
             double pipAspect = videoAspect * (op.PlacementWidth / op.PlacementHeight);
@@ -577,7 +574,7 @@ namespace VideoDirector.Models
             //
             // Contact, not coverage: (content x scale + box) / 2, expressed as a fraction of the fit
             // because that is how marks are stored. See ClampFraming for why coverage is wrong.
-            (double bContentW, double bContentH) = ClipGeometry.Content(boxW, boxH, aspect);
+            (double bContentW, double bContentH) = ClipGeometry.Content(boxW, boxH, videoAspect);
             double limX = (bContentW * mark.Scale + boxW) / 2 / W;
             double limY = (bContentH * mark.Scale + boxH) / 2 / H;
             mark.X = (float)System.Math.Clamp(mark.X, -limX, limX);
@@ -592,7 +589,7 @@ namespace VideoDirector.Models
             if (_mode != EditorMode.Arrange) return;
             if (IsActivelyPlaying) return;   // same invariant: no resizing a live video surface
             var overlay = _activeOverlay[e.slot];
-            if (overlay == null) return;
+            if (overlay == null || overlay.IsLocked) return;
             // Wheel = uniform resize: scales both dimensions, preserving the box's current shape.
             double f = e.delta > 0 ? 1.08 : 1.0 / 1.08;
             overlay.PlacementWidth *= f;

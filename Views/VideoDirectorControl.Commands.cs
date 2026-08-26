@@ -125,11 +125,17 @@ namespace VideoDirector.Views
             await RunRecordingAsync(file, hwnd, total);
         }
         private bool _telemetryBeforeRecording;
+        private bool _loopingBeforeRecording;
+        private TimeSpan? _loopStartBeforeRecording;
+        private TimeSpan? _loopEndBeforeRecording;
 
         // Play the project from the top, full screen, with nothing on it, and record that.
         private async Task RunRecordingAsync(StorageFile file, IntPtr hwnd, TimeSpan total)
         {
             _telemetryBeforeRecording = ViewModel.IsTelemetryVisible;
+            _loopingBeforeRecording = ViewModel.IsLooping;
+            _loopStartBeforeRecording = ViewModel.LoopRegionStart;
+            _loopEndBeforeRecording = ViewModel.LoopRegionEnd;
 
             // The HUD is drawn INTO the window, so capture takes it too - it showed up in the
             // first recording as an FPS/GPU readout across the top corner. The chrome lock cannot
@@ -139,20 +145,31 @@ namespace VideoDirector.Views
             ViewModel.IsRecording = true;          // locks the chrome; see ChromeRules
             ViewModel.IsCinematicMode = true;
             ViewModel.IsControlsVisible = false;
+            ViewModel.IsLooping = false;
+            ViewModel.LoopRegionStart = null;
+            ViewModel.LoopRegionEnd = null;
+            ViewModel.CurrentStoryTime = TimeSpan.Zero;
 
-            // A moment for the window to reach full screen before the first frame is kept.
-            await Task.Delay(700);
             _playbackEngine?.StopPlayback();
-            await (_playbackEngine?.StartPlaybackAsync(0) ?? Task.CompletedTask);
+            await (_playbackEngine?.StartPlaybackAsync() ?? Task.CompletedTask);
+
+            // Full screen and the first frame have to actually land before capture starts. The
+            // delay used to run before playback, so it waited for a still editor.
+            await Task.Delay(700);
 
             _recorder = new Models.ScreenRecorder();
 
-            // Stop when the project ends. Esc stops early through StopRecording.
+            // Stop when the project ends, or if the playhead wraps (looping leaked back on).
+            // Esc stops early through StopRecording.
+            TimeSpan lastStory = TimeSpan.Zero;
             var guard = DispatcherQueue.CreateTimer();
             guard.Interval = TimeSpan.FromMilliseconds(250);
             guard.Tick += (s, e) =>
             {
-                if (ViewModel.IsRecording && ViewModel.CurrentStoryTime < total && ViewModel.IsPlaying) return;
+                var t = ViewModel.CurrentStoryTime;
+                bool wrapped = t < lastStory && lastStory > TimeSpan.Zero;
+                lastStory = t;
+                if (!wrapped && ViewModel.IsRecording && t < total && ViewModel.IsPlaying) return;
                 guard.Stop();
                 _recorder?.RequestStop();
             };
@@ -166,21 +183,39 @@ namespace VideoDirector.Views
             var tempFolder = await StorageFolder.GetFolderFromPathAsync(System.IO.Path.GetTempPath());
             var temp = await tempFolder.CreateFileAsync("videodirector-silent.mp4", CreationCollisionOption.ReplaceExisting);
 
-            var result = await _recorder.RecordAsync(hwnd, temp,
-                targetWidth: 1920, fps: 30,
-                maxSeconds: (int)Math.Ceiling(total.TotalSeconds) + 5);
+            int canvasW = (int)Math.Round(ViewModel.CanvasWidth);
+            int canvasH = (int)Math.Round(ViewModel.CanvasHeight);
+            if (canvasW < 2) canvasW = 1920;
+            if (canvasH < 2) canvasH = 1080;
 
-            if (result.Success)
+            Models.ScreenRecorder.Result result = new() { Message = "Recording did not start." };
+            Models.PerformanceAudio.Result audio = null;
+            try
             {
-                var audio = await Models.PerformanceAudio.MuxAsync(
-                    temp, ViewModel.Tracks, file, ViewModel.CanvasWidth, ViewModel.CanvasHeight);
+                result = await _recorder.RecordAsync(hwnd, temp,
+                    targetWidth: canvasW, targetHeight: canvasH, fps: 30,
+                    maxSeconds: (int)Math.Ceiling(total.TotalSeconds) + 2);
 
-                if (!audio.Success)
+                if (result.Success)
                 {
-                    // No sound to add, or the mix would not render. Keep the picture rather than
-                    // losing the take: copy the silent recording to where the user asked for it.
-                    await temp.CopyAndReplaceAsync(file);
+                    audio = await Models.PerformanceAudio.MuxAsync(
+                        temp, ViewModel.Tracks, file, ViewModel.CanvasWidth, ViewModel.CanvasHeight);
+
+                    if (!audio.Success)
+                    {
+                        // No sound to add, or the mix would not render. Keep the picture rather than
+                        // losing the take: copy the silent recording to where the user asked for it.
+                        await temp.CopyAndReplaceAsync(file);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                result = new() { Message = ex.Message };
+            }
+            finally
+            {
+                try { await temp.DeleteAsync(StorageDeleteOption.PermanentDelete); } catch { }
             }
 
             guard.Stop();
@@ -189,6 +224,9 @@ namespace VideoDirector.Views
             StopRecording();                        // releases the lock, stops playback
             ViewModel.IsCinematicMode = false;
             ViewModel.IsTelemetryVisible = _telemetryBeforeRecording;
+            ViewModel.IsLooping = _loopingBeforeRecording;
+            ViewModel.LoopRegionStart = _loopStartBeforeRecording;
+            ViewModel.LoopRegionEnd = _loopEndBeforeRecording;
 
             // Success says so in the title bar and then gets out of the way. A modal OK after
             // something you asked for and watched happen is a click for nothing - and you already
@@ -200,11 +238,20 @@ namespace VideoDirector.Views
                 return;
             }
 
+            string extra = "";
+            if (audio != null && audio.SkippedSpeedChanged > 0)
+                extra = "  \u2022  " + audio.SkippedSpeedChanged + " clip"
+                      + (audio.SkippedSpeedChanged == 1 ? "" : "s")
+                      + " skipped (speed is not 1x)";
+
             ShowBanner("Recording saved",
-                       System.IO.Path.GetFileName(result.Message) + "  \u2022  "
+                       System.IO.Path.GetFileName(file.Path) + "  \u2022  "
                        + result.Duration.TotalSeconds.ToString("F0") + "s, "
-                       + result.FramesEncoded + " frames",
-                       InfoBarSeverity.Success);
+                       + result.FramesEncoded + " frames"
+                       + extra,
+                       audio != null && audio.SkippedSpeedChanged > 0
+                           ? InfoBarSeverity.Warning
+                           : InfoBarSeverity.Success);
         }
 
         /// <summary>
@@ -233,40 +280,9 @@ namespace VideoDirector.Views
             timer.Start();
         }
 
-        private async Task<bool> ConfirmRecordAsync(TimeSpan total)
+        public void ReportUnexpectedError(string message)
         {
-            var panel = new StackPanel { Spacing = 10 };
-            panel.Children.Add(new TextBlock
-            {
-                Text = "The project will play full screen from the beginning and be recorded as it "
-                     + "goes. Everything you see is captured \u2014 motion, fades, speed, borders and "
-                     + "picture-in-picture.",
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(new TextBlock
-            {
-                Text = "This happens in real time, so it will take about "
-                     + Math.Ceiling(total.TotalSeconds) + " seconds. Press Esc to stop early.",
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(new TextBlock
-            {
-                Text = "No sound yet \u2014 the recording is silent.",
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.8
-            });
-
-            var dialog = new ContentDialog
-            {
-                Title = "Record this project",
-                Content = panel,
-                PrimaryButtonText = "Record",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = this.XamlRoot
-            };
-            try { return await dialog.ShowAsync() == ContentDialogResult.Primary; }
-            catch { return false; }
+            ShowBanner("Something went wrong", message ?? "An unexpected error occurred.", InfoBarSeverity.Error);
         }
 
         private async Task ShowExportMessage(string title, string message)
@@ -413,9 +429,8 @@ namespace VideoDirector.Views
         /// not something anyone wants at the end of their file.
         /// </summary>
         /// <remarks>
-        /// The recorder itself is not built yet; this is the state and the way out of it, which is
-        /// the half that has to be right before any frames are written. Setting IsRecording false
-        /// releases the chrome lock in ChromeRules.
+        /// Setting IsRecording false releases the chrome lock in ChromeRules. The recorder is
+        /// asked to finish at the next frame boundary.
         /// </remarks>
         private void StopRecording()
         {

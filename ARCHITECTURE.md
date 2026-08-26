@@ -123,7 +123,7 @@ width = boxW * (Sc/St)
 
 so a mark at the live framing draws exactly on the box edge, and one at a wider framing draws outside it. `CaptureMark` is the inverse of this and must stay so: if the two disagree, a rectangle placed visibly inside the picture writes a mark outside it.
 
-**Aspect has one source of truth.** `AspectOf` prefers the clip's persisted `SourceAspect` and falls back to the live `_overlayAspect`; it returns 0 for genuinely unknown and callers must hold off rather than assume 16:9. Three separate fallbacks once disagreed, and on a 2.39:1 source the rects were drawn 34% out.
+**Aspect: two policies, one reason.** `SourceAspect` on the clip is the persisted value. Mark space (`TryGetMarkSpace`, Set, rectangle draw/drag) uses that alone and waits at 0 — a wrong mark is saved. Box layout (`AspectOf`) may fall back to the live slot cache: a slightly wrong frame is cosmetic and corrects next evaluation. Three separate fallbacks once disagreed, and on a 2.39:1 source the rects were drawn 34% out.
 
 **Preview.** The live framing follows `ApplyMarksAtProgress` at the playhead. `SeekForMark` moves the playhead to a mark's time — this is what implements rule 7. `BeginEdit` must NOT be called from a Set handler: it re-enters edit mode and re-runs the placement bypass, which resizes the window and violates the window invariant.
 
@@ -185,7 +185,7 @@ This chronological ledger records all established solutions and performance opti
   **CORRECTION — this entry previously claimed the exporter was "verified end to end". That was false.** The harness rendered a project written by hand to match the exporter's own assumptions: one mp4, one overlay track, no gaps, even dimensions. It was never once run against the saved projects in `Tests/`, and **every one of those fails**, as they always had. Two independent causes, both measured afterwards: a source with an odd width or height (one sample is 1918×804) is refused as an overlay layer by the Windows compositor; and `composition.Clips` is a sequence with no per-clip start time, so gaps on track 1 are deleted and overlays keep absolute delays, desynchronising everything after the first gap.
 
   The lesson is the one this project keeps relearning, one level up from "a green build proves nothing": **a passing test against a fixture you wrote yourself proves nothing either.** Export verification must run the projects in `Tests/`, which is what anyone actually loads.
-* **The Warning Is Computed, Not Boilerplate.** `WhatIsNotBaked()` walks the actual clips and names only what THIS project loses, shown before the file picker. A project with no motion and no fades gets no warning at all. It also names the alternative that loses nothing: cinematic playback is the finished piece, so recording it captures what a render cannot.
+* **The Warning Is Computed, Not Boilerplate.** The old MediaComposition exporter walked the clips and named only what THIS project would lose. Recording does not need that warning: it photographs the compositor, so motion, fades, speed and borders survive. Speed-changed audio is the remaining hole — mixed at 1x it would desync, so it is skipped and named on the status banner.
 
 ### 🧭 One Boundary Rule, In Both Modes (`0.9.0`)
 

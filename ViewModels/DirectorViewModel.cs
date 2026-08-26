@@ -19,14 +19,14 @@ namespace VideoDirector.ViewModels
 
     // How the canvas - the composition space everything is measured against - gets its size.
     //
-    // Auto is the only one implemented. The rest are named and stubbed so the menu shows where
-    // this is going rather than pretending the choice does not exist.
+    // Auto and Custom are implemented (presets write Custom). MatchWorkingArea and FollowWindow
+    // are unused integer slots kept so older project files still deserialise.
     public enum CanvasSizeMode
     {
         Auto,               // the app window as it was when the project began, then fixed
-        MatchWorkingArea,   // the visible area: the window less the inspector and the track dock
-        FollowWindow,       // tracks the window live, so the frame reshapes as you resize
-        Custom              // chosen explicitly
+        MatchWorkingArea,   // unused; kept for serialised values
+        FollowWindow,       // unused; kept for serialised values
+        Custom              // chosen explicitly (including the HD/UHD/scope/vertical presets)
     }
 
     public class DirectorViewModel : ObservableObject
@@ -438,7 +438,7 @@ namespace VideoDirector.ViewModels
                 {
                     foreach (var node in track.Clips)
                     {
-                        var end = node.StartTime + node.OpDuration + node.TransitionDuration;
+                        var end = ClipRules.StoryEnd(node.StartTime, node.OpDuration);
                         if (end > max) max = end;
                     }
                 }
@@ -551,7 +551,7 @@ namespace VideoDirector.ViewModels
                     {
                         if (Tracks[i].Clips.Contains(_selectedClip))
                         {
-                            return i == 0 ? "Track 1 · main" : $"Track {i + 1} · overlay";
+                            return "Track " + (i + 1);
                         }
                     }
                 }
@@ -956,6 +956,7 @@ namespace VideoDirector.ViewModels
                     PlacementWidth = TrackDefaults[0].w,
                     PlacementHeight = TrackDefaults[0].h
                 });
+                ClipAdded?.Invoke(this, mainTrack.Clips[^1]);
             }
             RecordIfChanged();
         }
@@ -1282,6 +1283,7 @@ namespace VideoDirector.ViewModels
             
             EnsureTracks();            // floor of one, no longer a top-up to the ceiling
             TrimTrailingEmptyTracks(); // unused tracks on top of a saved project do not reopen
+            StampPlacementDefaults();  // old projects have no DefaultPlacement*; Reset needs the track default
             RaiseTrackCountChanged();
             ResetHistory(); // the loaded project is the new baseline, not an undo step
         }

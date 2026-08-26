@@ -26,7 +26,7 @@ namespace VideoDirector.Views
             {
                 var formatter = new DecimalFormatter
                 {
-                    FractionDigits = 0,
+                    FractionDigits = digits,
                     NumberRounder = new IncrementNumberRounder
                     {
                         Increment = Math.Pow(10, -digits),

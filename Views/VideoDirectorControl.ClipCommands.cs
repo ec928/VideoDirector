@@ -218,6 +218,8 @@ namespace VideoDirector.Views
             // guard against moving THAT clip, and a fresh copy you cannot drag is a copy you cannot
             // put where you wanted it.
             IsVideoHidden = clip.IsVideoHidden,
+            SourceHasVideo = clip.SourceHasVideo,
+            SourceHasAudio = clip.SourceHasAudio,
             Thumbnail = clip.Thumbnail,
             OpDuration = clip.OpDuration
         };
@@ -290,6 +292,8 @@ namespace VideoDirector.Views
                 PlacementHeight = clip.PlacementHeight,
                 PlacementCenterX = clip.PlacementCenterX,
                 PlacementCenterY = clip.PlacementCenterY,
+                SourceHasVideo = clip.SourceHasVideo,
+                SourceHasAudio = clip.SourceHasAudio,
                 Thumbnail = clip.Thumbnail
             };
 

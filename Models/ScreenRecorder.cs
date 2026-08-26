@@ -62,8 +62,11 @@ namespace VideoDirector.Models
         private Direct3D11CaptureFramePool _pool;
         private GraphicsCaptureSession _session;
         private byte[] _bufA, _bufB, _latest;
+        private byte[][] _encodePool;
+        private int _encodeSlot;
         private bool _useA = true;
         private int _outWidth, _outHeight;
+        private Windows.Foundation.Rect _srcRect;
         private volatile bool _stopRequested;
         private int _captured, _encoded, _repeats;
 
@@ -78,7 +81,7 @@ namespace VideoDirector.Models
         /// Returns when the file is written and closed.
         /// </summary>
         public async Task<Result> RecordAsync(IntPtr hwnd, StorageFile output,
-                                              int targetWidth = 1920, int fps = 30, int maxSeconds = 3600)
+                                              int targetWidth = 1920, int targetHeight = 0, int fps = 30, int maxSeconds = 3600)
         {
             if (!IsSupported) return new Result { Message = "Screen capture is not available on this system." };
 
@@ -86,16 +89,46 @@ namespace VideoDirector.Models
             try { item = CreateItemForWindow(hwnd); }
             catch (Exception ex) { return new Result { Message = "Could not start capture: " + ex.Message }; }
 
-            _outWidth = Math.Max(2, (int)Math.Round(targetWidth / 2.0) * 2);
-            _outHeight = (int)Math.Round(_outWidth * (double)item.Size.Height / Math.Max(1, item.Size.Width));
-            if (_outHeight % 2 != 0) _outHeight++;
-            if (_outHeight < 2) _outHeight = 2;
+            double capW = Math.Max(1, item.Size.Width);
+            double capH = Math.Max(1, item.Size.Height);
+
+            _outWidth = Align16(targetWidth);
+            _outHeight = targetHeight > 0
+                ? Align16(targetHeight)
+                : Align16((int)Math.Round(_outWidth * capH / capW));
+
+            // Do not upscale past the captured window: a 4K canvas viewed in a 1080p window
+            // has no 4K pixels to photograph.
+            double fit = Math.Min(1.0, Math.Min(capW / _outWidth, capH / _outHeight));
+            if (fit < 1.0)
+            {
+                _outWidth = Align16((int)Math.Round(_outWidth * fit));
+                _outHeight = Align16((int)Math.Round(_outHeight * fit));
+            }
+
+            // Centre-crop the captured window to the output aspect so a 9:16 canvas in a
+            // landscape window is not squeezed, and pasteboard around a 2.39:1 canvas is dropped.
+            double outAspect = (double)_outWidth / _outHeight;
+            double capAspect = capW / capH;
+            if (capAspect > outAspect)
+            {
+                double srcW = capH * outAspect;
+                _srcRect = new Windows.Foundation.Rect((capW - srcW) / 2, 0, srcW, capH);
+            }
+            else
+            {
+                double srcH = capW / outAspect;
+                _srcRect = new Windows.Foundation.Rect(0, (capH - srcH) / 2, capW, srcH);
+            }
 
             _device = CanvasDevice.GetSharedDevice();
             _scaled = new CanvasRenderTarget(_device, _outWidth, _outHeight, 96);
             int byteCount = _outWidth * _outHeight * 4;
             _bufA = new byte[byteCount];
             _bufB = new byte[byteCount];
+            _encodePool = new byte[8][];
+            for (int i = 0; i < _encodePool.Length; i++) _encodePool[i] = new byte[byteCount];
+            _encodeSlot = 0;
 
             _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                 _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
@@ -146,11 +179,15 @@ namespace VideoDirector.Models
                     {
                         ds.Clear(Microsoft.UI.Colors.Black);
                         ds.Transform = Matrix3x2.CreateScale(1, -1) * Matrix3x2.CreateTranslation(0, _outHeight);
-                        ds.DrawImage(bmp, new Windows.Foundation.Rect(0, 0, _outWidth, _outHeight));
+                        ds.DrawImage(bmp,
+                            new Windows.Foundation.Rect(0, 0, _outWidth, _outHeight),
+                            _srcRect);
                     }
 
-                    // Two buffers, alternating: one being filled while the other is encoded. The
-                    // first version allocated per frame and reached 1.9GB on a 26 second take.
+                    // Two capture buffers, alternating: one being filled while the other is copied
+                    // into an encode-pool slot. Allocating a new array per frame reached 1.9GB on a
+                    // 26 second take; wrapping the capture buffer itself let FrameArrived overwrite
+                    // a sample the transcoder still held.
                     var target = _useA ? _bufA : _bufB;
                     _scaled.GetPixelBytes(target.AsBuffer());
                     lock (_gate) { _latest = target; _useA = !_useA; }
@@ -191,26 +228,33 @@ namespace VideoDirector.Models
                 var wait = due - pace.Elapsed;
                 if (wait > TimeSpan.Zero) Thread.Sleep(wait);
 
-                byte[] buf;
-                lock (_gate) buf = _latest;
+                byte[] src;
+                lock (_gate) src = _latest;
 
-                if (buf == null) buf = lastSent ?? new byte[_outWidth * _outHeight * 4];
-                else if (ReferenceEquals(buf, lastSent)) Interlocked.Increment(ref _repeats);
-                lastSent = buf;
+                byte[] dest = _encodePool[_encodeSlot];
+                _encodeSlot = (_encodeSlot + 1) % _encodePool.Length;
 
-                var sample = MediaStreamSample.CreateFromBuffer(buf.AsBuffer(), due);
+                if (src == null)
+                {
+                    if (lastSent != null) Buffer.BlockCopy(lastSent, 0, dest, 0, dest.Length);
+                    else Array.Clear(dest, 0, dest.Length);
+                    Interlocked.Increment(ref _repeats);
+                }
+                else
+                {
+                    Buffer.BlockCopy(src, 0, dest, 0, dest.Length);
+                    if (ReferenceEquals(src, lastSent)) Interlocked.Increment(ref _repeats);
+                    lastSent = src;
+                }
+
+                var sample = MediaStreamSample.CreateFromBuffer(dest.AsBuffer(), due);
                 sample.Duration = frameDuration;
                 e.Request.Sample = sample;
                 index++;
                 Interlocked.Increment(ref _encoded);
             };
 
-            var profile = MediaEncodingProfile.CreateMp4(
-                _outHeight >= 1000 ? VideoEncodingQuality.HD1080p : VideoEncodingQuality.HD720p);
-            profile.Video.Width = (uint)_outWidth;
-            profile.Video.Height = (uint)_outHeight;
-            profile.Video.FrameRate.Numerator = (uint)fps;
-            profile.Video.FrameRate.Denominator = 1;
+            var profile = CreateSizedMp4(_outWidth, _outHeight, fps);
 
             using (var stream = await output.OpenAsync(FileAccessMode.ReadWrite))
             {
@@ -229,6 +273,53 @@ namespace VideoDirector.Models
             try { _scaled?.Dispose(); } catch { }
             _session = null; _pool = null; _scaled = null;
             _bufA = _bufB = _latest = null;
+            _encodePool = null;
+        }
+
+        /// <summary>
+        /// MP4 profile whose Width/Height are the ones we asked for, not a quality preset.
+        /// </summary>
+        /// <remarks>
+        /// CreateMp4(HD1080p) is 1920×1080. Writing profile.Video.Width under CsWinRT mutates a
+        /// copy, so the encoder kept the preset. A 2752×1158 canvas therefore exported as exactly
+        /// 1920×1080. Build the H.264 properties, assign the whole Video object back, and throw
+        /// if a read-back still disagrees.
+        /// </remarks>
+        internal static MediaEncodingProfile CreateSizedMp4(int width, int height, int fps = 30)
+        {
+            width = Align16(width);
+            height = Align16(height);
+            fps = Math.Max(1, fps);
+
+            var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
+            var video = profile.Video;
+            video.Width = (uint)width;
+            video.Height = (uint)height;
+            video.FrameRate.Numerator = (uint)fps;
+            video.FrameRate.Denominator = 1;
+            video.PixelAspectRatio.Numerator = 1;
+            video.PixelAspectRatio.Denominator = 1;
+            ulong pixels = (ulong)width * (ulong)height;
+            video.Bitrate = (uint)Math.Clamp(
+                pixels * 8_000_000UL / (1920UL * 1080UL), 2_000_000UL, 40_000_000UL);
+            profile.Video = video;
+
+            if (profile.Video == null
+                || profile.Video.Width != (uint)width
+                || profile.Video.Height != (uint)height)
+            {
+                throw new InvalidOperationException(
+                    "encoder profile is "
+                    + (profile.Video == null ? "empty" : profile.Video.Width + "x" + profile.Video.Height)
+                    + ", wanted " + width + "x" + height);
+            }
+            return profile;
+        }
+
+        internal static int Align16(int n)
+        {
+            if (n < 16) n = 16;
+            return (n + 8) / 16 * 16;
         }
 
         // ---- IGraphicsCaptureItemInterop, through the vtable ------------------------------------

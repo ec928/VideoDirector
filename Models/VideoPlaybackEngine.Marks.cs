@@ -21,21 +21,13 @@ namespace VideoDirector.Models
         // the player pane at Scale 1, which is exactly the box Edit mode frames against. Every
         // read multiplies by this; every write divides by it. Keeping the conversion in one place
         // is what makes a mark mean the same thing at any window size.
-        // THE aspect for a clip, in one place. Everything that derives a fit rectangle must come
-        // through here or the geometry silently forks.
+        // Box layout vs mark space are deliberately different policies, not a leftover fork.
         //
-        // It used to fork three ways: TryGetMarkSpace preferred op.SourceAspect and fell back to
-        // 16:9, ApplyOverlayBox read only _overlayAspect[slot] and bailed, and the WYSIWYG rect
-        // code read only _overlayAspect[0] and fell back to 16:9 without ever consulting the clip.
-        // On a 2.39:1 source that last fallback drew and dragged the Start/Mid/End rects against a
-        // 1.78 fit — 34% out — so a rect placed visibly INSIDE the picture wrote a mark outside it,
-        // and the clip rendered with black down the edge. Same clip, three different ideas of how
-        // big it is.
-        //
-        // The clip's own SourceAspect leads because it is persisted in the project and therefore
-        // known at load, long before a decoder has opened; _overlayAspect is the live backstop for
-        // clips saved before that field existed. Returns 0 for genuinely unknown — callers must
-        // decide what to do about it rather than be handed a plausible-looking lie.
+        // AspectOf may fall back to the live slot cache: a slightly wrong *box* is cosmetic and
+        // corrects next evaluation. TryGetMarkSpace will not: a wrong *mark* is saved. The 34%
+        // defect was three fallbacks disagreeing; mark paths now wait on SourceAspect rather than
+        // borrow another clip's cache. Returns 0 for genuinely unknown — callers must hold off
+        // rather than be handed a plausible-looking lie.
         private double AspectOf(CinematicOperation op, int slot)
         {
             double aspect = op?.SourceAspect ?? 0;
@@ -54,7 +46,10 @@ namespace VideoDirector.Models
             // No 16:9 guess. Reporting false lets the caller hold off for a frame; inventing an
             // aspect produced a fit rect that disagreed with the one the surface was sized to, and
             // marks interpreted in the wrong space are exactly how framing lands off-picture.
-            double aspect = AspectOf(op, 0);
+            // SourceAspect only. Slot 0's cached aspect belongs to whichever clip last occupied
+            // that slot, which is the wrong space for a mark on any other track (or a clip whose
+            // decoder has not opened yet). 0 means wait a frame.
+            double aspect = op?.SourceAspect ?? 0;
             if (aspect <= 0) return false;
 
             var fit = ClipGeometry.Fit(aspect, vpW, vpH);
@@ -161,28 +156,16 @@ namespace VideoDirector.Models
             _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
             UpdateTelemetryOverlay(true);
 
-            double vpW = _playerControl.CanvasWidth > 0 ? _playerControl.CanvasWidth : 1920;
-            double vpH = _playerControl.CanvasHeight > 0 ? _playerControl.CanvasHeight : 1080;
-
-            // In Edit mode, the clip being edited is always isolated into slot 0.
-            //
-            // This read _overlayAspect[0] alone and fell back to 16:9, never consulting the clip.
-            // The rects are the OUTPUT frames drawn over the picture, so a fit rect that disagrees
-            // with the picture's puts them somewhere they do not belong: on a 2.39:1 source the
-            // 1.78 fallback is 34% out, and a rect dropped visibly inside the frame writes a mark
-            // outside it. Hide them rather than draw them in the wrong place — an absent rect is
-            // obviously absent, a misplaced one looks authoritative.
-            double aspect = AspectOf(op, 0);
-            if (aspect <= 0)
+            // Same space as CaptureMark / rectangle drag. Hide rather than draw in a borrowed
+            // slot aspect — an absent rect is obviously absent, a misplaced one looks authoritative.
+            if (!TryGetMarkSpace(op, out double W, out double H) || W <= 0 || H <= 0)
             {
                 _playerControl.WysiwygCanvas.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                 return;
             }
 
-            // Compute the true physical bounds of the video on the screen in Edit mode (scale 1.0)
-            double W, H;
-            if (aspect >= vpW / vpH) { W = vpW; H = vpW / aspect; }
-            else { H = vpH; W = vpH * aspect; }
+            double vpW = _playerControl.CanvasWidth;
+            double vpH = _playerControl.CanvasHeight;
 
             // The crop box aspect ratio depends on the video's intrinsic aspect ratio
             double videoAspect = W / H;

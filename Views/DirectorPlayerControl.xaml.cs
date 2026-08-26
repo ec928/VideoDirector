@@ -40,10 +40,12 @@ namespace VideoDirector.Views
         // UniformToFill overflows its slot, and an absolute pivot would not be its centre.
         public Microsoft.UI.Xaml.Media.CompositeTransform StillTransform;
         public Microsoft.UI.Xaml.Controls.Grid Frame;
-        // The clip border. Lives in BorderHost, not in Grid: above every track picture, because a
-        // shape beneath a video surface is erased rather than blended. Being above everything, it
-        // is the engine that decides when a higher opaque clip should hide it.
-        public Microsoft.UI.Xaml.Shapes.Rectangle Border;
+        // Four-edge host (up to two segments per edge). Lives in BorderHost, not in Grid: above
+        // every track picture, because a shape beneath a video surface is erased rather than
+        // blended. Being above everything, it is the engine that decides when a higher opaque
+        // clip should hide each edge.
+        public Microsoft.UI.Xaml.Controls.Canvas Border;
+        public Microsoft.UI.Xaml.Shapes.Rectangle[] BorderEdges;
 
     }
 
@@ -84,6 +86,7 @@ namespace VideoDirector.Views
 
         // PiP manipulation events (Arrange mode). Raised from the full-screen InputLayer
         public event EventHandler<(int slot, BoxGrab grab, double dx, double dy)> OverlayBoxDragged;
+        public event EventHandler OverlayBoxReleased;
         public event EventHandler<(string markType, string action, double dx, double dy)> WysiwygBoxManipulated;
         public event EventHandler<string> WysiwygBoxGrabbed;
 
@@ -488,12 +491,13 @@ namespace VideoDirector.Views
                 IsHitTestVisible = false
             });
 
-            var border = new Microsoft.UI.Xaml.Shapes.Rectangle
+            var border = new Canvas { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+            var edges = new Microsoft.UI.Xaml.Shapes.Rectangle[8];
+            for (int e = 0; e < edges.Length; e++)
             {
-                Fill = null,
-                IsHitTestVisible = false,
-                Visibility = Visibility.Collapsed
-            };
+                edges[e] = new Microsoft.UI.Xaml.Shapes.Rectangle { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+                border.Children.Add(edges[e]);
+            }
 
             var grid = new Grid
             {
@@ -515,7 +519,8 @@ namespace VideoDirector.Views
                 Transform = videoTransform,
                 StillTransform = stillTransform,
                 Frame = frame,
-                Border = border
+                Border = border,
+                BorderEdges = edges
             };
         }
 
@@ -837,9 +842,11 @@ namespace VideoDirector.Views
                 if (!_panMoved) ResetCanvasView();
                 return;
             }
+            bool wasDragging = _isDragging;
             _isDragging = false;
             _dragSlot = -1;
             InputLayer.ReleasePointerCapture(e.Pointer);
+            if (wasDragging) OverlayBoxReleased?.Invoke(this, EventArgs.Empty);
         }
 
         private void InputLayer_PointerCanceled(object? sender, PointerRoutedEventArgs e)
@@ -852,9 +859,11 @@ namespace VideoDirector.Views
                 if (!_panMoved) ResetCanvasView();
                 return;
             }
+            bool wasDragging = _isDragging;
             _isDragging = false;
             _dragSlot = -1;
             InputLayer.ReleasePointerCapture(e.Pointer);
+            if (wasDragging) OverlayBoxReleased?.Invoke(this, EventArgs.Empty);
         }
 
         private void InputLayer_PointerWheelChanged(object? sender, PointerRoutedEventArgs e)

@@ -92,7 +92,6 @@ namespace VideoDirector.Views
             }
 
             var spineColor = TrackPalette.Spine;
-            var transColor = Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x64, 0x74, 0x8B);
             bool spineGhost = _timelineMovingClip && _dragIsSpine && _dragClip != null;
 
             if (ViewModel.Tracks.Count > 0)
@@ -106,9 +105,6 @@ namespace VideoDirector.Views
                         double x = clip.StartTime.TotalSeconds * _timelinePxPerSec;
                         double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
                         AddTimelineBlock(x, RowSpineY, cw, BlockH, spineColor, clip, mainTrack.ShowAudioWaveforms);
-                        double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
-                        if (tw > 0.5)
-                            AddTimelineBlock(x + cw, RowSpineY, tw, BlockH, transColor, null, false);
                     }
                 }
                 else
@@ -128,9 +124,7 @@ namespace VideoDirector.Views
                         
                         double cw = clip.OpDuration.TotalSeconds * _timelinePxPerSec;
                         AddTimelineBlock(actualStartX, RowSpineY, cw, BlockH, spineColor, clip, mainTrack.ShowAudioWaveforms);
-                        double tw = clip.TransitionDuration.TotalSeconds * _timelinePxPerSec;
-                        if (tw > 0.5) AddTimelineBlock(actualStartX + cw, RowSpineY, tw, BlockH, transColor, null, false);
-                        x += cw + tw;
+                        x += cw;
                         drawn++;
                     }
 

@@ -181,6 +181,8 @@ namespace VideoDirector.Models
                 else SetOverlayRender(i, OverlayRender.Hidden, null);
             }
 
+            CurrentPlayingOperation = tracks.Count > 0 ? _activeOverlay[0] : null;
+
             // AFTER the slots have been resolved, never before.
             //
             // This call used to sit at the top of the method, so the HUD reported the slot contents
@@ -218,7 +220,8 @@ namespace VideoDirector.Models
         /// <summary>Frames belong to Arrange, and only while nothing is rolling.</summary>
         /// <remarks>One definition, because ApplyOverlayBox needs the same rule to decide whether to
         /// place a frame, and two copies of it would drift.</remarks>
-        private bool ShowClipFrames => !IsActivelyPlaying && _mode == EditorMode.Arrange;
+        private bool ShowClipFrames =>
+            !IsActivelyPlaying && !_viewModel.IsRecording && _mode == EditorMode.Arrange;
 
         private void SetOverlayRender(int track, OverlayRender mode, CinematicOperation clip)
         {
@@ -488,6 +491,7 @@ namespace VideoDirector.Models
                 void OnOpened(MediaPlayer sender, object args)
                 {
                     sender.MediaOpened -= OnOpened;
+                    sender.MediaFailed -= OnFailed;
                     System.Threading.Interlocked.Decrement(ref _pendingMediaOpens);
 
                     // The overlay this slot wants may have changed while we were waiting
