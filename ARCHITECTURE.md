@@ -187,6 +187,20 @@ This chronological ledger records all established solutions and performance opti
   The lesson is the one this project keeps relearning, one level up from "a green build proves nothing": **a passing test against a fixture you wrote yourself proves nothing either.** Export verification must run the projects in `Tests/`, which is what anyone actually loads.
 * **The Warning Is Computed, Not Boilerplate.** The old MediaComposition exporter walked the clips and named only what THIS project would lose. Recording does not need that warning: it photographs the compositor, so motion, fades, speed and borders survive. Speed-changed audio is the remaining hole — mixed at 1x it would desync, so it is skipped and named on the status banner.
 
+### 🔎 The 0.9.0 Review Pass (`0.9.1`)
+
+A full-codebase review raised 22 findings; 21 were fixed and one declined. Most were ordinary holes — export starting from the playhead, looping left on during a take, `CloneClip` dropping the stream flags so a duplicated audio-only clip painted black over everything beneath it. Three are worth keeping.
+
+**A WinRT property returned a copy, and the write vanished.** `MediaEncodingProfile.Video` hands back a copy of the struct, so `profile.Video.Width = w` compiled, ran, and did nothing: every export came out 1920x1080 whatever the canvas was. The fix assigns the struct back and then VERIFIES it reads back, throwing if it does not — a silent no-op write is worth failing loudly over.
+
+It was found by measuring a real export, not by reading code. Two rounds of inspection had already declared the canvas-sizing fix correct, because the call site does pass the canvas through. The file itself said otherwise: exactly 1920x1080, the preset's own resolution, rather than anything with the project's 2.377:1 shape. **A single `--record` against `Tests/0-Test7.json` settled in one run what code review had got wrong twice.**
+
+**Chrome occlusion cannot be expressed with one rectangle.** `UIElement.Clip` is a `RectangleGeometry`, and what remains of a border after a higher clip partly covers it is an L-shape. Two successive attempts traded one artifact for another: trimming to "the largest surviving strip" clipped three sides away when a small clip sat in the MIDDLE of a larger one, and gating that to only spanning covers left the border drawn over the top of the clip above it — which then baked into an export. The border is now four edge rectangles; the visible part of an edge after a rectangular cover is itself a rectangle, so nothing has to be approximated.
+
+**Pure rules moved to `Models/ClipRules.cs`** — story end, mark modification, export-mux eligibility — so they are testable without WinUI. The suite went 52 to 62. That is the standing answer to "this cannot be unit tested": extract the arithmetic, test that, and use `--play`/`--record` for what genuinely needs the app.
+
+One finding was declined: `ClampFraming`'s remarks name `ClipGeometry.Allowance` deliberately, to record that coverage is the WRONG limit. That sentence prevents a regression rather than being a leftover from one.
+
 ### 🧭 One Boundary Rule, In Both Modes (`0.9.0`)
 
 Edit and Arrange now obey the same law, stated once in each place: **a thing may travel until its edge meets the boundary, and no further.** The picture may leave its frame, a clip may leave the canvas, and neither can be lost.
