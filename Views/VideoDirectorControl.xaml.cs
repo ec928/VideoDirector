@@ -354,5 +354,22 @@ namespace VideoDirector.Views
                 if (track.Clips.Contains(clip)) return track;
             return null;
         }
+
+        private void AlwaysShowFramesToggle_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (MainWindow.Instance != null && sender is Microsoft.UI.Xaml.Controls.ToggleSwitch ts)
+            {
+                ts.IsOn = MainWindow.Instance.AlwaysShowFullFrames;
+            }
+        }
+
+        private void AlwaysShowFramesToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (MainWindow.Instance != null && sender is Microsoft.UI.Xaml.Controls.ToggleSwitch ts)
+            {
+                MainWindow.Instance.AlwaysShowFullFrames = ts.IsOn;
+                _playbackEngine?.Invalidate(); // forces a render refresh
+            }
+        }
     }
 }

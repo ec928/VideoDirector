@@ -323,10 +323,20 @@ namespace VideoDirector.Models
             var rightE = new ClipGeometry.GeoRect(left + w, top, 1, h);
 
             var segs = new List<ClipGeometry.GeoRect>(8);
-            OccludeStrip(slot, topE, segs);
-            OccludeStrip(slot, botE, segs);
-            OccludeStrip(slot, leftE, segs);
-            OccludeStrip(slot, rightE, segs);
+            if (MainWindow.Instance != null && MainWindow.Instance.AlwaysShowFullFrames)
+            {
+                segs.Add(topE);
+                segs.Add(botE);
+                segs.Add(leftE);
+                segs.Add(rightE);
+            }
+            else
+            {
+                OccludeStrip(slot, topE, segs);
+                OccludeStrip(slot, botE, segs);
+                OccludeStrip(slot, leftE, segs);
+                OccludeStrip(slot, rightE, segs);
+            }
 
             if (segs.Count == 0) { HideFrameRect(slot); return; }
 

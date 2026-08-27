@@ -30,6 +30,9 @@ namespace VideoDirector
             // Persisted because it is exactly the setting you configure once, before an event,
             // and would not think to set again after a restart.
             public int PresentDisplayIndex { get; set; } = -1;
+
+            // User preference to draw clip frames in full, without occlusion.
+            public bool AlwaysShowFullFrames { get; set; } = true;
         }
 
         private sealed class OldModernSettings
@@ -44,12 +47,14 @@ namespace VideoDirector
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "VideoDirector", "settings.json");
 
-        private AppSettings _currentSettings = new();
+        private AppSettings _currentSettings = new AppSettings();
 
         public MainWindow()
         {
             Instance = this;
             this.InitializeComponent();
+
+            this.Title = "VideoDirector";
             if (this.Content is FrameworkElement fe) fe.RequestedTheme = Microsoft.UI.Xaml.ElementTheme.Dark;
             this.SystemBackdrop = new MicaBackdrop();
 
@@ -116,6 +121,7 @@ namespace VideoDirector
                     var loaded = JsonSerializer.Deserialize<AppSettings>(json);
                     if (loaded != null) settings = loaded;
                     PresentDisplayIndex = settings.PresentDisplayIndex;
+                    AlwaysShowFullFrames = settings.AlwaysShowFullFrames;
                 }
                 catch { }
             }
@@ -173,6 +179,9 @@ namespace VideoDirector
         /// <summary>Which display a performance takes over. Saved with the window settings.</summary>
         public int PresentDisplayIndex { get; set; } = -1;
 
+        /// <summary>User preference to always show full clip frames instead of occluding them behind higher tracks.</summary>
+        public bool AlwaysShowFullFrames { get; set; } = true;
+
         private void SaveAllSettings()
         {
             try
@@ -185,6 +194,7 @@ namespace VideoDirector
                 _currentSettings.WindowX = _appWindow.Position.X;
                 _currentSettings.WindowY = _appWindow.Position.Y;
                 _currentSettings.PresentDisplayIndex = PresentDisplayIndex;
+                _currentSettings.AlwaysShowFullFrames = AlwaysShowFullFrames;
 
                 string json = JsonSerializer.Serialize(_currentSettings, new JsonSerializerOptions
                 {
