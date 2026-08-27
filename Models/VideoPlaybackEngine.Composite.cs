@@ -243,6 +243,7 @@ namespace VideoDirector.Models
             if (_mode != EditorMode.Arrange) return;
 
             var tracks = _viewModel.Tracks;
+            _playerControl.SelectedOverlaySlot = -1;
 
             for (int i = 0; i < MaxOverlayTracks; i++)
             {
@@ -352,6 +353,8 @@ namespace VideoDirector.Models
                 && v.Frame.Children[0] is Microsoft.UI.Xaml.Shapes.Path framePath)
             {
                 bool isSelected = clip != null && _viewModel?.SelectedClip == clip;
+                if (isSelected) _playerControl.SelectedOverlaySlot = track;
+
                 var colour = track == 0 ? Views.TrackPalette.Spine : Views.TrackPalette.Overlay(track - 1);
 
                 var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(

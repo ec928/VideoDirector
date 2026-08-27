@@ -61,6 +61,9 @@ namespace VideoDirector.Views
 
         /// <summary>Set by the host so the wheel knows whether a clip owns it.</summary>
         public bool HasSelection { get; set; }
+        
+        /// <summary>The slot index of the currently selected clip, or -1 if none is selected.</summary>
+        public int SelectedOverlaySlot { get; set; } = -1;
 
         /// <summary>The middle button clears the clip selection before it pans.</summary>
         public event EventHandler? DeselectRequested;
@@ -559,10 +562,21 @@ namespace VideoDirector.Views
         // plain bounds test is valid.
         private int HitTestOverlaySlot(Point p)
         {
+            // First check if the currently selected clip is hit, so it can be moved even if occluded
+            int selectedSlot = SelectedOverlaySlot;
+            if (selectedSlot >= 0 && selectedSlot < OverlayVisuals.Length)
+            {
+                if (IsInsideBox(OverlayVisuals[selectedSlot].Grid, p, GrabOutset)) 
+                    return selectedSlot;
+            }
+
             // Topmost first, and each box is tested with its grab outset so the edge is catchable
             // from either side of the drawn line.
             for (int i = OverlayVisuals.Length - 1; i >= 0; i--)
+            {
+                if (i == selectedSlot) continue;
                 if (IsInsideBox(OverlayVisuals[i].Grid, p, GrabOutset)) return i;
+            }
             return -1;
         }
 
