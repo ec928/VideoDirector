@@ -32,7 +32,7 @@ namespace VideoDirector
             public int PresentDisplayIndex { get; set; } = -1;
 
             // User preference to draw clip frames in full, without occlusion.
-            public bool AlwaysShowFullFrames { get; set; } = true;
+            public bool AlwaysShowFullFrames { get; set; } = false;
         }
 
         private sealed class OldModernSettings
@@ -180,7 +180,7 @@ namespace VideoDirector
         public int PresentDisplayIndex { get; set; } = -1;
 
         /// <summary>User preference to always show full clip frames instead of occluding them behind higher tracks.</summary>
-        public bool AlwaysShowFullFrames { get; set; } = true;
+        public bool AlwaysShowFullFrames { get; set; } = false;
 
         private void SaveAllSettings()
         {
