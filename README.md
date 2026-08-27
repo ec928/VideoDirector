@@ -96,6 +96,46 @@ Neither path carries a `$(Platform)` segment, deliberately. The SDK only default
 
 > Deliberately **not** published as a single file. Single-file self-extracts the entire runtime to `%TEMP%` on the first launch after every publish, which measurably slows cold start.
 
+## 🔬 Playback Instrumentation
+
+Playback timing problems are not diagnosable by reading code — the costs live in the media pipeline, not
+in the call graph. The engine can trace what the UI thread actually did, gated behind an environment
+variable so it costs nothing when off.
+
+```
+set VD_TRACE=1
+set VD_TRACE_MS=45000
+VideoDirector.exe --play
+```
+
+| Variable | Meaning |
+|---|---|
+| `VD_TRACE` | any non-empty value enables tracing |
+| `VD_TRACE_MS` | how long to record before writing the log (default 25000) |
+
+The log is written to `%TEMP%d-trace.log`, tab-separated as `ms`, `tick`, `gapMs`, `event`. A row with a
+`gapMs` is one frame of the render loop; the events between two ticks are what happened during that frame.
+Recorded events include `LOOP wrap to 0`, `PRELOAD`/`PRIMED`, `OPEN`/`OPENED`, `REACTIVATE`, `DRIFT-SEEK`,
+`SEEK-DONE`, GC collections with heap size, and bytes allocated per 60 frames.
+
+`DRIFT-SEEK` and `REACTIVATE` carry `vol=`. **This matters more than anything else in the log:** overlays
+default to `Volume = 0`, so only the slot carrying the audio bed can produce an audible stutter. A silent
+slot seeking hard is not the bug you are chasing — that mistake cost two wrong fixes (see §4 of
+`ARCHITECTURE.md`).
+
+`trace-startup.ps1` runs the whole thing and summarises it:
+
+```
+.	race-startup.ps1 [project] -Seconds 45
+```
+
+It launches with `--play`, stops the app, and reports preload cost, tick count, median and worst frame gap,
+frames lost at 60Hz, loop wraps, collections, and every stall over 20ms with the events near it. Preload and
+the first post-preload tick are excluded from the frame-drop figures, because neither is a dropped frame.
+
+> Frame gaps and audible stutter are **different measurements**. A uniform frame gap cannot cause an
+> intermittent stutter; when the two disagree, the frame gap is not what is being heard.
+
 ## 📋 Status
 
 Active development. The timeline, compositor, Ken Burns model, canvas and mode system are implemented and in daily use. Export records the performance and keeps everything you see; it is silent only in the sense that it takes as long as the project runs. Expect rough edges.

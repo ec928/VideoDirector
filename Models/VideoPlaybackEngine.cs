@@ -73,8 +73,16 @@ namespace VideoDirector.Models
         private int _traceTick;
         private long _traceLastMs;
 
+        // Long enough to cover several loops: the stutter recurs every few passes, not only on the
+        // first, so a four second window could not see the pattern at all.
+        private static readonly int TraceMs =
+            int.TryParse(Environment.GetEnvironmentVariable("VD_TRACE_MS"), out var _ms) ? _ms : 25000;
+
         private bool Tracing => TraceEnabled && _traceClock != null && !_traceWritten
-                                && _traceClock.ElapsedMilliseconds <= 4000;
+                                && _traceClock.ElapsedMilliseconds <= TraceMs;
+
+        private int _gc0, _gc1, _gc2;
+        private long _allocLast;
 
         private void TraceBegin()
         {
@@ -84,28 +92,55 @@ namespace VideoDirector.Models
             _traceTick = 0;
             _traceLastMs = 0;
             _traceClock = System.Diagnostics.Stopwatch.StartNew();
+            _gc0 = GC.CollectionCount(0); _gc1 = GC.CollectionCount(1); _gc2 = GC.CollectionCount(2);
             _trace.Add("ms	tick	gapMs	event");
         }
 
+        // Buffering/seek callbacks arrive on the media pipeline's thread, not the UI thread, so
+        // every writer to _trace has to take the same lock or the list tears under load.
         internal void TraceEvent(string what)
         {
             if (!Tracing) return;
-            _trace.Add(string.Join("	", _traceClock.ElapsedMilliseconds, _traceTick, "", what));
+            lock (_trace)
+                _trace.Add(string.Join("	", _traceClock.ElapsedMilliseconds, _traceTick, "", what));
         }
 
         private void TraceTick()
         {
             if (!Tracing) { TraceFlush(); return; }
+            lock (_trace) {
             _traceTick++;
             long ms = _traceClock.ElapsedMilliseconds;
+
+            // A collection between two ticks blocks the thread, and a periodic stutter is exactly
+            // what allocation pressure looks like. Recorded per gen so the cost is attributable.
+            int g0 = GC.CollectionCount(0), g1 = GC.CollectionCount(1), g2 = GC.CollectionCount(2);
+            if (g0 != _gc0 || g1 != _gc1 || g2 != _gc2)
+            {
+                _trace.Add(string.Join("	", ms, _traceTick, "",
+                    "GC gen0+" + (g0 - _gc0) + " gen1+" + (g1 - _gc1) + " gen2+" + (g2 - _gc2)
+                    + " heap=" + (GC.GetTotalMemory(false) / (1024 * 1024)) + "MB"));
+                _gc0 = g0; _gc1 = g1; _gc2 = g2;
+            }
+
+            // How hard this thread is allocating. A full collection every couple of seconds has to
+            // be fed by something, and the per-frame render path is the candidate.
+            long alloc = GC.GetAllocatedBytesForCurrentThread();
+            if (_allocLast > 0 && _traceTick % 60 == 0)
+                _trace.Add(string.Join("	", ms, _traceTick, "",
+                    "ALLOC " + ((alloc - _allocLast) / 1024) + "KB over 60 frames"));
+            if (_traceTick % 60 == 0) _allocLast = alloc;
+            if (_allocLast == 0) _allocLast = alloc;
+
             _trace.Add(string.Join("	", ms, _traceTick, ms - _traceLastMs, ""));
             _traceLastMs = ms;
+            }
         }
 
         private void TraceFlush()
         {
             if (!TraceEnabled || _traceClock == null || _traceWritten) return;
-            if (_traceClock.ElapsedMilliseconds <= 4000) return;
+            if (_traceClock.ElapsedMilliseconds <= TraceMs) return;
             _traceWritten = true;
             try
             {
@@ -302,9 +337,25 @@ namespace VideoDirector.Models
 
             _viewModel.IsPlaying = true;
             _isPaused = false;
-            _isAnimating = true;
+
+            // NOT animating yet. Loading a source activates its slot, and an activation while the
+            // transport is running presses play — so the players used to start rolling partway
+            // through the preload and were already ahead of the story clock by the time it
+            // started, which drift correction then jumped. Staying stopped until the clock is
+            // about to start parks each slot on its in-point instead. Set true below.
+            _isAnimating = false;
             
             for (int i = 0; i < MaxOverlayTracks; i++) _activeOverlay[i] = null;
+
+            TraceBegin();
+
+            // BEFORE THE CLOCK, not during it. The loading has to be finished by the time the
+            // transport starts, or the work lands in the middle of playback - which is the whole
+            // point of doing it here.
+            await PreloadActiveSourcesAsync(_viewModel.CurrentStoryTime);
+            await PrimeActiveSlotsAsync();
+
+            _isAnimating = true;   // clock and players start together
 
             if (!_isPlaybackLoopRunning)
             {
@@ -312,7 +363,103 @@ namespace VideoDirector.Models
                 Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += PlaybackTimer_Tick;
             }
             _lastTickTime = TimeSpan.Zero;
-            TraceBegin();
+        }
+
+        /// <summary>Put every slot on its first frame before the story clock starts.</summary>
+        /// <remarks>
+        /// Opening a source is not the same as being ready to play it. A seek costs 130-340ms to
+        /// land, and the player does not advance while it settles - so a slot activated on the
+        /// first tick starts a quarter second behind the clock and stays there until drift
+        /// correction jumps it, roughly half a second in. That jump is audible on whichever slot
+        /// carries the audio, and it always lands just after the track starts.
+        ///
+        /// Priming with the transport stopped avoids it: SeekAndPlayOverlay parks a slot rather
+        /// than playing it while _isAnimating is false, so each player settles onto its in-point
+        /// and waits there. The first tick then finds zero drift and simply presses play (see the
+        /// resume at the end of ApplyOverlayDriftCorrection).
+        /// </remarks>
+        private async Task PrimeActiveSlotsAsync()
+        {
+            EvaluateOverlays(_viewModel.CurrentStoryTime);   // transport is stopped: parks, not plays
+
+            // Bounded like the preload wait: a seek that never reports back must not hold up the
+            // transport. 600ms clears the worst latency measured with room to spare.
+            var settleClock = System.Diagnostics.Stopwatch.StartNew();
+            while (settleClock.ElapsedMilliseconds < 600)
+            {
+                bool settling = false;
+                for (int i = 0; i < MaxOverlayTracks; i++)
+                    if (SeekSettling(i)) { settling = true; break; }
+                if (!settling) break;
+                await Task.Delay(15);
+            }
+            TraceEvent("PRIMED after " + settleClock.ElapsedMilliseconds + "ms");
+        }
+        /// <summary>Open every source the playhead needs before playback begins.</summary>
+        /// <remarks>
+        /// StartPlaybackAsync clears every slot, so each clip at the playhead used to open during
+        /// the first frames of playback - and the work at COMPLETION (seek, cache the aspect,
+        /// re-lay out) is what blocks the UI thread. Measured on 0-Test8 with trace-startup.ps1:
+        /// frame time is a steady 7ms with holes of 39ms and 86ms, eleven frames lost, every hole
+        /// sitting on an open. A blocked UI thread starves whatever else needs it, which is the
+        /// stutter heard at the start.
+        ///
+        /// Spreading the opens over separate frames was tried and measured: it redistributes the
+        /// blocking rather than reducing it, because three completions cost the same whether they
+        /// land on one frame or three. The only way to stop it interrupting audio is for it not to
+        /// happen while audio is playing.
+        ///
+        /// Nothing is lost by waiting: the clock already stalls on _pendingMediaOpens for exactly
+        /// this period, so the delay before the first frame is the same - it is simply spent before
+        /// the transport starts rather than inside it.
+        /// </remarks>
+        private async Task PreloadActiveSourcesAsync(TimeSpan at)
+        {
+            var waits = new System.Collections.Generic.List<Task>();
+            var tracks = _viewModel.Tracks;
+
+            for (int i = 0; i < MaxOverlayTracks && i < tracks.Count; i++)
+            {
+                var clip = ResolveActiveClip(tracks[i], at);
+                if (clip == null || clip.IsStill || clip.IsImage) continue;
+                if (string.IsNullOrWhiteSpace(clip.FilePath)) continue;
+
+                var player = _overlayPlayer[i];
+                if (player == null) continue;
+                if (player.Source != null &&
+                    string.Equals(PlayerPath(player), clip.FilePath, StringComparison.OrdinalIgnoreCase))
+                    continue;   // already open on the right file
+
+                var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                void Done(MediaPlayer sender, object args)
+                {
+                    sender.MediaOpened -= Done;
+                    sender.MediaFailed -= Failed;
+                    ready.TrySetResult(true);
+                }
+                void Failed(MediaPlayer sender, MediaPlayerFailedEventArgs args)
+                {
+                    sender.MediaOpened -= Done;
+                    sender.MediaFailed -= Failed;
+                    ready.TrySetResult(false);   // a bad file must not hold up the transport
+                }
+
+                player.MediaOpened += Done;
+                player.MediaFailed += Failed;
+                TraceEvent("PRELOAD slot=" + i + " " + System.IO.Path.GetFileName(clip.FilePath));
+                HookSeekTracking(player, i);
+                try { player.Source = MediaSource.CreateFromUri(new Uri(clip.FilePath)); }
+                catch { Failed(player, null); }
+
+                waits.Add(ready.Task);
+            }
+
+            if (waits.Count == 0) return;
+
+            // Bounded, so a source that never opens cannot stop playback starting at all.
+            await Task.WhenAny(Task.WhenAll(waits), Task.Delay(3000));
+            TraceEvent("PRELOAD done");
         }
 
         public void StopPlayback()
@@ -415,6 +562,7 @@ namespace VideoDirector.Models
             {
                 if (_viewModel.IsLooping)
                 {
+                    TraceEvent("LOOP wrap to 0");
                     _viewModel.CurrentStoryTime = TimeSpan.Zero;
                 }
                 else

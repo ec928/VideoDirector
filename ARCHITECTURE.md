@@ -187,6 +187,49 @@ This chronological ledger records all established solutions and performance opti
   The lesson is the one this project keeps relearning, one level up from "a green build proves nothing": **a passing test against a fixture you wrote yourself proves nothing either.** Export verification must run the projects in `Tests/`, which is what anyone actually loads.
 * **The Warning Is Computed, Not Boilerplate.** The old MediaComposition exporter walked the clips and named only what THIS project would lose. Recording does not need that warning: it photographs the compositor, so motion, fades, speed and borders survive. Speed-changed audio is the remaining hole — mixed at 1x it would desync, so it is skipped and named on the status banner.
 
+### 🔊 The Audio Stutter Was Four Bugs With One Cause (`0.9.2`)
+
+Playback stuttered audibly at the start of the track and at every loop wrap. It turned out to be four
+separate defects that all reduce to the same mistake: **correcting playback against a position the
+player had not finished producing.**
+
+A `MediaPlayer` seek is not instant — measured here at **130–340ms** to land, and while it settles the
+player keeps reporting its OLD position. Drift correction fired at a **200ms** threshold. A threshold
+smaller than the latency of its own correction cannot converge, and it did not: one slot re-seeked every
+~175ms indefinitely.
+
+1. **Corrections stacked on unlanded seeks.** Gated on `SeekCompleted` — the only honest signal that a
+   correction has taken effect. `SeekSettling` expires after 1s so a slot can never be locked out.
+2. **Seek targets were stale on arrival.** A correction aimed at "now" lands ~250ms late and immediately
+   re-trips the same threshold. Targets are now aimed at where the clip should be **when the seek lands**,
+   using each slot's own measured latency (`SeekLatencySeconds`, an EMA seeded at 250ms).
+3. **The transport ran during preload.** Loading a source activates its slot, and an activation while the
+   transport is running presses play — so players started rolling partway through the preload. The clock
+   and the players now start together.
+4. **Corrections fired during play spin-up.** `Position` lags for ~200ms after `Play()`. That read as 200ms
+   of drift within 130ms of pressing play — faster than drift can physically accumulate. Starting now opens
+   a settle window the same way a seek does.
+
+**One seek is inaudible; two close together is the stutter.** This is the finding the fix rests on, and it
+is why the wrap re-sync — which genuinely must jump ~12s — needed no special handling once the *spurious*
+second seek was removed. Across a 60s run: audio-slot corrections at startup 2 → **0**, per wrap 1–2 → **1**,
+total drift seeks 40+ → **6**.
+
+**Two earlier fixes were wrong and were reverted.** A fixed 500ms refractory period worked mechanically
+(10 seeks → 6, spaced exactly 500ms) and changed nothing audible. Throttling media opens measured *worse*
+(11 → 13 frames lost). Both were reasoning about the wrong slot.
+
+**The step that unlocked it was asking which slot could actually be heard.** Overlays default to `Volume = 0`,
+so only the slot carrying the audio bed can stutter. Tracing `vol=` next to every seek showed the thrashing
+slot was silent — which is exactly why the refractory fix had looked useless. Everything before that point
+was tuning a slot nobody could hear.
+
+**The trace and the listener agreed exactly, every time.** Reports of "loops 1 and 2 stuttered, 3 and 4 were
+fine" mapped one-to-one onto which playthroughs had a second audio-slot seek — including "it stuttered twice
+near the beginning", which matched two corrections at 576ms and 1683ms. Where a measurement and an ear
+disagree, one of them is measuring the wrong thing: an intermittent symptom against a uniform 28–34ms frame
+gap was the clue that the frame gap was never the audible defect at all.
+
 ### 🔎 The 0.9.0 Review Pass (`0.9.1`)
 
 A full-codebase review raised 22 findings; 21 were fixed and one declined. Most were ordinary holes — export starting from the playhead, looping left on during a take, `CloneClip` dropping the stream flags so a duplicated audio-only clip painted black over everything beneath it. Three are worth keeping.
@@ -284,6 +327,15 @@ The lesson is procedural rather than technical: the telemetry HUD resolved in on
 8. **Mode Rules Are Pure Functions, Defined Once (`Models/ChromeRules.cs`)**: What a mode means — what is on screen, what is reachable — is arithmetic over seven booleans (cinematic, playing, edit, controls visible, dock open, inspector open, has selection), and it lives in one WinUI-free static class that `DirectorViewModel` delegates to. This is load-bearing history, not tidiness: cinematic mode was tested in five separate places, so each fix caught one caller and left the rest — arming it took the window full screen, disabled canvas zoom and pan, hid the inspector in Edit, and collapsed the track dock, none of which it should ever have done. **Cinematic changes exactly one thing: `IsPerforming = cinematic && playing`.** Never test the cinematic flag alone, and never inline one of these expressions at a call site — that is precisely how the rule forks again.
 
 9. **Edit Mode Is Specified In §2.C, And The Spec Wins**: The picture is always whole, the rectangles are overlay only, there is exactly ONE multiplier in the render path, Set records what is rendered rather than changing it, and the visible clip size window moves for navigation and nothing else. Every one of those has been broken by a change that looked locally sensible — clipping the surface to the frame, adding a canvas zoom on top of the framing transform, resetting the view inside a Set handler, clamping the pan to COVERAGE rather than contact, and hardcoding `editMode: false` in the per-frame layout. Before touching the wheel, `CaptureMark`, `ApplyOverlayBox`, or `grid.Clip`, read §2.C and check the change against all ten rules. A fix that satisfies nine of them is a regression. The rules were rewritten on 2026-08-25 because the first version contradicted itself; if a rule ever disagrees with the code again, one of the two is a defect and the disagreement is the finding.
+
+10. **Never Correct Playback Against A Player That Is Still Settling**: A seek takes 130–340ms to land and
+    `Position` lags for ~200ms after `Play()`; throughout both, the player reports a stale position. Drift
+    correction reacting to that reading seeks a player that was never out of sync, and on the slot carrying
+    audio every needless seek is an audible break. Corrections are therefore gated on `SeekSettling(slot)`,
+    and any code that moves a playhead or presses play must call `MarkSeekIssued(slot)`. Corrections that do
+    fire aim at where the clip should be **when the seek lands**, never at "now" — a correction aimed at now
+    arrives already stale and re-trips the very threshold that raised it. Lowering the 200ms threshold below
+    the seek latency, or removing the gate, restores the stutter described in §4.
 
 ---
 

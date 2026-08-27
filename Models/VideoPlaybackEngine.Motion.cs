@@ -15,7 +15,7 @@ namespace VideoDirector.Models
 {
     public partial class VideoPlaybackEngine
     {
-        private void SeekAndPlayOverlay(MediaPlayer player, CinematicOperation overlay, TimeSpan currentStoryTime)
+        private void SeekAndPlayOverlay(MediaPlayer player, int slot, CinematicOperation overlay, TimeSpan currentStoryTime)
         {
             if (player.PlaybackSession == null) return;
 
@@ -33,6 +33,13 @@ namespace VideoDirector.Models
             // seeking past end-of-media (which the player can't reach).
             bool pastEnd = TryClampToMediaLength(player, ref targetPosition);
 
+            // No lead here, deliberately. The drift path aims ahead to cover the ~250ms a seek
+            // takes to land, and that works while the clip is already running. At a fresh
+            // activation the player does not advance at all until the seek settles, so aiming
+            // ahead overshoots and then oscillates — measured as three startup corrections
+            // instead of two. MarkSeekIssued still runs so drift correction leaves this seek
+            // alone until it has actually landed.
+            MarkSeekIssued(slot);
             player.PlaybackSession.Position = targetPosition;
 
             double combinedSpeed = clipSpeed * _viewModel.PlaybackSpeed;
@@ -299,9 +306,35 @@ namespace VideoDirector.Models
             var loose = TimeSpan.FromMilliseconds(soundOnly ? 750 : 200);
             var tight = TimeSpan.FromMilliseconds(soundOnly ? 750 : 10);
 
-            if (drift > loose || (!_isAnimating && drift > tight) || (_isPaused && drift > tight))
+            // Never stack a correction on top of one that has not landed yet. The player still
+            // reports its pre-seek position while a seek is settling, so the drift measured above
+            // is the drift we are already fixing — acting on it again seeks a second time, and on
+            // the slot carrying audio every extra seek is an audible break.
+            if ((drift > loose || (!_isAnimating && drift > tight) || (_isPaused && drift > tight))
+                && !SeekSettling(slot))
             {
-                player.PlaybackSession.Position = expectedPosition;
+                // Aim at where the clip should be when the seek LANDS, not where it should be now.
+                // A seek takes long enough that a correction aimed at "now" arrives already ~200ms
+                // stale — which trips this same threshold again and fires a second seek a quarter
+                // second later. One seek is inaudible; the second one is the stutter. Only the
+                // running clock needs this: paused, the target is not moving.
+                TimeSpan seekTarget = expectedPosition;
+                if (_isAnimating && !_isPaused)
+                {
+                    double runRate = clipSpeed * _viewModel.PlaybackSpeed;
+                    if (runRate > 0)
+                    {
+                        seekTarget += TimeSpan.FromSeconds(SeekLatencySeconds(slot) * runRate);
+                        // Compensation must never push the target past end-of-media.
+                        TryClampToMediaLength(player, ref seekTarget);
+                    }
+                }
+
+                TraceEvent("DRIFT-SEEK   slot=" + slot + " vol=" + overlay.Volume
+                           + " drift=" + (long)drift.TotalMilliseconds + "ms lead="
+                           + (long)(seekTarget - expectedPosition).TotalMilliseconds + "ms");
+                MarkSeekIssued(slot);
+                player.PlaybackSession.Position = seekTarget;
             }
 
             // We're back in-bounds (not past end-of-media) — make sure the player is actually
@@ -319,6 +352,12 @@ namespace VideoDirector.Models
                 if (player.Volume != effectiveVolume) player.Volume = effectiveVolume;
                 if (player.PlaybackSession.PlaybackState != Windows.Media.Playback.MediaPlaybackState.Playing)
                 {
+                    // Starting is not instant either, and Position lags while the pipeline spins
+                    // up - measured as 200ms of apparent drift within 130ms of pressing play, far
+                    // faster than drift can actually accumulate. Correcting against that reading
+                    // seeks a player that was never out of sync. Hold corrections off the same way
+                    // a seek does until it has had time to report honestly.
+                    MarkSeekIssued(slot);
                     player.Play();
                 }
             }

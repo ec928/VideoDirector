@@ -6,7 +6,7 @@
 #
 #   .\trace-startup.ps1                 -> Tests\0-Test8.json
 #   .\trace-startup.ps1 Tests\0-Test7.json
-param([string]$Project = "Tests\0-Test8.json", [int]$Seconds = 8)
+param([string]$Project = "Tests\0-Test8.json", [int]$Seconds = 30)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -28,14 +28,36 @@ Start-Sleep -Milliseconds 400
 if (-not (Test-Path $log)) { throw "no trace written - did playback start?" }
 
 $rows = Import-Csv $log -Delimiter "`t"
+
+# Loading before the transport starts is not a dropped frame - nothing is playing yet. Measure
+# from the first tick after preloading finishes, and report the wait on its own.
+$preload = $rows | Where-Object { $_.event -like "PRELOAD*" }
+$startMs = 0
+if ($preload) {
+    $done = $preload | Where-Object { $_.event -eq "PRELOAD done" } | Select-Object -Last 1
+    if ($done) { $startMs = [int]$done.ms }
+}
+if ($startMs -gt 0) {
+    $rows = $rows | Where-Object { [int]$_.ms -ge $startMs }
+    # The first tick after the wait carries a gap that spans it, so it measures the wait and not
+    # a dropped frame. Drop exactly that one.
+    $first = $rows | Where-Object { $_.gapMs -ne "" } | Select-Object -First 1
+    if ($first) { $rows = $rows | Where-Object { -not ($_.ms -eq $first.ms -and $_.tick -eq $first.tick) } }
+}
 $ticks = $rows | Where-Object { $_.gapMs -ne "" } | ForEach-Object { [int]$_.gapMs }
 $holes = $rows | Where-Object { $_.gapMs -ne "" -and [int]$_.gapMs -gt 20 }
 
 "project      : $(Split-Path $proj -Leaf)"
+if ($startMs -gt 0) { "preload      : $startMs ms before the clock started (not a dropped frame)" }
 "ticks        : $($ticks.Count)"
 "median gap   : $(($ticks | Sort-Object)[[int]($ticks.Count/2)]) ms"
 "worst gap    : $(($ticks | Measure-Object -Maximum).Maximum) ms"
 "frames lost  : $((($ticks | Where-Object { $_ -gt 20 } | Measure-Object -Sum).Sum / 16.7) -as [int]) (at 60Hz)"
+""
+"loops and collections:"
+foreach ($e in ($rows | Where-Object { $_.event -like "LOOP*" -or $_.event -like "GC*" -or $_.event -like "BUFFER*" -or $_.event -like "REACTIVATE*" })) {
+    "  {0,6}ms  {1}" -f [int]$e.ms, $e.event
+}
 ""
 "stalls over 20ms, with what happened around them:"
 foreach ($h in $holes) {

@@ -60,6 +60,66 @@ namespace VideoDirector.Models
             }
         }
 
+        // A seek is not instant: measured at 130-340ms to land on this machine. Until it lands
+        // the player still reports its OLD position, so drift correction sees the same drift it
+        // just corrected and fires again — a loop that cannot converge, because the correction
+        // latency is larger than the 200ms threshold that triggers it. SeekCompleted is the only
+        // honest signal that a correction has actually taken effect.
+        private readonly bool[] _seekHooked = new bool[MaxOverlayTracks];
+        private readonly bool[] _seekPending = new bool[MaxOverlayTracks];
+        private readonly long[] _seekIssuedAt = new long[MaxOverlayTracks];
+        private readonly double[] _seekLatencyMs = new double[MaxOverlayTracks];
+
+        private void HookSeekTracking(MediaPlayer player, int slot)
+        {
+            if (_seekHooked[slot]) return;
+            var session = player.PlaybackSession;
+            if (session == null) return;
+            _seekHooked[slot] = true;
+            session.SeekCompleted += (s2, e2) =>
+            {
+                long took = _seekPending[slot] ? Environment.TickCount64 - _seekIssuedAt[slot] : -1;
+                if (took > 0 && took <= 1000)
+                    _seekLatencyMs[slot] = _seekLatencyMs[slot] <= 0
+                        ? took
+                        : _seekLatencyMs[slot] * 0.7 + took * 0.3;
+                _seekPending[slot] = false;
+                TraceEvent("SEEK-DONE    slot=" + slot + (took >= 0 ? " took=" + took + "ms" : " (unsolicited)"));
+            };
+        }
+
+        // How long this slot's seeks actually take, smoothed. A seek lands at the position we asked
+        // for, but by then the story clock has moved on by this much — so a correction aimed at
+        // "now" is guaranteed to arrive already wrong by roughly this figure. Seeded from the
+        // measured range until the slot has reported a real one; it only has to be close enough to
+        // keep the residual under the threshold that would trigger a second seek.
+        private double SeekLatencySeconds(int slot)
+        {
+            double ms = _seekLatencyMs[slot] <= 0 ? 250 : _seekLatencyMs[slot];
+            return Math.Clamp(ms, 0, 500) / 1000.0;
+        }
+
+        // Records that we have just moved this slot's playhead. Paired with SeekCompleted above.
+        private void MarkSeekIssued(int slot)
+        {
+            _seekPending[slot] = true;
+            _seekIssuedAt[slot] = Environment.TickCount64;
+        }
+
+        // True while this slot's last seek is still settling. Bounded: if SeekCompleted never
+        // arrives (a failed or superseded seek) the slot must not be locked out of correction
+        // forever, so the flag expires well past the worst latency we have measured.
+        private bool SeekSettling(int slot)
+        {
+            if (!_seekPending[slot]) return false;
+            if (Environment.TickCount64 - _seekIssuedAt[slot] > 1000)
+            {
+                _seekPending[slot] = false;
+                return false;
+            }
+            return true;
+        }
+
         // Empty at this time, but keep the decoder: a later clip on this track (or a loop)
         // may want the file we just parked. ReleaseOverlaySlot would throw it away.
         private void StandDownSlot(int slot)
@@ -540,7 +600,7 @@ namespace VideoDirector.Models
             if (TryReviveParkedPlayer(slot, overlay.FilePath))
             {
                 player = _overlayPlayer[slot];
-                SeekAndPlayOverlay(player, overlay, currentStoryTime);
+                SeekAndPlayOverlay(player, slot, overlay, currentStoryTime);
                 CacheOverlayAspect(slot, player);
                 ApplyOverlayBox(slot, overlay, false);
                 return;
@@ -572,7 +632,7 @@ namespace VideoDirector.Models
 
                     if (_activeOverlay[slot] != overlay) return;
 
-                    SeekAndPlayOverlay(sender, overlay, _viewModel.CurrentStoryTime);
+                    SeekAndPlayOverlay(sender, slot, overlay, _viewModel.CurrentStoryTime);
                     _dispatcher.TryEnqueue(() =>
                     {
                         CacheOverlayAspect(slot, sender);
@@ -591,15 +651,17 @@ namespace VideoDirector.Models
                 player.MediaFailed += OnFailed;
                 TraceEvent("OPEN slot=" + slot + " " + System.IO.Path.GetFileName(overlay.FilePath));
                 player.Source = MediaSource.CreateFromUri(new Uri(overlay.FilePath));
+                HookSeekTracking(player, slot);
                 TraceEvent("OPENED slot=" + slot);
             }
             else
             {
                 // Source is already correct and open (e.g. re-entering this slot for the same
                 // clip) — safe to seek immediately.
-                SeekAndPlayOverlay(player, overlay, currentStoryTime);
+                SeekAndPlayOverlay(player, slot, overlay, currentStoryTime);
                 CacheOverlayAspect(slot, player);
                 ApplyOverlayBox(slot, overlay, false);
+                TraceEvent("REACTIVATE slot=" + slot + " vol=" + overlay.Volume);
             }
         }
 
