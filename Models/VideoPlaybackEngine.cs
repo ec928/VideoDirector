@@ -20,6 +20,11 @@ namespace VideoDirector.Models
         private TimeSpan _lastTickTime = TimeSpan.Zero;
         private readonly System.Diagnostics.Stopwatch _editPreviewClock = new();
         private readonly MediaPlayer[] _overlayPlayer = new MediaPlayer[MaxOverlayTracks];
+        // Previous source for this slot, kept open. A silent clip in the middle of a track
+        // otherwise tears down the audible file, and looping back has to reopen it — Test7 seeks
+        // an hour into an mkv every round-trip and stutters. All-sound timelines stay on one
+        // decoder and loop clean; this makes the mixed case behave the same.
+        private readonly MediaPlayer[] _overlayHold = new MediaPlayer[MaxOverlayTracks];
         private readonly CinematicOperation[] _activeOverlay = new CinematicOperation[MaxOverlayTracks];
         private readonly double[] _overlayAspect = new double[MaxOverlayTracks];
 
@@ -46,6 +51,69 @@ namespace VideoDirector.Models
         public enum EditorMode { Arrange, Edit }
         private EditorMode _mode = EditorMode.Arrange;
         private int _pendingMediaOpens = 0;
+
+        // Frame number, so a diagnostic can say which frame something happened on.
+        private long _frameSeq;
+
+        // STARTUP TRACE - measures the UI thread, because that is what stutters.
+        //
+        // Ticks come from CompositionTarget.Rendering, so the interval between them IS the frame
+        // time. A steady 7ms with occasional 160ms holes means the thread was blocked, and a blocked
+        // UI thread starves whatever else needs it. Recording every tick makes the holes and what
+        // caused them line up on the same timeline.
+        //
+        // Self-limiting: collects for four seconds from the start of playback, writes once, then
+        // costs one bool test per frame. Reads state, never changes it. Enabled by VD_TRACE so a
+        // normal run pays nothing.
+        private static readonly bool TraceEnabled =
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("VD_TRACE"));
+        private readonly System.Collections.Generic.List<string> _trace = new();
+        private System.Diagnostics.Stopwatch _traceClock;
+        private bool _traceWritten;
+        private int _traceTick;
+        private long _traceLastMs;
+
+        private bool Tracing => TraceEnabled && _traceClock != null && !_traceWritten
+                                && _traceClock.ElapsedMilliseconds <= 4000;
+
+        private void TraceBegin()
+        {
+            if (!TraceEnabled) return;
+            _trace.Clear();
+            _traceWritten = false;
+            _traceTick = 0;
+            _traceLastMs = 0;
+            _traceClock = System.Diagnostics.Stopwatch.StartNew();
+            _trace.Add("ms	tick	gapMs	event");
+        }
+
+        internal void TraceEvent(string what)
+        {
+            if (!Tracing) return;
+            _trace.Add(string.Join("	", _traceClock.ElapsedMilliseconds, _traceTick, "", what));
+        }
+
+        private void TraceTick()
+        {
+            if (!Tracing) { TraceFlush(); return; }
+            _traceTick++;
+            long ms = _traceClock.ElapsedMilliseconds;
+            _trace.Add(string.Join("	", ms, _traceTick, ms - _traceLastMs, ""));
+            _traceLastMs = ms;
+        }
+
+        private void TraceFlush()
+        {
+            if (!TraceEnabled || _traceClock == null || _traceWritten) return;
+            if (_traceClock.ElapsedMilliseconds <= 4000) return;
+            _traceWritten = true;
+            try
+            {
+                System.IO.File.WriteAllLines(
+                    System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vd-trace.log"), _trace);
+            }
+            catch { }   // a diagnostic must never take the app down
+        }
         public CinematicOperation? CurrentPlayingOperation { get; private set; }
         private const int MaxOverlayTracks = DirectorViewModel.MaxTracks;
 
@@ -244,6 +312,7 @@ namespace VideoDirector.Models
                 Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += PlaybackTimer_Tick;
             }
             _lastTickTime = TimeSpan.Zero;
+            TraceBegin();
         }
 
         public void StopPlayback()
@@ -277,10 +346,12 @@ namespace VideoDirector.Models
             if (_lastTickTime == TimeSpan.Zero) _lastTickTime = now;
             var elapsed = now - _lastTickTime;
             _lastTickTime = now;
-            
+            _frameSeq++;
+            TraceTick();
+
             // Stall the clock if we're waiting for media to load, so clips don't skip the first 500ms
             if (System.Threading.Interlocked.CompareExchange(ref _pendingMediaOpens, 0, 0) > 0) return;
-            
+
             // Also stall the clock if any active player is buffering or opening, to prevent the clock
             // from running ahead and triggering continuous drift correction seeks (which causes stutter).
             for (int i = 0; i < MaxOverlayTracks; i++)
@@ -290,7 +361,7 @@ namespace VideoDirector.Models
                     var state = _overlayPlayer[i].PlaybackSession.PlaybackState;
                     if (state == MediaPlaybackState.Buffering || state == MediaPlaybackState.Opening)
                     {
-                        return; // stall clock
+                        return;
                     }
                 }
             }

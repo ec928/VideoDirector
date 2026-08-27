@@ -37,22 +37,77 @@ namespace VideoDirector.Models
 
         // ==================== Overlay Playback ====================
 
+        private static MediaPlayer CreateOverlayPlayer()
+        {
+            var player = new MediaPlayer
+            {
+                IsLoopingEnabled = false,
+                AutoPlay = false
+                // Audio is governed by the per-clip Volume (overlays default to 0 = silent, so
+                // Track 1 stays the audio bed unless a PiP's Volume is raised). Do NOT hard-mute
+                // here: that overrode Volume entirely, so the audio slider did nothing.
+            };
+            player.CommandManager.IsEnabled = false;
+            return player;
+        }
+
         private void InitializeOverlayPlayers()
         {
             for (int i = 0; i < MaxOverlayTracks; i++)
             {
-                var player = new MediaPlayer
-                {
-                    IsLoopingEnabled = false,
-                    AutoPlay = false
-                    // Audio is governed by the per-clip Volume (overlays default to 0 = silent, so
-                    // Track 1 stays the audio bed unless a PiP's Volume is raised). Do NOT hard-mute
-                    // here: that overrode Volume entirely, so the audio slider did nothing.
-                };
-                player.CommandManager.IsEnabled = false;
-                _overlayPlayer[i] = player;
-                _playerControl.OverlayVisuals[i].Video.SetMediaPlayer(player);
+                _overlayPlayer[i] = CreateOverlayPlayer();
+                _playerControl.OverlayVisuals[i].Video.SetMediaPlayer(_overlayPlayer[i]);
             }
+        }
+
+        // Empty at this time, but keep the decoder: a later clip on this track (or a loop)
+        // may want the file we just parked. ReleaseOverlaySlot would throw it away.
+        private void StandDownSlot(int slot)
+        {
+            _overlayPlayer[slot]?.Pause();
+            SetOverlayRender(slot, OverlayRender.Hidden, null);
+            _activeOverlay[slot] = null;
+        }
+
+        private static string PlayerPath(MediaPlayer player)
+        {
+            if (player?.Source is MediaSource src && src.Uri != null)
+                return src.Uri.LocalPath;
+            return null;
+        }
+
+        // If this slot recently played `path`, swap that decoder back in instead of opening again.
+        private bool TryReviveParkedPlayer(int slot, string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var hold = _overlayHold[slot];
+            if (hold == null || !string.Equals(PlayerPath(hold), path, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var live = _overlayPlayer[slot];
+            live?.Pause();
+            _overlayPlayer[slot] = hold;
+            _overlayHold[slot] = live;
+            var video = _playerControl.OverlayVisuals[slot].Video;
+            if (video != null) video.SetMediaPlayer(hold);
+            return true;
+        }
+
+        // Keep the live decoder on the slot so a later clip of the same file can revive it.
+        private void ParkLivePlayer(int slot)
+        {
+            var live = _overlayPlayer[slot];
+            if (live == null || live.Source == null) return;
+
+            live.Pause();
+            var hold = _overlayHold[slot];
+            if (hold == null) hold = CreateOverlayPlayer();
+            else { hold.Pause(); hold.Source = null; }
+
+            _overlayHold[slot] = live;
+            _overlayPlayer[slot] = hold;
+            var video = _playerControl.OverlayVisuals[slot].Video;
+            if (video != null) video.SetMediaPlayer(hold);
         }
 
         // The generic per-track evaluation (§7B). One loop body, indexed by track — no slot
@@ -141,6 +196,7 @@ namespace VideoDirector.Models
                 if (_activeOverlay[i] != desired)
                 {
                     if (desired != null) ActivateOverlaySlot(i, desired, currentStoryTime);
+                    else if (_isAnimating) StandDownSlot(i);
                     else ReleaseOverlaySlot(i);
                 }
                 else if (_activeOverlay[i] != null)
@@ -481,11 +537,31 @@ namespace VideoDirector.Models
                 return;
             }
 
-            bool needsNewSource = player.Source == null ||
-                !string.Equals((player.Source as MediaSource)?.Uri?.LocalPath, overlay.FilePath, StringComparison.OrdinalIgnoreCase);
+            if (TryReviveParkedPlayer(slot, overlay.FilePath))
+            {
+                player = _overlayPlayer[slot];
+                SeekAndPlayOverlay(player, overlay, currentStoryTime);
+                CacheOverlayAspect(slot, player);
+                ApplyOverlayBox(slot, overlay, false);
+                return;
+            }
 
+            bool needsNewSource = player.Source == null ||
+                !string.Equals(PlayerPath(player), overlay.FilePath, StringComparison.OrdinalIgnoreCase);
+
+            // ONE SOURCE OPENS AT A TIME.
+            //
+            // StartPlaybackAsync clears every slot, so every clip at the playhead used to open on
+            // the same frame - and worse, finish on the same frame, each one then seeking, caching
+            // its aspect and re-laying out. Measured on 0-Test8: a 92ms hole in the frame clock as
+            // three completed together, and 11 frames lost at startup. A blocked UI thread starves
+            // whatever else needs it, which is what the audio stutter was.
+            //
             if (needsNewSource)
             {
+                ParkLivePlayer(slot);
+                player = _overlayPlayer[slot];
+
                 System.Threading.Interlocked.Increment(ref _pendingMediaOpens);
 
                 void OnOpened(MediaPlayer sender, object args)
@@ -494,10 +570,7 @@ namespace VideoDirector.Models
                     sender.MediaFailed -= OnFailed;
                     System.Threading.Interlocked.Decrement(ref _pendingMediaOpens);
 
-                    // The overlay this slot wants may have changed while we were waiting
-                    // (e.g. playback moved past it, or it got released) — bail if so.
-                    var currentSlotOverlay = _activeOverlay[slot];
-                    if (currentSlotOverlay != overlay) return;
+                    if (_activeOverlay[slot] != overlay) return;
 
                     SeekAndPlayOverlay(sender, overlay, _viewModel.CurrentStoryTime);
                     _dispatcher.TryEnqueue(() =>
@@ -516,7 +589,9 @@ namespace VideoDirector.Models
 
                 player.MediaOpened += OnOpened;
                 player.MediaFailed += OnFailed;
+                TraceEvent("OPEN slot=" + slot + " " + System.IO.Path.GetFileName(overlay.FilePath));
                 player.Source = MediaSource.CreateFromUri(new Uri(overlay.FilePath));
+                TraceEvent("OPENED slot=" + slot);
             }
             else
             {
