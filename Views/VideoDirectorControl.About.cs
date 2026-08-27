@@ -32,10 +32,10 @@ namespace VideoDirector.Views
         /// </summary>
         private async void About_Click(object? sender, RoutedEventArgs e)
         {
-            var body = new StackPanel { Spacing = 0 };
+            // ---- brand block (Sticky Header)
+            var head = new StackPanel { Spacing = 0 };
 
-            // ---- brand block
-            body.Children.Add(new TextBlock
+            head.Children.Add(new TextBlock
             {
                 Text = "VideoDirector",
                 FontSize = 24,
@@ -43,14 +43,14 @@ namespace VideoDirector.Views
                 CharacterSpacing = -20,          // 1/1000 em; the -0.02em of the CSS
                 Foreground = ThemeBrush("AccentTextFillColorPrimaryBrush", "TextFillColorPrimaryBrush")
             });
-            body.Children.Add(new TextBlock
+            head.Children.Add(new TextBlock
             {
                 Text = "Version " + AppVersion(),
                 FontSize = 12,
                 Margin = new Thickness(0, 3, 0, 0),
                 Foreground = ThemeBrush("TextFillColorSecondaryBrush", null)
             });
-            body.Children.Add(new TextBlock
+            head.Children.Add(new TextBlock
             {
                 Text = "Cinematic Collage & Motion Slideshow for Video, Stills & Sound — arrange "
                      + "clips anywhere on the canvas, give any of them pan and zoom, and present "
@@ -60,12 +60,15 @@ namespace VideoDirector.Views
                 Margin = new Thickness(0, 8, 0, 0),
                 Foreground = ThemeBrush("TextFillColorSecondaryBrush", null)
             });
-            body.Children.Add(new Border
+            head.Children.Add(new Border
             {
                 Height = 1,
                 Margin = new Thickness(0, 14, 0, 0),
                 Background = ThemeBrush("SurfaceStrokeColorDefaultBrush", null)
             });
+
+            // ---- body (Scrollable)
+            var body = new StackPanel { Spacing = 0, Margin = new Thickness(0, 0, 0, 14) };
 
             // ---- sections. Claims kept to what the app actually does; see the export note.
             AddSection(body, "Compose", new[]
@@ -104,9 +107,17 @@ namespace VideoDirector.Views
                 ("Export to MP4", "by recording the performance. The project plays full screen with no chrome and is captured as it goes, so motion, fades, speed, borders and picture-in-picture all survive - it photographs what the compositor draws rather than trying to re-render it. Sound is mixed from the sources and laid on afterwards. Runs in real time; Esc stops a take early."),
             });
 
-            // ---- footer
-            var links = new StackPanel { Spacing = 0, Margin = new Thickness(0, 14, 0, 0) };
-            var report = new HyperlinkButton { Content = "Report a problem or suggest a feature", Padding = new Thickness(0) };
+            // ---- footer (Sticky)
+            var foot = new StackPanel { Spacing = 0 };
+            foot.Children.Add(new Border
+            {
+                Height = 1,
+                Margin = new Thickness(0, 0, 0, 14),
+                Background = ThemeBrush("SurfaceStrokeColorDefaultBrush", null)
+            });
+            
+            var links = new StackPanel { Spacing = 0 };
+            var report = new HyperlinkButton { Content = "Report a problem or suggest a feature on GitHub", Padding = new Thickness(0) };
             report.Click += ReportProblem_Click;
             links.Children.Add(report);
             links.Children.Add(new HyperlinkButton
@@ -115,9 +126,9 @@ namespace VideoDirector.Views
                 NavigateUri = new Uri("https://github.com/ec928/VideoDirector"),
                 Padding = new Thickness(0)
             });
-            body.Children.Add(links);
+            foot.Children.Add(links);
 
-            body.Children.Add(new TextBlock
+            foot.Children.Add(new TextBlock
             {
                 Text = "MIT licensed. Portable and self-contained — no installer, no registry.",
                 FontSize = 12,
@@ -126,15 +137,30 @@ namespace VideoDirector.Views
                 Foreground = ThemeBrush("TextFillColorSecondaryBrush", null)
             });
 
+            var layoutGrid = new Grid();
+            layoutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layoutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            Grid.SetRow(head, 0);
+            layoutGrid.Children.Add(head);
+
+            var scroll = new ScrollViewer
+            {
+                Content = body,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = 460                 // the panel scrolls rather than the window growing
+            };
+            Grid.SetRow(scroll, 1);
+            layoutGrid.Children.Add(scroll);
+
+            Grid.SetRow(foot, 2);
+            layoutGrid.Children.Add(foot);
+
             var dialog = new ContentDialog
             {
-                Title = "About VideoDirector",
-                Content = new ScrollViewer
-                {
-                    Content = body,
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                    MaxHeight = 460                 // the panel scrolls rather than the window growing
-                },
+                // We use layoutGrid to manually control the header and footer, bypassing ContentDialog's Title styling
+                Content = layoutGrid,
                 CloseButtonText = "Close",
                 XamlRoot = this.XamlRoot            // required, or ContentDialog throws in WinUI 3
             };
