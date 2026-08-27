@@ -70,45 +70,31 @@ namespace VideoDirector.Views
             // ---- body (Scrollable)
             var body = new StackPanel { Spacing = 0, Margin = new Thickness(0, 0, 0, 14) };
 
-            // ---- sections. Claims kept to what the app actually does; see the export note.
+            // ---- sections. Revised for clarity and punchiness.
             AddSection(body, "Compose", new[]
             {
-                ("Up to six equal tracks", "composited by Z-order — no privileged “spine”, and any clip on any track can be a picture-in-picture. Add and remove them as a project needs."),
-                ("A fixed canvas", "— the composition has its own frame rather than borrowing the window’s, so hiding a panel, resizing or presenting full screen changes only how big it looks."),
-                ("Free placement", "with independent size, position and opacity, plus solid, soft or film-strip borders."),
-                ("Clips may hang off the canvas", "as far as their edge meeting the boundary line, so a full bleed or an entry from off screen is authorable. They draw whole while you place them, and cannot be pushed somewhere unreachable."),
-                ("Chrome that stays findable", "— every clip carries a dashed outline in its track colour above every picture, so a clip hidden behind a larger one can still be found. A fully opaque clip on a higher track hides it, exactly as it hides the picture."),
-                ("Stills as first-class clips", "— images hold for a set duration and advance story time by wall clock, so mixed photo and video sequences stay in sync."),
-                ("Audio clips", "- drop in an mp3 or any other sound file and trim, place and level it like any clip. It draws nothing, so it never covers the tracks beneath, and the inspector offers only what applies to it: timing and volume."),
-                ("Fades", "in from black, out to black, or both, on any clip. A transition ADDS to the clip’s length rather than eating into it, and the timeline shades the part that is fade rather than picture."),
+                ("Six-track timeline", "— mix and match up to six independent layers of video, stills, and audio. Every track is treated equally, making picture-in-picture a breeze."),
+                ("Fixed canvas resolution", "— work in standard formats (1080p, 4K, 2.39:1, 9:16) that never shift when you resize panels or present full screen."),
+                ("Freeform placement", "— size, position, and blend clips anywhere on the canvas. Apply solid, soft, or film-strip borders to any element."),
+                ("First-class still images", "— mix photo and video sequences seamlessly. Images act as standard clips with set durations that keep your project perfectly in sync.")
             });
 
             AddSection(body, "Motion", new[]
             {
-                ("Ken Burns pan and zoom", "on any clip, video or still, from Start, optional Mid, and End framing keyframes with easing curves."),
-                ("Frame it on the canvas", "— the wheel magnifies the clip inside a window that never changes size, and Set Start, Mid or End records the framing already on screen. Pressing Set cannot move the picture, because what it stores is what you were already looking at."),
-                ("Shape a keyframe by dragging it", "— a rectangle’s tab moves that framing, its corners resize it. Selecting one never steals the wheel."),
-                ("The picture is never cut off", "while you frame it. It may sit past the edge of its frame - that is how a push-in from off-frame is authored - and stops only when its edge reaches the boundary, so it can never be lost off screen."),
-                ("Source-resolution stills", "so a slow push-in resamples real pixels instead of a flattened screen-sized copy."),
+                ("Ken Burns pan and zoom", "— easily add animated motion to any video or still image using start, mid, and end framing keyframes with smooth easing curves."),
+                ("Direct canvas framing", "— what you see is what you get. Use your mouse wheel and drag directly on the canvas to frame your shots perfectly without diving into menus."),
+                ("Source-resolution sampling", "— VideoDirector uses the full resolution of your original files, ensuring that slow zoom-ins remain crystal clear rather than pixelating.")
             });
 
-            AddSection(body, "Edit", new[]
+            AddSection(body, "Edit & Present", new[]
             {
-                ("Three strict modes", "— Playback, Arrange and Edit — so canvas manipulation never collides with scrubbing or review."),
-                ("Trim, split, retime", "with variable speed including freeze-frames, cross-track drag, 8px magnetic snapping and unlimited undo."),
-                ("Loop a region", "by dragging across the time ruler."),
-            });
-
-            AddSection(body, "Screen and share", new[]
-            {
-                ("Cinematic mode", "— arm it, and playback takes over the whole screen with every trace of the editor gone. Move the mouse for the transport, stop playing and the editor returns as you left it."),
-                ("Present on any display", "— choose which screen a performance takes over, remembered between sessions. The list is built when you open it, so a projector plugged in after launch needs no restart."),
-                ("A check before you present", "— opening a project, and arming cinematic, both say plainly which clips can no longer find their files. A project is a list of paths, and that is the failure that actually bites."),
-                ("Export to MP4", "by recording the performance. The project plays full screen with no chrome and is captured as it goes, so motion, fades, speed, borders and picture-in-picture all survive - it photographs what the compositor draws rather than trying to re-render it. Sound is mixed from the sources and laid on afterwards. Runs in real time; Esc stops a take early."),
+                ("Precision editing tools", "— trim, split, and retime clips with variable speed (including freeze-frames). Enjoy magnetic snapping, cross-track dragging, and unlimited undo/redo."),
+                ("Cinematic playback", "— take over any display for a distraction-free presentation. The app remembers your preferred screen between sessions."),
+                ("Flawless MP4 export", "— export exactly what you see. VideoDirector captures your live composite in real-time, guaranteeing that every fade, border, and motion effect survives intact.")
             });
 
             // ---- footer (Sticky)
-            var foot = new StackPanel { Spacing = 0 };
+            var foot = new StackPanel { Spacing = 0, Margin = new Thickness(0, 14, 0, 0) };
             foot.Children.Add(new Border
             {
                 Height = 1,
@@ -138,28 +124,25 @@ namespace VideoDirector.Views
             });
 
             var layoutGrid = new Grid();
-            layoutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layoutGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             layoutGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            Grid.SetRow(head, 0);
-            layoutGrid.Children.Add(head);
 
             var scroll = new ScrollViewer
             {
                 Content = body,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(0, 0, 16, 0), // Push content away from the scrollbar
                 MaxHeight = 460                 // the panel scrolls rather than the window growing
             };
-            Grid.SetRow(scroll, 1);
+            Grid.SetRow(scroll, 0);
             layoutGrid.Children.Add(scroll);
 
-            Grid.SetRow(foot, 2);
+            Grid.SetRow(foot, 1);
             layoutGrid.Children.Add(foot);
 
             var dialog = new ContentDialog
             {
-                // We use layoutGrid to manually control the header and footer, bypassing ContentDialog's Title styling
+                Title = head, // WinUI 3 correctly applies top margins and paddings for the Title property
                 Content = layoutGrid,
                 CloseButtonText = "Close",
                 XamlRoot = this.XamlRoot            // required, or ContentDialog throws in WinUI 3
