@@ -318,9 +318,9 @@ namespace VideoDirector.Models
             // Trim to what a higher opaque clip leaves visible, in the frame's own coordinates.
             // A thickness of 1 is used to give the edges area so SubtractStrip processes them.
             var topE = new ClipGeometry.GeoRect(left, top, w, 1);
-            var botE = new ClipGeometry.GeoRect(left, top + h, w, 1);
+            var botE = new ClipGeometry.GeoRect(left, Math.Max(top, top + h - 1), w, 1);
             var leftE = new ClipGeometry.GeoRect(left, top, 1, h);
-            var rightE = new ClipGeometry.GeoRect(left + w, top, 1, h);
+            var rightE = new ClipGeometry.GeoRect(Math.Max(left, left + w - 1), top, 1, h);
 
             var segs = new List<ClipGeometry.GeoRect>(8);
             if (MainWindow.Instance != null && MainWindow.Instance.AlwaysShowFullFrames)
@@ -483,6 +483,11 @@ namespace VideoDirector.Models
                 var other = _activeOverlay[j];
                 if (other == null || other.IsVideoHidden || other.Opacity < 0.999) continue;
                 if (!TryGetSlotBox(j, out var ob)) continue;
+
+                // Inflate the occluder slightly to ensure it completely swallows the border and frame
+                // strokes (which may sit exactly on or slightly outside the mathematical edge) of identically
+                // sized clips below it.
+                ob = new ClipGeometry.GeoRect(ob.X - 1, ob.Y - 1, ob.W + 2, ob.H + 2);
 
                 var next = new List<ClipGeometry.GeoRect>(cur.Count * 2);
                 foreach (var s in cur)
