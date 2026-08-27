@@ -1,6 +1,8 @@
 # 🎬 VideoDirector
 
-A multi-track video sequencer and compositor for Windows. Assembles video and image assets into a time-synchronised composite, with animated pan/zoom on any clip and up to five simultaneous picture-in-picture layers.
+**Cinematic Collage & Motion Slideshow for Video, Stills & Sound.**
+
+Arrange stills, video and sound anywhere on a fixed canvas, give any of them animated pan and zoom, and present the result full screen or export it. Six equal tracks, any of which can be a picture-in-picture.
 
 Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImageViewer), and runs standalone.
 

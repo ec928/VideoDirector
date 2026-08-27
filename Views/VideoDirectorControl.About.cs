@@ -52,8 +52,9 @@ namespace VideoDirector.Views
             });
             body.Children.Add(new TextBlock
             {
-                Text = "A multi-track video sequencer and compositor for Windows — cut, compose, "
-                     + "and animate stills and video on one timeline.",
+                Text = "Cinematic Collage & Motion Slideshow for Video, Stills & Sound — arrange "
+                     + "clips anywhere on the canvas, give any of them pan and zoom, and present "
+                     + "the result.",
                 FontSize = 13,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 8, 0, 0),
