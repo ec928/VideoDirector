@@ -170,10 +170,79 @@ namespace VideoDirector
             int w = settings.WindowWidth < 300 ? 1600 : settings.WindowWidth;
             int h = settings.WindowHeight < 300 ? 900 : settings.WindowHeight;
 
+            // A saved position is only worth honouring if it is still somewhere the user can SEE.
+            // Restoring it blind is how the app strands itself: present onto a display that is not
+            // a real monitor (an HDMI audio sink enumerates as one, 720x480 at some far corner of
+            // the desktop), close while the window is still there, and every launch afterwards puts
+            // the window back onto the invisible screen. There is no way out from inside the app,
+            // because the app is what is invisible. Verified against a real stranded settings.json:
+            // WindowX/Y 3416,1440 against a DISPLAY2 at exactly 3416,1440, 720x480.
+            bool leftOnPresentationDisplay =
+                IsOnPresentationDisplay(settings.WindowX, settings.WindowY, settings.PresentDisplayIndex);
+
+            // The SIZE came from that display too - 576x384 is a 720x480 screen at 125% - so a
+            // window rescued by position alone still opens as a postage stamp. Geometry left behind
+            // by a performance is discarded whole, not in halves.
+            if (leftOnPresentationDisplay) { w = 1600; h = 900; }
+
             _appWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
 
-            if (settings.WindowX != -1 && settings.WindowY != -1)
+            if (settings.WindowX != -1 && settings.WindowY != -1 && !leftOnPresentationDisplay &&
+                IsPositionVisible(settings.WindowX, settings.WindowY, w, h))
                 _appWindow.Move(new Windows.Graphics.PointInt32(settings.WindowX, settings.WindowY));
+        }
+
+        /// <summary>Is a window at this rect landing somewhere the user can actually see?</summary>
+        /// <remarks>
+        /// Tests the window's TITLE BAR strip rather than the whole rect, because that is what has
+        /// to be reachable to drag the window anywhere else - a window whose body overlaps a monitor
+        /// but whose bar does not is still unusable. Requires a real overlap, not a touching edge.
+        /// Any failure to enumerate answers "yes": refusing to restore a position is a far smaller
+        /// harm than refusing to start, and the fallback below is a sane one either way.
+        /// </remarks>
+        /// <summary>Is this saved desk position actually a performance left behind on the presentation display?</summary>
+        /// <remarks>
+        /// It should never be. The desk position is where the user WORKS, and a performance always
+        /// restores it on the way out - unless the app was closed mid-performance, in which case the
+        /// position saved is the presentation display's. If that display is one the user cannot see
+        /// (an HDMI audio sink enumerates as a 720x480 monitor), every later launch restores the
+        /// window onto it and the app is unreachable, with nothing on screen to fix it with.
+        ///
+        /// So a saved position sitting on the chosen presentation display is treated as leftover and
+        /// discarded. The cost when wrong - someone who presents to the same monitor they work on -
+        /// is one window opening at the default position. The cost of trusting it is an app that
+        /// cannot be recovered without hand-editing settings.json.
+        /// </remarks>
+        private static bool IsOnPresentationDisplay(int x, int y, int presentIndex)
+        {
+            if (presentIndex < 0) return false;
+            try
+            {
+                var all = DisplayArea.FindAll();
+                if (presentIndex >= all.Count) return false;
+                var b = all[presentIndex].OuterBounds;
+                return x >= b.X && x < b.X + b.Width && y >= b.Y && y < b.Y + b.Height;
+            }
+            catch { return false; }
+        }
+
+        private static bool IsPositionVisible(int x, int y, int width, int height)
+        {
+            try
+            {
+                const int barHeight = 32;      // enough of the top edge to grab
+                const int minOverlap = 120;    // and enough of it to aim at
+
+                foreach (var area in DisplayArea.FindAll())
+                {
+                    var b = area.WorkArea;
+                    int ox = Math.Min(x + width, b.X + b.Width) - Math.Max(x, b.X);
+                    int oy = Math.Min(y + barHeight, b.Y + b.Height) - Math.Max(y, b.Y);
+                    if (ox >= minOverlap && oy > 0) return true;
+                }
+                return false;
+            }
+            catch { return true; }
         }
 
         /// <summary>Which display a performance takes over. Saved with the window settings.</summary>
@@ -189,10 +258,19 @@ namespace VideoDirector
                 if (_appWindow == null) return;
                 if (_appWindow.Presenter is OverlappedPresenter p && p.State == OverlappedPresenterState.Minimized) return;
 
-                _currentSettings.WindowWidth = _appWindow.Size.Width;
-                _currentSettings.WindowHeight = _appWindow.Size.Height;
-                _currentSettings.WindowX = _appWindow.Position.X;
-                _currentSettings.WindowY = _appWindow.Position.Y;
+                // While full screen the window's position and size belong to the PRESENTATION
+                // display, not to the desk the user works at. Saving them sends the next launch to
+                // wherever the performance happened to be - and if that was a display they cannot
+                // see, the app never comes back. Keep whatever was saved last; the restore path in
+                // ApplyCinematicPresenter puts the real geometry back on exit anyway.
+                bool presenting = _appWindow.Presenter?.Kind == AppWindowPresenterKind.FullScreen;
+                if (!presenting)
+                {
+                    _currentSettings.WindowWidth = _appWindow.Size.Width;
+                    _currentSettings.WindowHeight = _appWindow.Size.Height;
+                    _currentSettings.WindowX = _appWindow.Position.X;
+                    _currentSettings.WindowY = _appWindow.Position.Y;
+                }
                 _currentSettings.PresentDisplayIndex = PresentDisplayIndex;
                 _currentSettings.AlwaysShowFullFrames = AlwaysShowFullFrames;
 
