@@ -340,6 +340,11 @@ namespace VideoDirector.Models
         private bool ShowClipFrames =>
             !IsActivelyPlaying && !_viewModel.IsRecording && _mode == EditorMode.Arrange;
 
+        // How far a track's frame chrome drops back when its clip is not selected. The dashed line
+        // and the T1..T6 badge share this one figure deliberately: they sit right next to each other,
+        // so any difference between them reads as a rendering bug rather than a choice.
+        private const byte UnselectedFrameAlpha = 0x80;   // 128/255 = 50%
+
         private void SetOverlayRender(int track, OverlayRender mode, CinematicOperation clip)
         {
             var v = _playerControl.OverlayVisuals[track];
@@ -358,7 +363,7 @@ namespace VideoDirector.Models
                 var colour = track == 0 ? Views.TrackPalette.Spine : Views.TrackPalette.Overlay(track - 1);
 
                 var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                    isSelected ? colour : Views.TrackPalette.At(colour, 0xB0));
+                    isSelected ? colour : Views.TrackPalette.At(colour, UnselectedFrameAlpha));
 
                 // Selected reads as solid; the rest stay dashed and quieter, matching
                 // how the keyframe rectangles distinguish the one being worked on.
@@ -372,10 +377,12 @@ namespace VideoDirector.Models
                 else if (!isSelected && !dashed)
                     framePath.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
 
-                // Align the badge opacity with the frame line opacity
+                // Align the badge opacity (50% when unselected, solid when selected)
                 if (v.Frame.Children.Count > 1 && v.Frame.Children[1] is Microsoft.UI.Xaml.Controls.Border badge)
                 {
-                    badge.Background = brush;
+                    badge.Background = isSelected 
+                        ? brush 
+                        : new Microsoft.UI.Xaml.Media.SolidColorBrush(Views.TrackPalette.At(colour, UnselectedFrameAlpha));
                 }
             }
 

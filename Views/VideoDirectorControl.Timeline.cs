@@ -429,13 +429,16 @@ namespace VideoDirector.Views
             return IsActiveAtPlayhead(clip) ? 1.0 : 0.5;
         }
 
+        // Active means one thing on every track: the playhead is inside the clip's window. Track 1
+        // used to be asked differently — GetTimelineIndexForStoryTime — which is the SEQUENTIAL
+        // lookup from when track 1 was a gapless spine that always had exactly one clip showing. It
+        // deliberately falls back to "the clip just before, or the last clip" when the playhead is
+        // in a gap or past the end, so a track 1 clip that had already finished still reported as
+        // active and drew at full strength while every other track dimmed correctly. Tracks are
+        // interchangeable now (§5.2) and track 1 may have gaps like any other, so it takes the same
+        // test. That lookup still has callers who WANT the fallback; this is not one of them.
         private bool IsActiveAtPlayhead(CinematicOperation clip)
-        {
-            var t = ViewModel.CurrentStoryTime;
-            if (ViewModel.Tracks.Count > 0 && ViewModel.Tracks[0].Clips.Contains(clip))   // spine: the clip at the playhead
-                return ViewModel.Tracks[0].Clips.IndexOf(clip) == ViewModel.GetTimelineIndexForStoryTime(t);
-            return clip.IsActiveAt(t);                    // overlay: live in its window
-        }
+            => clip.IsActiveAt(ViewModel.CurrentStoryTime);
 
         // Which clips are on screen right now — as a signature, so playback can rebuild the
         // highlights only when the active set actually changes (an overlay starts/ends), not every
