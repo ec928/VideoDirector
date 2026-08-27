@@ -479,13 +479,11 @@ namespace VideoDirector.Views
             surfaces.Children.Add(video);
             surfaces.Children.Add(still);
 
-            // A Rectangle, not a Border, because a Border cannot draw dashes.
+            // A Path, not a Rectangle, because a single Rectangle cannot be clipped to an L-shape
+            // to accurately occlude the frame when partially covered by higher tracks.
             var frame = new Grid { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
-            frame.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle
+            frame.Children.Add(new Microsoft.UI.Xaml.Shapes.Path
             {
-                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                // 3, not 2: this line is the resize surface, and it should look like something
-                // you can take hold of rather than a hairline you have to aim at.
                 StrokeThickness = 3,
                 StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 },
                 IsHitTestVisible = false

@@ -349,24 +349,24 @@ namespace VideoDirector.Models
             // frame was hardcoded white, so that correlation existed in the palette's comments and
             // nowhere on screen.
             if (v.Frame != null && v.Frame.Children.Count > 0
-                && v.Frame.Children[0] is Microsoft.UI.Xaml.Shapes.Rectangle frameRect)
+                && v.Frame.Children[0] is Microsoft.UI.Xaml.Shapes.Path framePath)
             {
                 bool isSelected = clip != null && _viewModel?.SelectedClip == clip;
                 var colour = track == 0 ? Views.TrackPalette.Spine : Views.TrackPalette.Overlay(track - 1);
 
                 // Selected reads as solid and heavier; the rest stay dashed and quieter, matching
                 // how the keyframe rectangles distinguish the one being worked on.
-                frameRect.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                framePath.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(
                     isSelected ? colour : Views.TrackPalette.At(colour, 0xB0));
                 // The frame IS the resize surface in Arrange, so it is drawn heavy enough to aim
                 // at. A hairline told you where the edge was without suggesting you could grab it.
-                frameRect.StrokeThickness = isSelected ? 4 : 3;
+                framePath.StrokeThickness = isSelected ? 4 : 3;
 
-                bool dashed = frameRect.StrokeDashArray != null && frameRect.StrokeDashArray.Count > 0;
+                bool dashed = framePath.StrokeDashArray != null && framePath.StrokeDashArray.Count > 0;
                 if (isSelected && dashed)
-                    frameRect.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection();
+                    framePath.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection();
                 else if (!isSelected && !dashed)
-                    frameRect.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
+                    framePath.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
             }
 
             switch (mode)

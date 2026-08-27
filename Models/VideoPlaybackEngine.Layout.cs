@@ -208,8 +208,6 @@ namespace VideoDirector.Models
             // ARE the framing, and a fourth outline competing with them is noise at best.
             _playerControl.SetCanvasEdgeVisible(!editMode);
 
-            bool anyVisible = TryGetVisibleBorderRegion(slot, box, out var visibleBorder);
-
             if (overlay.BorderType == BorderType.None || editMode)
             {
                 grid.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
@@ -241,10 +239,10 @@ namespace VideoDirector.Models
             // two cannot disagree about where a clip is or what covers it. ShowFrameRect sets
             // geometry AND visibility together - splitting those across two code paths is how a
             // frame ends up positioned correctly and collapsed, or visible and stale.
-            if (editMode || !ShowClipFrames || !anyVisible)
+            if (editMode || !ShowClipFrames)
                 HideFrameRect(slot);
             else
-                ShowFrameRect(slot, left, top, boxW, boxH, visibleBorder);
+                ShowFrameRect(slot, left, top, boxW, boxH);
 
             return true;
         }
@@ -311,12 +309,26 @@ namespace VideoDirector.Models
         ///
         /// Writes are delta-guarded: this runs from the per-frame render path.
         /// </remarks>
-        private void ShowFrameRect(int slot, double left, double top, double w, double h,
-                                   ClipGeometry.GeoRect visible)
+        private void ShowFrameRect(int slot, double left, double top, double w, double h)
         {
             var frame = GetFrameRect(slot);
             if (frame == null) return;
             if (w <= 0 || h <= 0) { HideFrameRect(slot); return; }
+
+            // Trim to what a higher opaque clip leaves visible, in the frame's own coordinates.
+            // A thickness of 1 is used to give the edges area so SubtractStrip processes them.
+            var topE = new ClipGeometry.GeoRect(left, top, w, 1);
+            var botE = new ClipGeometry.GeoRect(left, top + h, w, 1);
+            var leftE = new ClipGeometry.GeoRect(left, top, 1, h);
+            var rightE = new ClipGeometry.GeoRect(left + w, top, 1, h);
+
+            var segs = new List<ClipGeometry.GeoRect>(8);
+            OccludeStrip(slot, topE, segs);
+            OccludeStrip(slot, botE, segs);
+            OccludeStrip(slot, leftE, segs);
+            OccludeStrip(slot, rightE, segs);
+
+            if (segs.Count == 0) { HideFrameRect(slot); return; }
 
             if (frame.Visibility != Microsoft.UI.Xaml.Visibility.Visible)
                 frame.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
@@ -328,20 +340,44 @@ namespace VideoDirector.Models
             if (Microsoft.UI.Xaml.Controls.Canvas.GetTop(frame) != top)
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(frame, top);
 
-            // Trim to what a higher opaque clip leaves visible, in the frame's own coordinates.
-            bool trimmed = visible.W < w - 0.5 || visible.H < h - 0.5
-                           || visible.X > left + 0.5 || visible.Y > top + 0.5;
-            if (!trimmed)
+            if (frame.Children.Count > 0 && frame.Children[0] is Microsoft.UI.Xaml.Shapes.Path path)
             {
-                if (frame.Clip != null) frame.Clip = null;
-            }
-            else
-            {
-                frame.Clip = new Microsoft.UI.Xaml.Media.RectangleGeometry
+                var group = new Microsoft.UI.Xaml.Media.GeometryGroup();
+                foreach (var s in segs)
                 {
-                    Rect = new Windows.Foundation.Rect(visible.X - left, visible.Y - top,
-                                                       Math.Max(0, visible.W), Math.Max(0, visible.H))
-                };
+                    double sx = s.X - left;
+                    double sy = s.Y - top;
+                    if (s.W > s.H) // Horizontal segment
+                    {
+                        group.Children.Add(new Microsoft.UI.Xaml.Media.LineGeometry {
+                            StartPoint = new Windows.Foundation.Point(sx, sy),
+                            EndPoint = new Windows.Foundation.Point(sx + s.W, sy)
+                        });
+                    }
+                    else // Vertical segment
+                    {
+                        group.Children.Add(new Microsoft.UI.Xaml.Media.LineGeometry {
+                            StartPoint = new Windows.Foundation.Point(sx, sy),
+                            EndPoint = new Windows.Foundation.Point(sx, sy + s.H)
+                        });
+                    }
+                }
+                path.Data = group;
+            }
+
+            // Hide the badge if the top-left corner is occluded
+            if (frame.Children.Count > 1 && frame.Children[1] is Microsoft.UI.Xaml.UIElement badge)
+            {
+                bool badgeVisible = false;
+                foreach (var s in segs)
+                {
+                    if (Math.Abs(s.X - left) < 0.5 && Math.Abs(s.Y - top) < 0.5)
+                    {
+                        badgeVisible = true;
+                        break;
+                    }
+                }
+                badge.Visibility = badgeVisible ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
             }
         }
 
@@ -363,88 +399,6 @@ namespace VideoDirector.Models
                                    op.PlacementWidth, op.PlacementHeight,
                                    op.PlacementCenterX, op.PlacementCenterY, editMode: false);
             return true;
-        }
-
-        // How much of a border is still visible once higher tracks are taken into account.
-        //
-        // The border is drawn above every picture so that it survives at all, which means stacking
-        // can no longer hide it when something covers the clip it belongs to. So it is worked out
-        // here and applied as a clip on the rectangle, giving the border the same behaviour the
-        // PICTURE gets for free: present where nothing covers it, gone where something does.
-        //
-        // A containment test was not enough. A PiP that pokes out past the edge of the full-frame
-        // clip above it is not "fully covered", so the whole border drew - including the three
-        // quarters of it lying under an opaque clip.
-        //
-        // Returns false when nothing of it is left.
-        private bool TryGetVisibleBorderRegion(int slot, ClipGeometry.GeoRect box,
-                                               out ClipGeometry.GeoRect visible)
-        {
-            visible = box;
-            if (box.W <= 0 || box.H <= 0) return false;
-
-            for (int j = slot + 1; j < MaxOverlayTracks; j++)
-            {
-                var other = _activeOverlay[j];
-                if (other == null || other.IsVideoHidden || other.Opacity < 0.999) continue;
-                if (!TryGetSlotBox(j, out var ob)) continue;
-
-                // No overlap: this one hides nothing.
-                if (ob.Right <= visible.X || ob.X >= visible.Right ||
-                    ob.Bottom <= visible.Y || ob.Y >= visible.Bottom) continue;
-
-                // ONLY A CLIP THAT SPANS AN AXIS CAN BE REDUCED TO A STRIP. What is left after an
-                // overlap is an L-shape in general, and UIElement.Clip takes only a rectangle, so a
-                // strip is kept - but a strip is the exact remainder ONLY when the covering clip
-                // runs the full width or the full height of what is left.
-                //
-                // Without this test a small opaque clip sitting in the MIDDLE of a larger one - which
-                // covers none of its border at all - still reduced that border to one edge strip and
-                // clipped the other three sides away. Erring toward showing the chrome is right: a
-                // border drawn where the picture is hidden is a cosmetic slip, a border missing where
-                // the picture is visible is a clip you cannot find.
-                // COVERED OUTRIGHT is its own case and has to be tested FIRST. It used to fall out
-                // of the strip arithmetic - all four remainders come out negative, so the best area
-                // is zero - but the spanning gate below runs before that and would skip the occluder
-                // entirely, leaving a frame drawn over a clip that is completely hidden.
-                //
-                // Tolerance is a pixel rather than half: these boxes are derived through a chain of
-                // scaling, and a full-frame clip over another full-frame clip should read as covering
-                // it even if the two disagree in the last decimal.
-                const double eps = 1.0;
-                if (ob.X <= visible.X + eps && ob.Y <= visible.Y + eps
-                    && ob.Right >= visible.Right - eps && ob.Bottom >= visible.Bottom - eps)
-                    return false;
-
-                bool spansWidth  = ob.X <= visible.X + eps && ob.Right >= visible.Right - eps;
-                bool spansHeight = ob.Y <= visible.Y + eps && ob.Bottom >= visible.Bottom - eps;
-                if (!spansWidth && !spansHeight) continue;
-
-                double leftW   = ob.X - visible.X;
-                double rightW  = visible.Right - ob.Right;
-                double topH    = ob.Y - visible.Y;
-                double bottomH = visible.Bottom - ob.Bottom;
-
-                // Only the strips along the axis it spans are exact; the others are not candidates.
-                double leftA   = spansHeight ? Math.Max(0, leftW)   * visible.H : 0;
-                double rightA  = spansHeight ? Math.Max(0, rightW)  * visible.H : 0;
-                double topA    = spansWidth  ? Math.Max(0, topH)    * visible.W : 0;
-                double bottomA = spansWidth  ? Math.Max(0, bottomH) * visible.W : 0;
-
-                double best = Math.Max(Math.Max(leftA, rightA), Math.Max(topA, bottomA));
-                if (best <= 0) return false; // this clip swallows what was left
-
-                if (best == leftA)
-                    visible = new ClipGeometry.GeoRect(visible.X, visible.Y, leftW, visible.H);
-                else if (best == rightA)
-                    visible = new ClipGeometry.GeoRect(ob.Right, visible.Y, rightW, visible.H);
-                else if (best == topA)
-                    visible = new ClipGeometry.GeoRect(visible.X, visible.Y, visible.W, topH);
-                else
-                    visible = new ClipGeometry.GeoRect(visible.X, ob.Bottom, visible.W, bottomH);
-            }
-
-            return visible.W > 0 && visible.H > 0;
         }
 
         private void HideBorderRect(int slot)
