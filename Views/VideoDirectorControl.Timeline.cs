@@ -42,6 +42,7 @@ namespace VideoDirector.Views
             double h = TimelineBarHeight;
             double total = Math.Max(30.0, ViewModel.TotalStoryDuration.TotalSeconds);
 
+
             // Add a 20% pad at the end for comfortable dragging
             total *= 1.2;
 
@@ -470,7 +471,16 @@ namespace VideoDirector.Views
             gradient.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop { Color = topColor, Offset = 0.0 });
             gradient.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop { Color = color, Offset = 1.0 });
 
-            bool isSelected = clip != null && ReferenceEquals(clip, ViewModel.SelectedClip);
+            bool isSelected = ViewModel.IsSelected(clip);
+
+            // A GROUPED CLIP WEARS ITS GROUP COLOUR. Groups take the track palette in order - the
+            // first gets T1 blue, the sixth T6, the seventh starts again at T1 - so a block reads as
+            // one thing at a glance without any extra chrome on the timeline. White stays the mark
+            // of an individual selection, so the two never say the same thing.
+            int groupIndex = ViewModel.GroupIndexOf(clip);
+            var strokeColour = groupIndex >= 0
+                ? (groupIndex % 6 == 0 ? TrackPalette.Spine : TrackPalette.Overlay(groupIndex % 6 - 1))
+                : Microsoft.UI.Colors.White;
             var r = new Microsoft.UI.Xaml.Shapes.Rectangle
             {
                 Width = width,
@@ -479,10 +489,10 @@ namespace VideoDirector.Views
                 RadiusY = 4,
                 Opacity = dim,
                 Fill = gradient,
-                Stroke = isSelected 
-                    ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White) 
+                Stroke = (isSelected || groupIndex >= 0)
+                    ? new Microsoft.UI.Xaml.Media.SolidColorBrush(strokeColour)
                     : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(50, 0, 0, 0)),
-                StrokeThickness = isSelected ? 2 : 1
+                StrokeThickness = (isSelected || groupIndex >= 0) ? 2 : 1
             };
             Canvas.SetLeft(r, x);
             Canvas.SetTop(r, y);
@@ -672,5 +682,6 @@ namespace VideoDirector.Views
                 if (clip != null && _clipBlockElements.TryGetValue(clip, out var listSp)) listSp.Add(sp);
             }
         }
+
     }
 }

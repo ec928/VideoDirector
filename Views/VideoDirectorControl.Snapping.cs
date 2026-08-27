@@ -85,6 +85,45 @@ namespace VideoDirector.Views
             }
         }
 
+        /// <summary>Snap a block by its own leading and trailing edges.</summary>
+        /// <remarks>
+        /// Every member is excluded from the snap points, or the block snaps to itself and is pulled
+        /// to whatever offset one of its own clips happens to sit at. Snapping counts as on if the
+        /// track under the pointer has it on - a block spans several, and asking all of them to agree
+        /// would mean one track with it switched off disabled it for the whole block.
+        /// </remarks>
+        private double ApplyGroupSnapping(double desiredStartSec, double durSec, Models.TimelineTrack targetTrack)
+        {
+            if (ViewModel == null || targetTrack == null || !targetTrack.IsSnappingEnabled || _timelinePxPerSec <= 0)
+                return desiredStartSec;
+
+            double threshold = 8.0 / _timelinePxPerSec;
+            double best = desiredStartSec;
+            double minDiff = threshold;
+
+            foreach (double sp in GetTimelineSnapPoints(null, includePlayhead: true))
+            {
+                bool ownEdge = false;
+                foreach (var kv in _dragGroupOrigin)
+                {
+                    double st = kv.Value.TotalSeconds;
+                    if (Math.Abs(sp - st) < 1e-6 || Math.Abs(sp - (st + kv.Key.OpDuration.TotalSeconds)) < 1e-6)
+                    {
+                        ownEdge = true;
+                        break;
+                    }
+                }
+                if (ownEdge) continue;
+
+                double dLeft = Math.Abs(desiredStartSec - sp);
+                if (dLeft < minDiff) { minDiff = dLeft; best = sp; }
+
+                double dRight = Math.Abs((desiredStartSec + durSec) - sp);
+                if (dRight < minDiff) { minDiff = dRight; best = sp - durSec; }
+            }
+            return best;
+        }
+
         private double ApplyClipSnapping(double desiredStartSec, double durSec, CinematicOperation ignoreClip, Models.TimelineTrack targetTrack)
         {
             if (ViewModel == null || targetTrack == null || !targetTrack.IsSnappingEnabled || _timelinePxPerSec <= 0) return desiredStartSec;
@@ -174,20 +213,68 @@ namespace VideoDirector.Views
             targetIndex = Math.Clamp(targetIndex, 0, ViewModel.Tracks.Count - 1);
             var target = ViewModel.Tracks[targetIndex];
             var current = TrackOf(_dragClip);
-            bool trackChanged = current != null && !ReferenceEquals(current, target);
+
+            // A GROUP MOVES IN TIME ONLY. Reordering sections of the piece is a horizontal job, and
+            // a group has no single answer to "which track did you mean" - the clips are spread over
+            // several. Dragging one clip on its own still changes track exactly as before.
+            bool groupDrag = _dragGroupOrigin.Count > 1;
+
+            bool trackChanged = !groupDrag && current != null && !ReferenceEquals(current, target);
             if (trackChanged)
             {
                 current.Clips.Remove(_dragClip);
                 target.Clips.Add(_dragClip);
             }
+            if (groupDrag) target = current;
 
             // Horizontal: set the start time
             // (tracks are strict — an overlap would silently hide one clip at playback).
             double dur = _dragClip.OpDuration.TotalSeconds;
             double newStart = (p.X / _timelinePxPerSec) - _dragGrabOffsetSec;
             newStart = Math.Max(0, newStart);
-            newStart = ApplyClipSnapping(newStart, dur, _dragClip, target);
-            _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
+            if (!groupDrag)
+            {
+                newStart = ApplyClipSnapping(newStart, dur, _dragClip, target);
+            }
+            else
+            {
+                // A BLOCK SNAPS BY ITS OWN EDGES. Snapping the grabbed clip aligns whichever member
+                // you happened to take hold of, which has nothing to do with where the block lands -
+                // so trying to butt a block against something never quite worked. Convert to the
+                // block's leading edge, snap that, and convert back.
+                double blockStart = double.MaxValue, blockEnd = 0;
+                foreach (var kv in _dragGroupOrigin)
+                {
+                    double st = kv.Value.TotalSeconds;
+                    if (st < blockStart) blockStart = st;
+                    double en = st + kv.Key.OpDuration.TotalSeconds;
+                    if (en > blockEnd) blockEnd = en;
+                }
+
+                double lead = blockStart + (newStart - _dragGroupOrigin[_dragClip].TotalSeconds);
+                double snappedLead = ApplyGroupSnapping(lead, blockEnd - blockStart, target);
+                newStart += snappedLead - lead;
+            }
+            if (!groupDrag)
+            {
+                _dragClip.StartTime = TimeSpan.FromSeconds(newStart);
+            }
+            else
+            {
+                // ONE DELTA, applied to where everything started. Nudging each clip from wherever
+                // the last pointer move left it would let the group drift apart over a long drag.
+                double delta = newStart - _dragGroupOrigin[_dragClip].TotalSeconds;
+
+                // Nothing may be pushed before zero, so the whole group stops when its earliest
+                // member reaches the start rather than piling up against it.
+                double earliest = double.MaxValue;
+                foreach (var kv in _dragGroupOrigin)
+                    if (kv.Value.TotalSeconds < earliest) earliest = kv.Value.TotalSeconds;
+                if (earliest + delta < 0) delta = -earliest;
+
+                foreach (var kv in _dragGroupOrigin)
+                    kv.Key.StartTime = TimeSpan.FromSeconds(kv.Value.TotalSeconds + delta);
+            }
 
             if (trackChanged)
             {

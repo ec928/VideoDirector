@@ -467,6 +467,350 @@ namespace VideoDirector.ViewModels
             set => SetProperty(ref _loopRegionEnd, value);
         }
 
+        /// <summary>A set of clips treated as one block: a slice of time across every track.</summary>
+        /// <remarks>
+        /// The span runs from the earliest member start to the latest member end, so it reads as a
+        /// column rather than an outline around scattered clips - which is what it is, since clips
+        /// at the same moment on different tracks play together as one picture.
+        ///
+        /// Membership is by SET, not by span. A clip that happens to sit inside the span is not a
+        /// member: the existing rules apply to it unchanged, so it is pushed clear the moment the
+        /// group forms, exactly as it would be if the block had been dragged there.
+        /// </remarks>
+        public sealed class ClipGroup
+        {
+            public List<CinematicOperation> Clips { get; } = new();
+
+            public TimeSpan Start
+            {
+                get
+                {
+                    var min = TimeSpan.MaxValue;
+                    foreach (var c in Clips) if (c.StartTime < min) min = c.StartTime;
+                    return min == TimeSpan.MaxValue ? TimeSpan.Zero : min;
+                }
+            }
+
+            public TimeSpan End
+            {
+                get
+                {
+                    var max = TimeSpan.Zero;
+                    foreach (var c in Clips)
+                    {
+                        var e = c.StartTime + c.OpDuration;
+                        if (e > max) max = e;
+                    }
+                    return max;
+                }
+            }
+        }
+
+        public ObservableCollection<ClipGroup> Groups { get; } = new();
+
+        public ClipGroup GroupOf(CinematicOperation clip)
+        {
+            if (clip == null) return null;
+            foreach (var g in Groups) if (g.Clips.Contains(clip)) return g;
+            return null;
+        }
+
+        /// <summary>Which group a clip belongs to, or -1. The index picks its colour.</summary>
+        public int GroupIndexOf(CinematicOperation clip)
+        {
+            if (clip == null) return -1;
+            for (int i = 0; i < Groups.Count; i++)
+                if (Groups[i].Clips.Contains(clip)) return i;
+            return -1;
+        }
+
+        public bool CanGroupSelection => MultiSelectedCount > 1;
+
+        /// <summary>Turn the current selection into one block, pushing strangers clear of its span.</summary>
+        public ClipGroup GroupSelection()
+        {
+            if (!CanGroupSelection) return null;
+
+            var g = new ClipGroup();
+            foreach (var c in SelectedClips)
+            {
+                // A clip belongs to one block at a time; regrouping moves it.
+                GroupOf(c)?.Clips.Remove(c);
+                g.Clips.Add(c);
+            }
+            Groups.Add(g);
+
+            // The block is now declared, so its whole slice belongs to it: anything inside that
+            // span is pushed clear, on every track, including tracks where the block has no clip.
+            SettleAround(g);
+
+            for (int i = Groups.Count - 1; i >= 0; i--)
+                if (Groups[i].Clips.Count < 2) Groups.RemoveAt(i);
+
+            OnPropertyChanged(nameof(CanGroupSelection));
+            RecordIfChanged();
+            return g;
+        }
+
+        /// <summary>Clear a group's whole time slice, across every track.</summary>
+        /// <remarks>
+        /// A GROUP IS A COLUMN, NOT A SET OF CELLS. It runs from the earliest member start to the
+        /// latest member end and occupies that span on ALL SIX TRACKS, whether or not it has a clip
+        /// on each. So anything inside the span is pushed clear of it - including on a track where
+        /// the group has no member at all. Resolving track by track against member clips misses
+        /// exactly those, which is the difference between a time slice and a handful of clips.
+        ///
+        /// ANYTHING PUSHED THAT IS ITSELF A GROUP MOVES WHOLE. Shifting one member of another block
+        /// would shred it, and a block that survives being moved but not being pushed is not a block.
+        ///
+        /// The loop repeats because clearing one span can land something on the next; it is bounded
+        /// because every pass moves at least one unit strictly later and nothing is ever moved back.
+        /// </remarks>
+        public void PushClearOfSpan(ClipGroup g)
+        {
+            if (g == null || g.Clips.Count == 0) return;
+
+            for (int pass = 0; pass < 32; pass++)
+            {
+                var gs = g.Start;
+                var ge = g.End;
+                if (ge <= gs) return;
+
+                CinematicOperation offender = null;
+                foreach (var trk in Tracks)
+                {
+                    foreach (var c in trk.Clips)
+                    {
+                        if (g.Clips.Contains(c)) continue;
+                        if (c.StartTime < ge && gs < c.StartTime + c.OpDuration) { offender = c; break; }
+                    }
+                    if (offender != null) break;
+                }
+                if (offender == null) return;
+
+                // Move the offender - or the whole block it belongs to - just past the slice.
+                var other = GroupOf(offender);
+                if (other != null && other != g)
+                {
+                    var delta = ge - other.Start;
+                    if (delta <= TimeSpan.Zero) delta = ge - offender.StartTime;
+                    foreach (var c in other.Clips) c.StartTime += delta;
+                }
+                else
+                {
+                    offender.StartTime = ge;
+                }
+            }
+        }
+
+        private static TimeSpan SpanStart(ICollection<CinematicOperation> set)
+        {
+            var min = TimeSpan.MaxValue;
+            foreach (var c in set) if (c.StartTime < min) min = c.StartTime;
+            return min == TimeSpan.MaxValue ? TimeSpan.Zero : min;
+        }
+
+        private static TimeSpan SpanEnd(ICollection<CinematicOperation> set)
+        {
+            var max = TimeSpan.Zero;
+            foreach (var c in set)
+            {
+                var e = c.StartTime + c.OpDuration;
+                if (e > max) max = e;
+            }
+            return max;
+        }
+
+        /// <summary>One unit that can be in the way: a whole block, or a single loose clip.</summary>
+        private sealed class Incumbent
+        {
+            public List<CinematicOperation> Clips = new();
+            public TimeSpan Start;
+            public TimeSpan End;
+        }
+
+        /// <summary>Everything the incoming drop could collide with, as whole units.</summary>
+        /// <remarks>
+        /// A GROUP IS ALWAYS SPAN-WIDE. Its slice is reserved on every track, so it is in the way of
+        /// anything landing in that time - including a lone clip on a track the group has no member
+        /// on. Missing that is what let a single clip settle inside a block.
+        ///
+        /// A LOOSE CLIP ONLY OWNS ITS OWN ROW. Overlapping it in time on a different track is a
+        /// composite, not a collision - so it counts only when the drop shares its track, or when the
+        /// drop is itself a slice and claims every track.
+        /// </remarks>
+        private List<Incumbent> IncumbentsFor(ICollection<CinematicOperation> incoming, bool claimsWholeSlice)
+        {
+            var list = new List<Incumbent>();
+
+            foreach (var g in Groups)
+            {
+                bool isIncoming = false;
+                foreach (var c in g.Clips) if (incoming.Contains(c)) { isIncoming = true; break; }
+                if (isIncoming || g.Clips.Count == 0) continue;
+                list.Add(new Incumbent { Clips = new List<CinematicOperation>(g.Clips), Start = g.Start, End = g.End });
+            }
+
+            var grouped = AllGroupedClips();
+            foreach (var trk in Tracks)
+            {
+                bool sharesTrack = claimsWholeSlice;
+                if (!sharesTrack)
+                    foreach (var c in incoming) if (trk.Clips.Contains(c)) { sharesTrack = true; break; }
+                if (!sharesTrack) continue;
+
+                foreach (var c in trk.Clips)
+                {
+                    if (incoming.Contains(c) || grouped.Contains(c)) continue;
+                    list.Add(new Incumbent
+                    {
+                        Clips = new List<CinematicOperation> { c },
+                        Start = c.StartTime,
+                        End = c.StartTime + c.OpDuration
+                    });
+                }
+            }
+            return list;
+        }
+
+        /// <summary>Settle a drop: where it landed on something decides which of them moves.</summary>
+        /// <remarks>
+        /// WHERE YOU DROPPED SAYS WHAT YOU MEANT. Land on the FRONT half of something and you are
+        /// claiming its place, so it gives way. Land on the BACK half and you were aiming past it, so
+        /// you go after it - which is how one thing is butted against the end of another.
+        ///
+        /// Both sides are treated as UNITS. A block is judged by its whole span and moves whole,
+        /// whether it is the thing dropped or the thing pushed; a lone clip stands for itself.
+        /// </remarks>
+        public void SettleDrop(ICollection<CinematicOperation> incoming, bool claimsWholeSlice)
+        {
+            if (incoming == null || incoming.Count == 0) return;
+
+            var inStart = SpanStart(incoming);
+            var inEnd = SpanEnd(incoming);
+            if (inEnd <= inStart) return;
+
+            var incumbents = IncumbentsFor(incoming, claimsWholeSlice);
+
+            // PASS A - anything whose BACK half you landed on was aimed past, so the drop goes after
+            // it. The furthest such end wins, so landing across two lands after both.
+            var landAt = inStart;
+            foreach (var inc in incumbents)
+            {
+                if (inStart >= inc.End || inEnd <= inc.Start) continue;
+                var half = inc.Start + TimeSpan.FromTicks((inc.End - inc.Start).Ticks / 2);
+                if (inStart >= half && inc.End > landAt) landAt = inc.End;
+            }
+
+            if (landAt > inStart)
+            {
+                var shift = landAt - inStart;
+                foreach (var c in incoming) c.StartTime += shift;
+                inStart = SpanStart(incoming);
+                inEnd = SpanEnd(incoming);
+            }
+
+            // PASS B - whatever the drop still covers had its place claimed, so it gives way. EVERY
+            // one of them, not just the first: a drop can land across several, and settling only
+            // against the first is how two clips were left overlapping on one row.
+            for (int guard = 0; guard < 64; guard++)
+            {
+                Incumbent hit = null;
+                foreach (var inc in incumbents)
+                {
+                    var s0 = SpanStart(inc.Clips);
+                    var e0 = SpanEnd(inc.Clips);
+                    if (s0 < inEnd && inStart < e0) { hit = inc; break; }
+                }
+                if (hit == null) break;
+
+                var delta = inEnd - SpanStart(hit.Clips);
+                if (delta <= TimeSpan.Zero) break;
+                foreach (var c in hit.Clips) c.StartTime += delta;
+            }
+
+            // Tidy what is left. Blocks and the thing just dropped hold their shape; loose clips
+            // give way, so no track is left carrying two clips at once.
+            var anchored = AllGroupedClips();
+            foreach (var c in incoming) anchored.Add(c);
+            foreach (var trk in Tracks) trk.ResolveOverlapsAnchoring(anchored);
+        }
+
+        /// <summary>Every clip that belongs to any group. Blocks hold their shape; loose clips give way.</summary>
+        private HashSet<CinematicOperation> AllGroupedClips()
+        {
+            var set = new HashSet<CinematicOperation>();
+            foreach (var grp in Groups) foreach (var c in grp.Clips) set.Add(c);
+            return set;
+        }
+
+        /// <summary>Clear the slice, then tidy what is left so no track carries two clips at once.</summary>
+        public void SettleAround(ClipGroup g)
+        {
+            PushClearOfSpan(g);
+
+            var anchored = AllGroupedClips();
+            foreach (var trk in Tracks) trk.ResolveOverlapsAnchoring(anchored);
+        }
+
+        public void Ungroup(ClipGroup g)
+        {
+            if (g == null) return;
+            Groups.Remove(g);
+            OnPropertyChanged(nameof(CanGroupSelection));
+            RecordIfChanged();
+        }
+
+        /// <summary>Clips picked out with shift-click, on top of the primary selection.</summary>
+        /// <remarks>
+        /// SelectedClip is left alone deliberately. It stays "the one you last clicked", so the
+        /// inspector, Edit mode and ChromeRules carry on reading it and need no changes - only the
+        /// timeline knows about this set. Shift-click adds, ctrl-click removes, a plain click clears
+        /// it and starts again.
+        /// </remarks>
+        private readonly HashSet<CinematicOperation> _multiSelected = new();
+
+        public bool IsSelected(CinematicOperation clip)
+            => clip != null && (ReferenceEquals(clip, SelectedClip) || _multiSelected.Contains(clip));
+
+        public int MultiSelectedCount => _multiSelected.Count;
+
+        public IEnumerable<CinematicOperation> SelectedClips
+        {
+            get
+            {
+                if (SelectedClip != null) yield return SelectedClip;
+                foreach (var c in _multiSelected)
+                    if (!ReferenceEquals(c, SelectedClip)) yield return c;
+            }
+        }
+
+        public void AddToSelection(CinematicOperation clip)
+        {
+            if (clip == null) return;
+            // The primary comes along, so shift-clicking a second clip leaves both marked rather
+            // than silently dropping the first.
+            if (SelectedClip != null) _multiSelected.Add(SelectedClip);
+            _multiSelected.Add(clip);
+            OnPropertyChanged(nameof(MultiSelectedCount));
+        }
+
+        public void RemoveFromSelection(CinematicOperation clip)
+        {
+            if (clip == null) return;
+            if (SelectedClip != null) _multiSelected.Add(SelectedClip);
+            _multiSelected.Remove(clip);
+            if (ReferenceEquals(clip, SelectedClip)) SelectedClip = null;
+            OnPropertyChanged(nameof(MultiSelectedCount));
+        }
+
+        public void ClearMultiSelection()
+        {
+            if (_multiSelected.Count == 0) return;
+            _multiSelected.Clear();
+            OnPropertyChanged(nameof(MultiSelectedCount));
+        }
+
         private CinematicOperation _selectedClip;
         public CinematicOperation SelectedClip
         {
@@ -1108,6 +1452,13 @@ namespace VideoDirector.ViewModels
         // Serialization wrapper.
         private class ProjectData
         {
+            // GROUPS SURVIVE UNDO BY POSITION. RestoreSnapshot rebuilds every clip as a new object,
+            // so a group holding clip references points at objects that no longer exist anywhere -
+            // which is why undo silently dissolved every group. Clips carry no stable id, but the
+            // snapshot and the restore see the same ordering, so (track, index) identifies a member
+            // unambiguously at the moment it matters.
+            public System.Collections.Generic.List<System.Collections.Generic.List<int[]>> Groups { get; set; }
+
             public int SchemaVersion { get; set; }   // absent in pre-versioned files => 0
 
             // Canvas. Absent in older files, which read back as 0 and are then initialised from
@@ -1371,6 +1722,44 @@ namespace VideoDirector.ViewModels
             _savedContent = CaptureContentSnapshot();
         }
 
+        private System.Collections.Generic.List<System.Collections.Generic.List<int[]>> CaptureGroupPositions()
+        {
+            var outer = new System.Collections.Generic.List<System.Collections.Generic.List<int[]>>();
+            foreach (var g in Groups)
+            {
+                var members = new System.Collections.Generic.List<int[]>();
+                foreach (var c in g.Clips)
+                    for (int t = 0; t < Tracks.Count; t++)
+                    {
+                        int i = Tracks[t].Clips.IndexOf(c);
+                        if (i >= 0) { members.Add(new[] { t, i }); break; }
+                    }
+                if (members.Count > 1) outer.Add(members);
+            }
+            return outer;
+        }
+
+        private void RestoreGroupPositions(System.Collections.Generic.List<System.Collections.Generic.List<int[]>> saved)
+        {
+            Groups.Clear();
+            if (saved == null) { OnPropertyChanged(nameof(CanGroupSelection)); return; }
+
+            foreach (var members in saved)
+            {
+                var g = new ClipGroup();
+                foreach (var pos in members)
+                {
+                    if (pos == null || pos.Length < 2) continue;
+                    int t = pos[0], i = pos[1];
+                    if (t < 0 || t >= Tracks.Count) continue;
+                    if (i < 0 || i >= Tracks[t].Clips.Count) continue;
+                    g.Clips.Add(Tracks[t].Clips[i]);
+                }
+                if (g.Clips.Count > 1) Groups.Add(g);
+            }
+            OnPropertyChanged(nameof(CanGroupSelection));
+        }
+
         private string CaptureContentSnapshot()
         {
             var data = new ProjectData { SchemaVersion = CurrentSchemaVersion, Tracks = Tracks };
@@ -1387,6 +1776,7 @@ namespace VideoDirector.ViewModels
             // undo must not re-run a migration that has already happened.
             var data = new ProjectData
             {
+                Groups = CaptureGroupPositions(),
                 SchemaVersion = CurrentSchemaVersion,
                 CanvasSizeMode = (int)_canvasSizeMode,
                 CanvasWidth = _canvasWidth,
@@ -1513,6 +1903,11 @@ namespace VideoDirector.ViewModels
                     Tracks.Add(track);
                 }
             }
+
+            // Membership is rebuilt from positions now the new clip objects exist. A member that
+            // no longer resolves - deleted in the state being restored - is dropped, and a group
+            // left with fewer than two members goes with it.
+            RestoreGroupPositions(data.Groups);
             // Legacy restore paths handled inside LoadAsync. Snapshot restoration only 
             // needs to deal with the current format since snapshots are created in-session.
             // Floor only, and deliberately NO trim: undo must reproduce what was snapshotted,

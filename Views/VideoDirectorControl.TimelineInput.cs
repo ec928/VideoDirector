@@ -20,6 +20,15 @@ namespace VideoDirector.Views
         // Timeline pointer model (standard NLE): the top ruler scrubs; the clip rows drag clips.
         // Tap in a row = select; drag in a row = move (overlay = reposition in time, spine =
         // reorder). Empty space in the rows also scrubs.
+        // Whether shift was held when the press began, read at the release.
+        private bool _selectToggle;
+
+        // Where every selected clip sat when a group drag began. The move is then ONE delta
+        // applied to the original layout, rather than each clip nudged from wherever the last
+        // pointer move left it - which would drift apart over a long drag.
+        private readonly System.Collections.Generic.Dictionary<Models.CinematicOperation, TimeSpan>
+            _dragGroupOrigin = new();
+
         private void TimelineBar_PointerPressed(object? sender, PointerRoutedEventArgs e)
         {
             var point = e.GetCurrentPoint(TimelineBar);
@@ -33,6 +42,11 @@ namespace VideoDirector.Views
             if (ViewModel.IsEditMode) { ExitEditMode(); return; }
 
             var p = point.Position;
+            // Captured at PRESS: by the time the release runs, the key may be up.
+            // ONE MODIFIER. Shift toggles - it adds a clip that is not in the selection and removes
+            // one that is. A second key for removing was needless: the clip already tells you which
+            // it will do, because you can see whether it is outlined.
+            _selectToggle = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Shift);
             _timelinePressPoint = p;
             _timelinePressed = true;
             _timelineScrubbing = false;
@@ -59,6 +73,22 @@ namespace VideoDirector.Views
                     _dragClip = hit.clip;
                     _dragIsSpine = hit.isSpine;
                     _dragGrabOffsetSec = (p.X / _timelinePxPerSec) - hit.startSec;
+
+                    // A GROUP TRAVELS AS A GROUP. Dragging any member moves all of it, whether or
+                    // not it is selected - that is what being grouped means. Failing that, dragging
+                    // a member of a multi-selection moves the selection.
+                    _dragGroupOrigin.Clear();
+                    var grp = ViewModel.GroupOf(hit.clip);
+                    if (grp != null)
+                    {
+                        foreach (var c in grp.Clips)
+                            if (!c.IsLocked) _dragGroupOrigin[c] = c.StartTime;
+                    }
+                    else if (ViewModel.MultiSelectedCount > 0 && ViewModel.IsSelected(hit.clip))
+                    {
+                        foreach (var c in ViewModel.SelectedClips)
+                            if (!c.IsLocked) _dragGroupOrigin[c] = c.StartTime;
+                    }
                 }
             }
             else
@@ -68,6 +98,7 @@ namespace VideoDirector.Views
                 // to deselect at all. The ruler is deliberately excluded (handled earlier) -
                 // scrubbing the time ruler should not disturb what you have selected.
                 ViewModel.SelectedClip = null;
+                ViewModel.ClearMultiSelection();
                 _timelineScrubbing = true;
                 ScrubToX(p.X);
             }
@@ -208,7 +239,22 @@ namespace VideoDirector.Views
 
             if (_dragClip != null)
             {
-                if (!wasMoving) SelectClip(_dragClip, _dragIsSpine); // a tap selects
+                if (!wasMoving)
+                {
+                    // Shift extends, Ctrl removes, a plain tap replaces. The primary selection is
+                    // still set on a plain tap so the inspector and Edit mode behave as before.
+                    if (_selectToggle)
+                    {
+                        if (ViewModel.IsSelected(_dragClip)) ViewModel.RemoveFromSelection(_dragClip);
+                        else ViewModel.AddToSelection(_dragClip);
+                        BuildTimelineBar();
+                    }
+                    else
+                    {
+                        ViewModel.ClearMultiSelection();
+                        SelectClip(_dragClip, _dragIsSpine);
+                    }
+                }
                 else
                 {
                     var track = TrackOf(_dragClip);
@@ -228,8 +274,25 @@ namespace VideoDirector.Views
                     }
                     else
                     {
-                        InsertBeforeIfDroppedOnFrontHalf(track, _dragClip);
-                        track?.ResolveOverlaps();
+                        // THE BLOCK YOU MOVED STAYS THE BLOCK YOU MOVED, AND NO TRACK EVER CARRIES
+                        // TWO CLIPS AT ONCE. Plain ResolveOverlaps honours the second and breaks the
+                        // first - it pushes whatever sorts later, so a group landing on occupied
+                        // space gets shuffled apart. Anchoring the group holds both: its members do
+                        // not move, and everything else gives way around them.
+                        //
+                        // Every track the group touches has to be resolved, not just the one under
+                        // the pointer, because the members are spread across several.
+                        // ONE RULE FOR EVERY DROP. Where it landed decides who moves: the front half
+                        // of something means you claimed its place, the back half means you were
+                        // aiming past it. A block is judged by its whole span, a lone clip by itself,
+                        // and anything that gives way moves whole if it belongs to a block.
+                        var dropped = _dragGroupOrigin.Count > 1
+                            ? new System.Collections.Generic.HashSet<Models.CinematicOperation>(_dragGroupOrigin.Keys)
+                            : new System.Collections.Generic.HashSet<Models.CinematicOperation> { _dragClip };
+                        // Only a real group claims the whole slice; a lone clip or an ad-hoc
+                        // multi-selection settles against its own track.
+                        bool isBlock = ViewModel.GroupOf(_dragClip) != null;
+                        ViewModel.SettleDrop(dropped, isBlock);
                         _playbackEngine?.RefreshComposite();
                     }
                 }
@@ -238,6 +301,7 @@ namespace VideoDirector.Views
             _timelineScrubbing = false;
             _timelineMovingClip = false;
             _dragClip = null;
+            _dragGroupOrigin.Clear();
             if (wasMoving)
             {
                 BuildTimelineBar();          // clear the drag ghost

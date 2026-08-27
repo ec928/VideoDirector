@@ -22,6 +22,25 @@ namespace VideoDirector.Views
         private CinematicOperation _contextClip;
         private bool _contextIsSpine;
 
+        private ViewModels.DirectorViewModel.ClipGroup _contextGroup;
+
+        // Grouping turns the selection into one block: a slice of time across every track, running
+        // from the earliest member start to the latest member end. Nothing new is decided about the
+        // clips that happen to sit inside that span - the existing rule applies, so they are pushed
+        // clear exactly as they would be if the block had been dragged there.
+        private void TimelineGroup_Click(object? sender, RoutedEventArgs e)
+        {
+            ViewModel.GroupSelection();
+            BuildTimelineBar();
+            _playbackEngine?.RefreshComposite();
+        }
+
+        private void TimelineUngroup_Click(object? sender, RoutedEventArgs e)
+        {
+            ViewModel.Ungroup(_contextGroup ?? ViewModel.GroupOf(_contextClip));
+            BuildTimelineBar();
+        }
+
         private void TimelineContextMenu_Opening(object? sender, object e)
         {
             // Keep this trivial: just record what was under the cursor. It previously also called
@@ -30,6 +49,13 @@ namespace VideoDirector.Views
             var hit = HitClip(_lastHoverPoint);
             _contextClip = hit.clip;
             _contextIsSpine = hit.isSpine;
+
+            // Group needs a selection of more than one; Ungroup needs the clip under the cursor to
+            // belong to a block. Both are shown greyed rather than hidden, so the pair is always in
+            // the same place and you can see that grouping exists before you have a selection.
+            _contextGroup = ViewModel.GroupOf(_contextClip);
+            TimelineGroupItem.IsEnabled = ViewModel.CanGroupSelection;
+            TimelineUngroupItem.IsEnabled = _contextGroup != null;
 
             if (_contextClip != null)
             {

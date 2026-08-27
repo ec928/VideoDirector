@@ -94,6 +94,58 @@ namespace VideoDirector.Models
         // one rendered - with every readout agreeing, because the model really did have it active.
         // Ticks are integers; laying a clip exactly on the previous clip's end is exact, and
         // half-open windows then guarantee only one clip covers any instant.
+        /// <summary>Clear overlaps while holding a set of clips exactly where they are.</summary>
+        /// <remarks>
+        /// TWO RULES HAVE TO HOLD AT ONCE. A track may never carry two clips at the same moment -
+        /// an overlap silently hides one - and a block the user has just moved must come out of the
+        /// move as the same block. Plain ResolveOverlaps honours the first and breaks the second: it
+        /// sorts by start time and pushes whatever comes later, so a group landing on occupied space
+        /// gets shuffled apart.
+        ///
+        /// Here the anchored clips are immovable and everything else gives way around them. Each
+        /// other clip is placed after whatever precedes it, then pushed clear of any anchored clip
+        /// it still lands on - repeatedly, since clearing one can land it on the next.
+        /// </remarks>
+        public void ResolveOverlapsAnchoring(System.Collections.Generic.ICollection<CinematicOperation> anchored)
+        {
+            if (anchored == null || anchored.Count == 0) { ResolveOverlaps(); return; }
+
+            var fixedSpans = new System.Collections.Generic.List<(long start, long end)>();
+            foreach (var c in Clips)
+                if (anchored.Contains(c))
+                    fixedSpans.Add((c.StartTime.Ticks, c.StartTime.Ticks + c.OpDuration.Ticks));
+            fixedSpans.Sort((a, b) => a.start.CompareTo(b.start));
+
+            var movable = new System.Collections.Generic.List<CinematicOperation>();
+            foreach (var c in Clips)
+                if (!anchored.Contains(c)) movable.Add(c);
+            movable.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
+
+            long runningEnd = 0;
+            foreach (var curr in movable)
+            {
+                long start = Math.Max(curr.StartTime.Ticks, runningEnd);
+                long len = curr.OpDuration.Ticks;
+
+                // Clearing one anchored clip can drop it onto the next, so keep going until it sits
+                // in open space. The list is sorted and start only ever increases, so this ends.
+                bool moved = true;
+                while (moved)
+                {
+                    moved = false;
+                    foreach (var span in fixedSpans)
+                        if (start < span.end && span.start < start + len)
+                        {
+                            start = span.end;
+                            moved = true;
+                        }
+                }
+
+                if (curr.StartTime.Ticks != start) curr.StartTime = TimeSpan.FromTicks(start);
+                runningEnd = start + len;
+            }
+        }
+
         public void ResolveOverlaps()
         {
             var sorted = new System.Collections.Generic.List<CinematicOperation>(Clips);

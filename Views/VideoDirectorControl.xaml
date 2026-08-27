@@ -673,6 +673,9 @@
                                      pointer event (which never fired reliably). -->
                                 <Canvas.ContextFlyout>
                                     <MenuFlyout Opening="TimelineContextMenu_Opening">
+                                        <MenuFlyoutItem x:Name="TimelineGroupItem" Text="Group" Click="TimelineGroup_Click" />
+                                        <MenuFlyoutItem x:Name="TimelineUngroupItem" Text="Ungroup" Click="TimelineUngroup_Click" />
+                                        <MenuFlyoutSeparator />
                                         <MenuFlyoutItem x:Name="TimelineEditItem" Text="Edit" Click="TimelineEdit_Click" />
                                         <MenuFlyoutSeparator />
                                                                                 <ToggleMenuFlyoutItem x:Name="TimelineHideItem" Text="Hide Video" Click="TimelineHide_Click" />
