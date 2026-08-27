@@ -202,42 +202,63 @@ namespace VideoDirector.Views
             catch { return null; }
         }
 
-        // Built when the menu opens, from the displays actually attached right now - a projector
-        // plugged in after launch appears without a restart.
-        private void PresentDisplayFlyout_Opening(object? sender, object e)
+        // Built when the menu opens, so settings stay fresh.
+        private void PreferencesFlyout_Opening(object? sender, object e)
         {
-            if (PresentDisplayFlyout == null || ViewModel == null) return;
+            if (PreferencesFlyout == null || ViewModel == null) return;
 
-            PresentDisplayFlyout.Items.Clear();
+            PreferencesFlyout.Items.Clear();
 
-            var current = new RadioMenuFlyoutItem
+            // 1. Clip Frames Toggle
+            var framesToggle = new ToggleMenuFlyoutItem
             {
-                Text = "Current display",
-                GroupName = "PresentDisplay",
-                IsChecked = ViewModel.PresentDisplayIndex < 0,
-                Tag = -1
+                Text = "Always show clip frames",
+                IsChecked = MainWindow.Instance != null && MainWindow.Instance.AlwaysShowFullFrames
             };
-            current.Click += PresentDisplay_Click;
-            PresentDisplayFlyout.Items.Add(current);
-
-            IReadOnlyList<Microsoft.UI.Windowing.DisplayArea> all;
-            try { all = Microsoft.UI.Windowing.DisplayArea.FindAll(); } catch { return; }
-            if (all.Count <= 1) return;   // nothing to choose between
-
-            PresentDisplayFlyout.Items.Add(new MenuFlyoutSeparator());
-
-            for (int i = 0; i < all.Count; i++)
+            framesToggle.Click += (s, args) =>
             {
-                var b = all[i].OuterBounds;
-                var item = new RadioMenuFlyoutItem
+                if (MainWindow.Instance != null)
                 {
-                    Text = "Display " + (i + 1) + "  (" + b.Width + " x " + b.Height + ")",
+                    MainWindow.Instance.AlwaysShowFullFrames = framesToggle.IsChecked;
+                    _playbackEngine?.Invalidate(); // forces a render refresh
+                }
+            };
+            PreferencesFlyout.Items.Add(framesToggle);
+
+            // 2. Display Selector
+            IReadOnlyList<Microsoft.UI.Windowing.DisplayArea> all = null;
+            try { all = Microsoft.UI.Windowing.DisplayArea.FindAll(); } catch { }
+
+            if (all != null && all.Count > 1)
+            {
+                PreferencesFlyout.Items.Add(new MenuFlyoutSeparator());
+                
+                var header = new MenuFlyoutItem { Text = "Presentation Display", IsEnabled = false };
+                PreferencesFlyout.Items.Add(header);
+
+                var current = new RadioMenuFlyoutItem
+                {
+                    Text = "Current display",
                     GroupName = "PresentDisplay",
-                    IsChecked = ViewModel.PresentDisplayIndex == i,
-                    Tag = i
+                    IsChecked = ViewModel.PresentDisplayIndex < 0,
+                    Tag = -1
                 };
-                item.Click += PresentDisplay_Click;
-                PresentDisplayFlyout.Items.Add(item);
+                current.Click += PresentDisplay_Click;
+                PreferencesFlyout.Items.Add(current);
+
+                for (int i = 0; i < all.Count; i++)
+                {
+                    var b = all[i].OuterBounds;
+                    var item = new RadioMenuFlyoutItem
+                    {
+                        Text = "Display " + (i + 1) + "  (" + b.Width + " x " + b.Height + ")",
+                        GroupName = "PresentDisplay",
+                        IsChecked = ViewModel.PresentDisplayIndex == i,
+                        Tag = i
+                    };
+                    item.Click += PresentDisplay_Click;
+                    PreferencesFlyout.Items.Add(item);
+                }
             }
         }
 

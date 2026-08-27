@@ -594,25 +594,6 @@
                     <!-- Right: Project, View, and Export. Also gone during a performance. -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
                                 Visibility="{x:Bind ViewModel.IsEditorChromeVisible, Mode=OneWay, Converter={StaticResource BoolToVisConverter}}">
-                        <!-- About: also the home for feedback, which used to be a lone "?" on the
-                             transport pill - a place people look for playback help, not for a way
-                             to report a bug. -->
-                        <Button x:Name="AboutButton" Click="About_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="About VideoDirector">
-                            <FontIcon Glyph="&#xE946;" FontSize="14" />
-                        </Button>
-                        <Button x:Name="PreferencesButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Preferences">
-                            <Button.Flyout>
-                                <Flyout>
-                                    <StackPanel Spacing="8" MinWidth="200">
-                                        <TextBlock Text="Preferences" FontWeight="SemiBold" />
-                                        <ToggleSwitch x:Name="AlwaysShowFramesToggle" Header="Always show clip frames" 
-                                                      Toggled="AlwaysShowFramesToggle_Toggled" Loaded="AlwaysShowFramesToggle_Loaded" />
-                                    </StackPanel>
-                                </Flyout>
-                            </Button.Flyout>
-                            <FontIcon Glyph="&#xE713;" FontSize="14" />
-                        </Button>
-                        <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
                         <!-- Project -->
                         <Button Click="Clear_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="New project">
                             <SymbolIcon Symbol="Document" />
@@ -624,18 +605,18 @@
                             <SymbolIcon Symbol="Save" />
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
-                        <!-- Which display a performance takes over. Built when the menu opens, from
-                             the displays actually attached, so a projector plugged in after launch
-                             appears without a restart. -->
 
-                        <!-- Which display a performance takes over. Built at open time from the
-                             displays actually attached, so plugging in a projector needs no restart. -->
-                        <Button x:Name="PresentDisplayButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4"
-                                ToolTipService.ToolTip="Which display cinematic playback takes over">
-                            <FontIcon Glyph="&#xE7F4;" FontSize="13" />
+                        <!-- Preferences (now hosts Display config and Clip frames toggle) -->
+                        <Button x:Name="PreferencesButton" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="Preferences">
+                            <FontIcon Glyph="&#xE713;" FontSize="14" />
                             <Button.Flyout>
-                                <MenuFlyout x:Name="PresentDisplayFlyout" Opening="PresentDisplayFlyout_Opening" />
+                                <MenuFlyout x:Name="PreferencesFlyout" Opening="PreferencesFlyout_Opening" />
                             </Button.Flyout>
+                        </Button>
+
+                        <!-- About: also the home for feedback -->
+                        <Button x:Name="AboutButton" Click="About_Click" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="4" ToolTipService.ToolTip="About VideoDirector">
+                            <FontIcon Glyph="&#xE946;" FontSize="14" />
                         </Button>
                         <Border Width="1" Height="20" Background="{ThemeResource SurfaceStrokeColorDefaultBrush}" Margin="4,0" />
 

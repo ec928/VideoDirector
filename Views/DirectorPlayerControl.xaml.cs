@@ -436,7 +436,7 @@ namespace VideoDirector.Views
                 FrameHost.Children.Add(OverlayVisuals[i].Frame);
                 StyleOverlayFrame(OverlayVisuals[i].Frame,
                                   i == 0 ? TrackPalette.Spine : TrackPalette.Overlay(i - 1),
-                                  "T" + (i + 1));
+                                  "T" + (i + 1), i);
 
             }
         }
@@ -522,7 +522,7 @@ namespace VideoDirector.Views
             };
         }
 
-        private static void StyleOverlayFrame(Microsoft.UI.Xaml.Controls.Grid frame, Windows.UI.Color color, string badgeText)
+        private static void StyleOverlayFrame(Microsoft.UI.Xaml.Controls.Grid frame, Windows.UI.Color color, string badgeText, int slot)
         {
             if (frame == null) return;
             var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
@@ -538,7 +538,8 @@ namespace VideoDirector.Views
                 Background = brush,
                 CornerRadius = new Microsoft.UI.Xaml.CornerRadius(3),
                 Padding = new Microsoft.UI.Xaml.Thickness(5, 1, 5, 1),
-                Margin = new Microsoft.UI.Xaml.Thickness(4),
+                // Stagger horizontally by 24px per track so stacked frames do not overlap their labels
+                Margin = new Microsoft.UI.Xaml.Thickness(4 + (slot * 24), 4, 4, 4),
                 HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Left,
                 VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Top,
                 Child = new Microsoft.UI.Xaml.Controls.TextBlock
