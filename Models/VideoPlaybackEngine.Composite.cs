@@ -354,19 +354,26 @@ namespace VideoDirector.Models
                 bool isSelected = clip != null && _viewModel?.SelectedClip == clip;
                 var colour = track == 0 ? Views.TrackPalette.Spine : Views.TrackPalette.Overlay(track - 1);
 
-                // Selected reads as solid and heavier; the rest stay dashed and quieter, matching
-                // how the keyframe rectangles distinguish the one being worked on.
-                framePath.Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
                     isSelected ? colour : Views.TrackPalette.At(colour, 0xB0));
-                // The frame IS the resize surface in Arrange, so it is drawn heavy enough to aim
-                // at. A hairline told you where the edge was without suggesting you could grab it.
-                framePath.StrokeThickness = isSelected ? 4 : 3;
+
+                // Selected reads as solid; the rest stay dashed and quieter, matching
+                // how the keyframe rectangles distinguish the one being worked on.
+                framePath.Stroke = brush;
+                // The frame IS the resize surface in Arrange, so it is drawn heavy enough to aim at.
+                framePath.StrokeThickness = 3;
 
                 bool dashed = framePath.StrokeDashArray != null && framePath.StrokeDashArray.Count > 0;
                 if (isSelected && dashed)
                     framePath.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection();
                 else if (!isSelected && !dashed)
                     framePath.StrokeDashArray = new Microsoft.UI.Xaml.Media.DoubleCollection { 4, 4 };
+
+                // Align the badge opacity with the frame line opacity
+                if (v.Frame.Children.Count > 1 && v.Frame.Children[1] is Microsoft.UI.Xaml.Controls.Border badge)
+                {
+                    badge.Background = brush;
+                }
             }
 
             switch (mode)
