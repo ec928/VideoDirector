@@ -145,9 +145,6 @@ namespace VideoDirector.Views
         //
         // Guarded because the presenter call throws if the window is mid-teardown, and a failed
         // toggle must not take the app down with it.
-        // Where the window was before a performance took it full screen, so it can be put back.
-        private Windows.Graphics.PointInt32? _restorePosition;
-        private Windows.Graphics.SizeInt32? _restoreSize;
 
         private void ApplyCinematicPresenter(bool cinematic)
         {
@@ -160,29 +157,19 @@ namespace VideoDirector.Views
                 bool isFullScreen = appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
                 if (wantFullScreen == isFullScreen) return;
 
+                // THE EDITOR WINDOW NEVER MOVES. It used to be dragged onto the chosen display so
+                // that going full screen would land there, and every stranding bug in this app came
+                // from that one line: a display the user cannot see swallows the window, and the
+                // geometry saved on the way out sends every later launch back to it. A performance
+                // is shown by PresentationWindow on the target display instead; this window only
+                // ever changes presenter, in place, on the display it is already on.
                 if (wantFullScreen)
                 {
-                    _restorePosition = appWindow.Position;
-                    _restoreSize = appWindow.Size;
-
-                    // Move onto the chosen display FIRST. Full screen takes whichever display the
-                    // window is on, so the move has to happen before the presenter changes.
-                    var target = ChosenDisplay();
-                    if (target != null)
-                        appWindow.Move(new Windows.Graphics.PointInt32(
-                            target.WorkArea.X + 8, target.WorkArea.Y + 8));
-
                     appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
                 }
                 else
                 {
                     appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped);
-
-                    // Back to the desk it came from, not wherever full screen left it.
-                    if (_restoreSize is Windows.Graphics.SizeInt32 sz) appWindow.Resize(sz);
-                    if (_restorePosition is Windows.Graphics.PointInt32 pt) appWindow.Move(pt);
-                    _restorePosition = null;
-                    _restoreSize = null;
                 }
             }
             catch { }
@@ -271,12 +258,85 @@ namespace VideoDirector.Views
         // strand is permanent. A safety check whose failure mode is the failure it prevents is not
         // a safety check. Presenting is made safe in MainWindow instead, where the geometry that
         // does the damage is written.
-        private void PresentDisplay_Click(object sender, RoutedEventArgs e)
+        private async void PresentDisplay_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not FrameworkElement fe || fe.Tag is not int idx || ViewModel == null) return;
 
+            int previous = ViewModel.PresentDisplayIndex;
+            ApplyPresentDisplay(idx);
+
+            // "Current display" needs no warning: it is the one being looked at right now.
+            if (idx < 0 || XamlRoot == null) return;
+
+            // The warning is shown HERE, on the display the user is already looking at. It is never
+            // shown on the display being chosen - that was tried, and asking a question on a screen
+            // nobody can see is how the app disappeared. Silence means no, because silence is also
+            // what an unread dialog produces.
+            if (!await ConfirmPresentDisplayAsync(idx))
+                ApplyPresentDisplay(previous);
+        }
+
+        private void ApplyPresentDisplay(int idx)
+        {
+            if (ViewModel == null) return;
             ViewModel.PresentDisplayIndex = idx;
             if (MainWindow.Instance != null) MainWindow.Instance.PresentDisplayIndex = idx;
+        }
+
+        /// <summary>Warns that a chosen display may not be one the user can see, and reverts on silence.</summary>
+        /// <remarks>
+        /// Nothing can tell a monitor from an HDMI audio sink: both enumerate through
+        /// DisplayArea.FindAll, and the sink reports an ordinary 720x480. So the user is asked,
+        /// on the screen they are already using, and the choice is dropped unless they say keep.
+        /// </remarks>
+        private async System.Threading.Tasks.Task<bool> ConfirmPresentDisplayAsync(int idx)
+        {
+            const int seconds = 10;
+            int left = seconds;
+
+            string size = "";
+            try
+            {
+                var all = Microsoft.UI.Windowing.DisplayArea.FindAll();
+                if (idx < all.Count)
+                {
+                    var b = all[idx].OuterBounds;
+                    size = "  (" + b.Width + " x " + b.Height + ")";
+                }
+            }
+            catch { }
+
+            var message = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Use Display " + (idx + 1) + " for performances?",
+                Content = message,
+                PrimaryButtonText = "Keep this display",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close
+            };
+
+            string Text(int n) =>
+                "Performances will play full screen on Display " + (idx + 1) + size + ". This window "
+                + "will not move.\n\nIf that display is not a monitor you can see - an HDMI audio "
+                + "device reports itself as one - the performance will play where you cannot watch "
+                + "it.\n\nKeeping the current setting in " + n + "s.";
+            message.Text = Text(left);
+
+            var timer = DispatcherQueue.CreateTimer();
+            timer.Interval = TimeSpan.FromSeconds(1);
+            timer.Tick += (s, e) =>
+            {
+                left--;
+                if (left <= 0) { timer.Stop(); dialog.Hide(); }
+                else message.Text = Text(left);
+            };
+            timer.Start();
+
+            try { return await dialog.ShowAsync() == ContentDialogResult.Primary; }
+            catch { return false; }
+            finally { timer.Stop(); }
         }
 
         private void VideoDirectorControl_Loaded(object? sender, RoutedEventArgs e)
