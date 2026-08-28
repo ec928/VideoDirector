@@ -250,8 +250,22 @@ namespace VideoDirector.Views
             _presentationPlayer.SetCinematicView(true);
 
             _playbackEngine.RetargetTo(_presentationPlayer);
+
+            ShowPerformanceElsewhereNotice(target);
         }
 
+        // Names the display, because "another display" is not much help when there are three and
+        // one of them is an audio device pretending to be a monitor.
+        private void ShowPerformanceElsewhereNotice(Microsoft.UI.Windowing.DisplayArea target)
+        {
+            if (PerformanceElsewhereNotice == null) return;
+
+            int shown = (ViewModel?.PresentDisplayIndex ?? -1) + 1;
+            if (PerformanceElsewhereText != null && shown > 0)
+                PerformanceElsewhereText.Text = "Performing on Display " + shown;
+
+            PerformanceElsewhereNotice.Visibility = Visibility.Visible;
+        }
         private void ClosePresentationWindow()
         {
             if (_presentationWindow == null) return;
@@ -263,6 +277,8 @@ namespace VideoDirector.Views
             // The picture comes home BEFORE the window holding it goes away, or the surfaces are
             // torn down while the players are still attached to them.
             try { _playbackEngine?.RetargetTo(PlayerControl); } catch { }
+            if (PerformanceElsewhereNotice != null)
+                PerformanceElsewhereNotice.Visibility = Visibility.Collapsed;
             try { window.Close(); } catch { }
         }
         // Null means "leave the window where it is".

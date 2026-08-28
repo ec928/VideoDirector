@@ -223,6 +223,23 @@ namespace VideoDirector.Models
                 // reliably to neither, and the old surface must stop drawing as this one starts.
                 try { previous.OverlayVisuals[i]?.Video?.SetMediaPlayer(null); } catch { }
                 try { next.OverlayVisuals[i]?.Video?.SetMediaPlayer(_overlayPlayer[i]); } catch { }
+
+                // And BLANK the surface being left behind. Nothing updates it once the engine has
+                // moved on, so whatever it was showing at the moment of handoff stays frozen there
+                // - which looked like dashed frames and badges hanging over an empty canvas while
+                // the performance ran on the other display.
+                try
+                {
+                    var stale = previous.OverlayVisuals[i];
+                    if (stale != null)
+                    {
+                        if (stale.Grid != null) stale.Grid.Opacity = 0;
+                        if (stale.Still != null) stale.Still.Source = null;
+                        if (stale.Frame != null) stale.Frame.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                        if (stale.Border != null) stale.Border.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    }
+                }
+                catch { }
             }
 
             _playerControl = next;

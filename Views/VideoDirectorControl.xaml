@@ -65,6 +65,26 @@
              whether the dock is up or down. -->
         <local:DirectorPlayerControl x:Name="PlayerControl" Grid.Row="0" Grid.RowSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
 
+        <!-- Says where the picture went. A performance on another display takes the media surfaces
+             with it, so this canvas has nothing left to draw and would otherwise read as a bug
+             rather than as a performance happening elsewhere. Not hit-testable: it explains, it
+             does not intercept. -->
+        <Border x:Name="PerformanceElsewhereNotice" Grid.Row="0" Grid.RowSpan="2"
+                Visibility="Collapsed" IsHitTestVisible="False"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                CornerRadius="10" Padding="28,20" BorderThickness="1"
+                Background="#E0141414" BorderBrush="#40FFFFFF">
+            <StackPanel HorizontalAlignment="Center">
+                <TextBlock x:Name="PerformanceElsewhereText"
+                           FontSize="20" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" TextAlignment="Center"
+                           Text="Performing on another display" />
+                <TextBlock FontSize="13" Opacity="0.7" Margin="0,8,0,0"
+                           HorizontalAlignment="Center" TextAlignment="Center"
+                           Text="Press Esc to end the performance" />
+            </StackPanel>
+        </Border>
+
         <!-- ===== Zone A: Global Command Zone (top-right) =====
              Project-scoped controls only — the mode badge (read-only state) + Save/Load/Clear.
              Deliberately separated from the selection-scoped Properties panel so the
