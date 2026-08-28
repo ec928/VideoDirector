@@ -146,8 +146,13 @@ namespace VideoDirector.Views
         // Guarded because the presenter call throws if the window is mid-teardown, and a failed
         // toggle must not take the app down with it.
 
-        // Where the windowed editor was before a performance took it full screen. The performance
-        // may travel to another display; the app must always come back to this.
+        // The window a performance plays in when it belongs on another display. Null whenever no
+        // performance is running there. The EDITOR window is never touched to make this happen.
+        private Window _presentationWindow;
+        private DirectorPlayerControl _presentationPlayer;
+
+        // Where the editor was before it went full screen ON ITS OWN DISPLAY. Only used for the
+        // no-target case; a performance on another display leaves the editor entirely alone.
         private Windows.Graphics.PointInt32? _restorePosition;
         private Windows.Graphics.SizeInt32? _restoreSize;
 
@@ -158,38 +163,38 @@ namespace VideoDirector.Views
                 var appWindow = MainWindow.Instance?.AppWindow;
                 if (appWindow == null) return;
 
-                bool wantFullScreen = cinematic && ViewModel != null && ViewModel.IsPlaying;
-                bool isFullScreen = appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
-                if (wantFullScreen == isFullScreen) return;
+                bool wantPerformance = cinematic && ViewModel != null && ViewModel.IsPlaying;
+                bool performing = _presentationWindow != null
+                    || appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
+                if (wantPerformance == performing) return;
 
-                // ONLY THE FULL-SCREEN PERFORMANCE TRAVELS. The windowed editor is the app itself and
-                // must come back to the display it was working on, every time, which is what the
-                // saved geometry below guarantees. Full screen takes whichever display the window is
-                // on, so reaching the target display means moving first, then changing presenter.
-                //
-                // This is safe now for a reason that has nothing to do with this method: a display
-                // cannot BE the target unless a human clicked a button on it (ConfirmOnTargetDisplay
-                // -Async), so the window can no longer be sent somewhere nobody can see. The guards
-                // in MainWindow.ConfigureWindow are the second line if it ever happens anyway.
-                if (wantFullScreen)
+                var target = wantPerformance ? ChosenDisplay() : null;
+
+                if (wantPerformance && target != null)
                 {
+                    // A CHOSEN DISPLAY GETS ITS OWN WINDOW. Sending the editor there worked, but
+                    // the app disappeared off the desk for the length of the performance and could
+                    // not be dismissed without finding it first. A second window leaves the editor
+                    // exactly where it is, still showing the timeline.
+                    OpenPresentationWindow(target);
+                }
+                else if (wantPerformance)
+                {
+                    // No display chosen: the performance is here, so this window becomes it.
                     _restorePosition = appWindow.Position;
                     _restoreSize = appWindow.Size;
-
-                    var target = ChosenDisplay();
-                    if (target != null)
-                        appWindow.Move(new Windows.Graphics.PointInt32(
-                            target.WorkArea.X + 8, target.WorkArea.Y + 8));
-
                     appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
                 }
                 else
                 {
-                    appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped);
+                    ClosePresentationWindow();
 
-                    // Back to the desk it came from, not wherever the performance left it.
-                    if (_restoreSize is Windows.Graphics.SizeInt32 sz) appWindow.Resize(sz);
-                    if (_restorePosition is Windows.Graphics.PointInt32 pt) appWindow.Move(pt);
+                    if (appWindow.Presenter?.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen)
+                    {
+                        appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped);
+                        if (_restoreSize is Windows.Graphics.SizeInt32 sz) appWindow.Resize(sz);
+                        if (_restorePosition is Windows.Graphics.PointInt32 pt) appWindow.Move(pt);
+                    }
                     _restorePosition = null;
                     _restoreSize = null;
                 }
@@ -197,6 +202,69 @@ namespace VideoDirector.Views
             catch { }
         }
 
+        // Whether a performance belongs on some OTHER display. When it does, this window is not
+        // the performance and must not dress like one: locking the editor to a fit canvas with its
+        // chrome gone would leave it looking broken, since the picture has moved to the other
+        // window and this canvas has nothing to draw. Read from the setting rather than from the
+        // presentation window, so the answer does not depend on which runs first.
+        private bool PerformanceGoesElsewhere => ChosenDisplay() != null;
+        /// <summary>Opens a bare full-screen window on the target display and renders the performance into it.</summary>
+        /// <remarks>
+        /// Nothing is stripped to get "just the picture": a DirectorPlayerControl in a cinematic
+        /// view already gates off frames, badges, marks and the canvas edge. Telling it what it is
+        /// is enough - the composite, with every clip's own borders and motion, is what remains.
+        /// </remarks>
+        private void OpenPresentationWindow(Microsoft.UI.Windowing.DisplayArea target)
+        {
+            if (_presentationWindow != null || target == null || _playbackEngine == null) return;
+
+            _presentationPlayer = new DirectorPlayerControl();
+            _presentationWindow = new Window
+            {
+                Title = "VideoDirector - performance",
+                Content = new Grid
+                {
+                    // Black, because the canvas rarely fills a display of a different shape and
+                    // whatever surrounds it is part of the performance.
+                    Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Black),
+                    Children = { _presentationPlayer }
+                }
+            };
+
+            // Closing it by any route ends the performance rather than leaving a headless one
+            // running with its picture nowhere.
+            _presentationWindow.Closed += (s, e) =>
+            {
+                if (ViewModel != null && ViewModel.IsCinematicMode) ViewModel.IsCinematicMode = false;
+            };
+
+            var b = target.OuterBounds;
+            _presentationWindow.AppWindow.MoveAndResize(
+                new Windows.Graphics.RectInt32(b.X, b.Y, b.Width, b.Height));
+            _presentationWindow.AppWindow.SetPresenter(
+                Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+            _presentationWindow.Activate();
+
+            _presentationPlayer.SetCanvasEdgeVisible(false);
+            _presentationPlayer.SetPlaybackView(true);
+            _presentationPlayer.SetCinematicView(true);
+
+            _playbackEngine.RetargetTo(_presentationPlayer);
+        }
+
+        private void ClosePresentationWindow()
+        {
+            if (_presentationWindow == null) return;
+
+            var window = _presentationWindow;
+            _presentationWindow = null;      // cleared first: Closed re-enters this method
+            _presentationPlayer = null;
+
+            // The picture comes home BEFORE the window holding it goes away, or the surfaces are
+            // torn down while the players are still attached to them.
+            try { _playbackEngine?.RetargetTo(PlayerControl); } catch { }
+            try { window.Close(); } catch { }
+        }
         // Null means "leave the window where it is".
         private Microsoft.UI.Windowing.DisplayArea ChosenDisplay()
         {
@@ -447,7 +515,7 @@ namespace VideoDirector.Views
                 if (ev.PropertyName == nameof(ViewModel.IsPlaying))
                 {
                     PlayerControl.SetPlaybackView(ViewModel.IsPlaying);
-                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode && ViewModel.IsPlaying);
+                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode && ViewModel.IsPlaying && !PerformanceGoesElsewhere);
                     ApplyCinematicPlaybackChrome();
                     ApplyCinematicPresenter(ViewModel.IsCinematicMode);
                 }
@@ -457,7 +525,7 @@ namespace VideoDirector.Views
                 {
                     // The view lock belongs to the PERFORMANCE, like full screen and the chrome.
                     // Arming cinematic on its own must leave zoom and pan alone.
-                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode && ViewModel.IsPlaying);
+                    PlayerControl.SetCinematicView(ViewModel.IsCinematicMode && ViewModel.IsPlaying && !PerformanceGoesElsewhere);
                     ApplyCinematicPlaybackChrome();
 
                     // Arming cinematic is the deliberate "I am about to show this" moment, and the

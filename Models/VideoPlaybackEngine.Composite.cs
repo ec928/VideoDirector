@@ -194,6 +194,46 @@ namespace VideoDirector.Models
         private bool _compositeDirty;
         private bool _compositeFlushScheduled;
 
+        /// <summary>Points the compositor at another player control, moving the picture with it.</summary>
+        /// <remarks>
+        /// How a performance reaches another display without the editor going there. Moving the
+        /// editor window was the previous approach: it worked, but the app vanished from the desk
+        /// for the length of the performance, and a display nobody could see took the whole app
+        /// with it. A second window can be closed and forgotten.
+        ///
+        /// Only the media surfaces move. The interaction events stay bound to the editor's control
+        /// and are deliberately NOT rewired: a performance is not interactive, so there is nothing
+        /// on that surface to drag, wheel or right-click. Chrome needs no stripping either - frames,
+        /// badges, marks and the canvas edge are already gated off in a cinematic view.
+        /// </remarks>
+        public void RetargetTo(Views.DirectorPlayerControl next)
+        {
+            if (next == null || ReferenceEquals(next, _playerControl)) return;
+
+            var previous = _playerControl;
+
+            // The canvas size IS the composition's coordinate space, so the new surface has to
+            // agree about it BEFORE anything is laid out on it, or every box lands at the wrong
+            // scale. Set it first, then move the pictures.
+            try { next.SetCanvasSize(previous.CanvasWidth, previous.CanvasHeight); } catch { }
+
+            for (int i = 0; i < MaxOverlayTracks; i++)
+            {
+                // Detach before attaching. A MediaPlayer bound to two elements at once renders
+                // reliably to neither, and the old surface must stop drawing as this one starts.
+                try { previous.OverlayVisuals[i]?.Video?.SetMediaPlayer(null); } catch { }
+                try { next.OverlayVisuals[i]?.Video?.SetMediaPlayer(_overlayPlayer[i]); } catch { }
+            }
+
+            _playerControl = next;
+
+            // Nothing in the new tree is positioned yet. ApplyOverlayBox reads the control directly
+            // and delta-guards against what the surface already shows, so a fresh surface differs
+            // from every target and gets written - there is no stale cache to clear. Stills are
+            // re-sourced by the same pass, since SetOverlayRender owns that choice.
+            EvaluateOverlays(_viewModel.CurrentStoryTime);
+            Invalidate();
+        }
         public void Invalidate()
         {
             _compositeDirty = true;

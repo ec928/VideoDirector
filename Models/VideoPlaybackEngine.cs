@@ -15,7 +15,10 @@ namespace VideoDirector.Models
 {
     public partial class VideoPlaybackEngine
     {
-        private readonly Views.DirectorPlayerControl _playerControl;
+        // NOT readonly. A performance on another display renders through a SECOND player control,
+        // in its own window on that display, and the engine is pointed at it for the duration.
+        // See RetargetTo. The editor window itself never moves - that is the whole point.
+        private Views.DirectorPlayerControl _playerControl;
         private bool _isPlaybackLoopRunning;
         private TimeSpan _lastTickTime = TimeSpan.Zero;
         private readonly System.Diagnostics.Stopwatch _editPreviewClock = new();
