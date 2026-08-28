@@ -177,29 +177,23 @@ namespace VideoDirector
             // the window back onto the invisible screen. There is no way out from inside the app,
             // because the app is what is invisible. Verified against a real stranded settings.json:
             // WindowX/Y 3416,1440 against a DISPLAY2 at exactly 3416,1440, 720x480.
-            bool leftOnPresentationDisplay =
-                IsOnPresentationDisplay(settings.WindowX, settings.WindowY, settings.PresentDisplayIndex);
+            bool saved = settings.WindowX != -1 && settings.WindowY != -1;
+            bool trustGeometry = saved
+                && !IsOnPresentationDisplay(settings.WindowX, settings.WindowY, settings.PresentDisplayIndex)
+                && IsPositionVisible(settings.WindowX, settings.WindowY, w, h);
 
-            // The SIZE came from that display too - 576x384 is a 720x480 screen at 125% - so a
-            // window rescued by position alone still opens as a postage stamp. Geometry left behind
-            // by a performance is discarded whole, not in halves.
-            if (leftOnPresentationDisplay) { w = 1600; h = 900; }
+            // Position and size are ONE decision, not two. Both were written by the same save, so a
+            // position rejected as leftover means the size beside it is leftover too: 414x277 is a
+            // 720x480 screen at 125%, and a window rescued by position alone still opens as an
+            // unusable sliver on the good monitor. Discard the geometry whole or keep it whole.
+            if (saved && !trustGeometry) { w = 1600; h = 900; }
 
             _appWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
 
-            if (settings.WindowX != -1 && settings.WindowY != -1 && !leftOnPresentationDisplay &&
-                IsPositionVisible(settings.WindowX, settings.WindowY, w, h))
+            if (trustGeometry)
                 _appWindow.Move(new Windows.Graphics.PointInt32(settings.WindowX, settings.WindowY));
         }
 
-        /// <summary>Is a window at this rect landing somewhere the user can actually see?</summary>
-        /// <remarks>
-        /// Tests the window's TITLE BAR strip rather than the whole rect, because that is what has
-        /// to be reachable to drag the window anywhere else - a window whose body overlaps a monitor
-        /// but whose bar does not is still unusable. Requires a real overlap, not a touching edge.
-        /// Any failure to enumerate answers "yes": refusing to restore a position is a far smaller
-        /// harm than refusing to start, and the fallback below is a sane one either way.
-        /// </remarks>
         /// <summary>Is this saved desk position actually a performance left behind on the presentation display?</summary>
         /// <remarks>
         /// It should never be. The desk position is where the user WORKS, and a performance always
@@ -226,6 +220,14 @@ namespace VideoDirector
             catch { return false; }
         }
 
+        /// <summary>Is a window at this rect landing somewhere the user can actually see and reach?</summary>
+        /// <remarks>
+        /// Tests the window's TITLE BAR strip rather than the whole rect, because that is what has
+        /// to be reachable to drag the window anywhere else - a window whose body overlaps a monitor
+        /// but whose bar does not is still unusable. Requires a real overlap, not a touching edge.
+        /// Any failure to enumerate answers "yes": refusing to restore a position is a far smaller
+        /// harm than refusing to start, and the fallback is a sane one either way.
+        /// </remarks>
         private static bool IsPositionVisible(int x, int y, int width, int height)
         {
             try
@@ -233,9 +235,26 @@ namespace VideoDirector
                 const int barHeight = 32;      // enough of the top edge to grab
                 const int minOverlap = 120;    // and enough of it to aim at
 
-                foreach (var area in DisplayArea.FindAll())
+                // A display this app could never sensibly have been WORKING on. The stranding case
+                // is an HDMI audio sink that enumerates as a 720x480 monitor: it is a real display
+                // by every API measure, so "does a display contain this point" answers yes and the
+                // window is restored somewhere invisible. Requiring the display to be big enough to
+                // host an editor separates the two without asking whether a screen is plugged in,
+                // which nothing can answer. Costs one default-position launch when wrong; the
+                // alternative costs an app that can only be recovered by editing settings.json.
+                const int minUsableWidth = 1024;
+                const int minUsableHeight = 768;
+
+                // INDEXED, never foreach. The IReadOnlyList<DisplayArea> that FindAll returns throws
+                // InvalidCastException from its enumerator in this interop context, so a foreach
+                // here does not filter anything - it lands in the catch below, answers "visible",
+                // and restores the very position it was meant to reject. The guard tested clean and
+                // was completely inert. Every other caller in this app indexes for the same reason.
+                var all = DisplayArea.FindAll();
+                for (int i = 0; i < all.Count; i++)
                 {
-                    var b = area.WorkArea;
+                    var b = all[i].WorkArea;
+                    if (b.Width < minUsableWidth || b.Height < minUsableHeight) continue;
                     int ox = Math.Min(x + width, b.X + b.Width) - Math.Max(x, b.X);
                     int oy = Math.Min(y + barHeight, b.Y + b.Height) - Math.Max(y, b.Y);
                     if (ox >= minOverlap && oy > 0) return true;

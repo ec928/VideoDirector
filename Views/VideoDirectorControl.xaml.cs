@@ -262,115 +262,21 @@ namespace VideoDirector.Views
             }
         }
 
-        // Choosing a display is a promise that the user can SEE it, and nothing in the system can
-        // verify that: DisplayArea.FindAll() reports an HDMI audio sink as a perfectly ordinary
-        // 720x480 monitor. So the choice is PROVEN before it is kept - the window goes there and
-        // asks. If the answer does not come back, nobody was looking, and the choice is discarded.
-        private async void PresentDisplay_Click(object sender, RoutedEventArgs e)
+        // NOTE: this deliberately does NOT move the window to prove the display is visible. That
+        // was tried and it is a worse bug than the one it guards: moving the ONLY window to a
+        // display nobody can see, to ask a question nobody can read, means the app has vanished -
+        // and what a user does when the app vanishes is kill it. The geometry saved on the way out
+        // is then the invisible display's, recorded while NOT full screen and while the display
+        // choice is still the previous one, so every guard in ConfigureWindow misses it and the
+        // strand is permanent. A safety check whose failure mode is the failure it prevents is not
+        // a safety check. Presenting is made safe in MainWindow instead, where the geometry that
+        // does the damage is written.
+        private void PresentDisplay_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not FrameworkElement fe || fe.Tag is not int idx || ViewModel == null) return;
 
-            int previous = ViewModel.PresentDisplayIndex;
-
-            // "Current display" is wherever the window already is, so it needs no proving.
-            var appWindow = MainWindow.Instance?.AppWindow;
-            Microsoft.UI.Windowing.DisplayArea target = null;
-            if (idx >= 0)
-            {
-                try
-                {
-                    var all = Microsoft.UI.Windowing.DisplayArea.FindAll();
-                    if (idx < all.Count) target = all[idx];
-                }
-                catch { }
-            }
-
-            if (target == null || appWindow == null || XamlRoot == null)
-            {
-                ApplyPresentDisplay(idx);
-                return;
-            }
-
-            var savedPosition = appWindow.Position;
-            var savedSize = appWindow.Size;
-            bool confirmed = false;
-            try
-            {
-                // Fit before moving: a 1600x900 window parked on a 720x480 display centres its
-                // dialog off the edge of that display, so the test would fail on a display that is
-                // in fact perfectly visible. Shrink to the target, ask, then put everything back.
-                var area = target.WorkArea;
-                int w = Math.Min(savedSize.Width, (int)(area.Width * 0.9));
-                int h = Math.Min(savedSize.Height, (int)(area.Height * 0.9));
-                appWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
-                appWindow.Move(new Windows.Graphics.PointInt32(
-                    area.X + (area.Width - w) / 2, area.Y + (area.Height - h) / 2));
-
-                confirmed = await ConfirmDisplayVisibleAsync(idx);
-            }
-            catch { }
-            finally
-            {
-                // Always back to the desk. The choice governs performances, not where you work.
-                try
-                {
-                    appWindow.Resize(savedSize);
-                    appWindow.Move(savedPosition);
-                }
-                catch { }
-            }
-
-            ApplyPresentDisplay(confirmed ? idx : previous);
-        }
-
-        private void ApplyPresentDisplay(int idx)
-        {
-            if (ViewModel == null) return;
             ViewModel.PresentDisplayIndex = idx;
             if (MainWindow.Instance != null) MainWindow.Instance.PresentDisplayIndex = idx;
-        }
-
-        /// <summary>Asks, on the candidate display, whether anyone is there to read it.</summary>
-        /// <remarks>
-        /// Reverting on silence rather than on refusal is the whole point: the failure this guards
-        /// against is a display nobody can see, and an invisible dialog cannot be answered. Cancel
-        /// and timeout therefore mean the same thing, and only an explicit click keeps the choice.
-        /// </remarks>
-        private async System.Threading.Tasks.Task<bool> ConfirmDisplayVisibleAsync(int idx)
-        {
-            const int seconds = 12;
-            int left = seconds;
-
-            var message = new TextBlock { TextWrapping = TextWrapping.Wrap };
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "Keep Display " + (idx + 1) + " for performances?",
-                Content = message,
-                PrimaryButtonText = "Keep this display",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close
-            };
-
-            string Text(int n) =>
-                "This window has moved to Display " + (idx + 1) + ". If you can read this, the "
-                + "display works and performances will play here.\n\nReverting to the previous "
-                + "setting in " + n + "s.";
-            message.Text = Text(left);
-
-            var timer = DispatcherQueue.CreateTimer();
-            timer.Interval = TimeSpan.FromSeconds(1);
-            timer.Tick += (s, e) =>
-            {
-                left--;
-                if (left <= 0) { timer.Stop(); dialog.Hide(); }
-                else message.Text = Text(left);
-            };
-            timer.Start();
-
-            try { return await dialog.ShowAsync() == ContentDialogResult.Primary; }
-            catch { return false; }
-            finally { timer.Stop(); }
         }
 
         private void VideoDirectorControl_Loaded(object? sender, RoutedEventArgs e)
