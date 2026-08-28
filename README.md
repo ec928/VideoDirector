@@ -16,7 +16,9 @@ Built as a companion to [ModernImageViewer](https://github.com/ec928/ModernImage
 
 **Canvas Sizes** — Auto (the app window as it was when the project began, then held), four presets — 1920×1080, 3840×2160, 2.39:1 and 9:16 — or a custom size. Saved with the project.
 
-**Present on Any Display** — Pick which screen cinematic playback takes over; the window moves there before going full screen and returns to its desk afterwards.
+**Present on Any Display** — Pick which screen a cinematic performance plays on. The performance opens its own bare full-screen window there; the editor stays exactly where it is, still showing the timeline, and says where the picture went. Choosing a display puts a confirmation ON that display and reverts after 10 seconds if nobody accepts it — nothing can tell a monitor from an HDMI audio sink, which reports itself as an ordinary screen, so the only real test is whether someone sitting there can act on it.
+
+**Preferences** — A settings flyout on the toolbar. *Always show clip frames* keeps every track's frame drawn in full rather than occluding it behind the clips above, which makes a crowded arrangement easier to read while placing it.
 
 **Media Pre-Flight** — Opening a project, and arming cinematic, both report which clips can no longer find their source files. A project is a list of paths into a media library, so that is the failure worth catching early.
 

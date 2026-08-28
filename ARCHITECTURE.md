@@ -187,6 +187,88 @@ This chronological ledger records all established solutions and performance opti
   The lesson is the one this project keeps relearning, one level up from "a green build proves nothing": **a passing test against a fixture you wrote yourself proves nothing either.** Export verification must run the projects in `Tests/`, which is what anyone actually loads.
 * **The Warning Is Computed, Not Boilerplate.** The old MediaComposition exporter walked the clips and named only what THIS project would lose. Recording does not need that warning: it photographs the compositor, so motion, fades, speed and borders survive. Speed-changed audio is the remaining hole — mixed at 1x it would desync, so it is skipped and named on the status banner.
 
+### 🧰 Frames, Badges And Preferences (`0.9.3`, parallel work)
+
+Recorded here because it landed alongside the above and was otherwise undocumented.
+
+* **A clip frame is a `Path`, not a `Rectangle`.** Splitting it into path lines is what allows a frame
+  to be occluded correctly where a higher clip covers part of it — the same reasoning that made the
+  BORDER four edge rectangles (see the 0.9.0 review pass), applied to the frame. `frame.Children[0]` is
+  the `Path` and the engine finds it by that index; `Children[1]` is the T1..T6 badge appended after.
+  Both are addressed positionally, so inserting anything ahead of them breaks the lookup silently.
+* **`Always show clip frames`** (Preferences flyout, default off) draws every edge of every frame rather
+  than occluding it behind the clips above. Read in `ApplyOverlayBox`'s edge builder.
+* **Frame chrome is 50% when unselected.** The dashed line and the badge share one constant
+  (`UnselectedFrameAlpha`) deliberately: they sit next to each other, so any difference between them
+  reads as a rendering bug rather than a choice.
+* Badges are staggered 24px per track so stacked frames do not overlap their labels.
+
+### 🖥️ A Performance Gets Its Own Window (`0.9.3`)
+
+Choosing a presentation display could **brick the app permanently**, and the three attempts to fix it
+are worth more than the fix.
+
+`DisplayArea.FindAll()` reports an HDMI audio sink as an ordinary 720x480 monitor. Nothing in the
+system distinguishes it from a screen. Selecting it and starting a performance moved the editor window
+there and went full screen; with nothing visible the app gets closed, `SaveAllSettings` wrote the
+presentation display's geometry as the desk position, and **every launch afterwards restored the window
+onto the invisible display**. Nothing on screen could fix it, because the thing that was invisible was
+the app. Confirmed from a real stranded `settings.json`: `WindowX/Y 3416,1440` against a DISPLAY2 at
+exactly `3416,1440 720x480`, and a saved `576x384` which is that screen at 125% scaling.
+
+**Three wrong answers came first, and each was worse than it looked.**
+
+1. *"Startup is safe, `PresentDisplayIndex` is not read there."* True, and irrelevant — the stranding
+   runs through the saved **window position**, not that setting. Reasoning about the wrong variable.
+2. *Prove the display by moving the window to it and asking.* This is a safety check whose failure mode
+   IS the failure it prevents: the app vanishes, the user kills it, and the geometry saved on the way
+   out strands it — this time while NOT full screen and with the choice not yet applied, so every guard
+   missed it and the strand was unrecoverable. **It bricked the app in testing.**
+3. *A guard that never ran.* `DisplayArea.FindAll()` returns an `IReadOnlyList` whose enumerator throws
+   `InvalidCastException` under WinRT interop, so a `foreach` fell into `catch { return true; }` and
+   restored the position it existed to reject. It compiled, read correctly, and was **inert**. Every
+   other caller in the app indexes `all[i]`; this one did not. Found by logging what the guard actually
+   saw, after the recovery test failed — not by re-reading the code, which looked right.
+
+**The answer was to stop moving the editor at all.** A performance bound for another display opens its
+own bare full-screen window there, and `RetargetTo` points the compositor at a second player control
+inside it. The editor is never moved, resized or re-presented, so there is no geometry to corrupt and
+the whole class of bug is gone by construction rather than by guard.
+
+Nothing had to be stripped to get "just the picture": a `DirectorPlayerControl` told `SetCinematicView(true)`
+already gates off frames, badges, marks and the canvas edge. Only the media surfaces move — the 18
+interaction events stay bound to the editor's control, because **a performance is not interactive**.
+The canvas size is matched BEFORE the players move, since the canvas is the coordinate space every
+placement box is expressed against.
+
+**A surface the engine walks away from must be blanked.** Once retargeted, nothing updates the editor's
+visuals again, so whatever they showed at the instant of handoff froze there — dashed frames and track
+badges hanging over an empty canvas for the length of the performance. `RetargetTo` now clears what it
+leaves behind, and the editor says `Performing on Display 2` rather than looking broken.
+
+The guards remain as a second line, because the confirmation is a human check and humans misclick:
+geometry is never saved while full screen, and geometry that comes back sitting on the presentation
+display — or on a display too small to have been worked on — is discarded **whole**, position and size
+together (a window rescued by position alone opened as a 414x277 sliver).
+
+**The lesson, and it is the same one as the export bug.** Three times the reasoning was clean and the
+conclusion was wrong, and each time the correction came from measurement: a logged decision, an
+enumerated window list, a launch against a real stranded file. *A safety mechanism that has never been
+observed working should be assumed inert.*
+
+### 🎚️ One Activity Rule For Every Track (`0.9.3`)
+
+Track 1 was asked a different question from the other tracks. `BlockDim` routed it through
+`GetTimelineIndexForStoryTime` — the SEQUENTIAL lookup from when track 1 was a gapless spine with exactly
+one clip showing — which deliberately falls back to "the clip just before, or the last clip" when the
+playhead sits in a gap or past the end. So a track 1 clip that had already finished still reported as
+active and drew at full strength while every other track dimmed correctly.
+
+The wrong rule gave the right answer whenever the playhead was inside the clip, which is why it survived
+so long: it only misreports past the end. Tracks are interchangeable now (§5.2) and track 1 may have gaps
+like any other, so it takes the same `IsActiveAt` test. The lookup keeps its fallback for the callers
+that want it; the timeline's dimming is not one of them.
+
 ### 🔊 The Audio Stutter Was Four Bugs With One Cause (`0.9.2`)
 
 Playback stuttered audibly at the start of the track and at every loop wrap. It turned out to be four
@@ -336,6 +418,17 @@ The lesson is procedural rather than technical: the telemetry HUD resolved in on
     fire aim at where the clip should be **when the seek lands**, never at "now" — a correction aimed at now
     arrives already stale and re-trips the very threshold that raised it. Lowering the 200ms threshold below
     the seek latency, or removing the gate, restores the stutter described in §4.
+
+11. **The Editor Window Is Never Moved By The App**: A performance on another display opens its OWN
+    window there (`OpenPresentationWindow` + `VideoPlaybackEngine.RetargetTo`); the editor is never
+    moved, resized or re-presented to make it happen. Moving it is how the app stranded itself on a
+    display that was not a viewable monitor — and the recovery guards in `MainWindow.ConfigureWindow`
+    (never save geometry while full screen; discard geometry that returns on the presentation display
+    or on a display too small to have been worked on) are a SECOND line, not the design. Restoring a
+    saved window position without checking it, or sending the editor to a chosen display "just for the
+    performance", reintroduces an app that cannot be recovered without hand-editing `settings.json`.
+    Related: `DisplayArea.FindAll()` must be INDEXED, never enumerated with `foreach` — its enumerator
+    throws under WinRT interop, which silently disabled the first version of that guard.
 
 ---
 
